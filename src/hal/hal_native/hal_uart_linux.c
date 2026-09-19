@@ -21,15 +21,25 @@ static int s_master_fd = -1;
 hal_status_t hal_uart_init(uart_baudrate_t baudrate) {
     (void)baudrate; // Ignored for virtual pseudo-terminals
 
+    if (s_master_fd >= 0) {
+        close(s_master_fd);
+        s_master_fd = -1;
+    }
+
     char slave_name[64];
     struct termios raw_opts;
+    int slave_fd = -1;
 
     // Build raw terminal options (no echo, 8N1, raw binary stream)
     cfmakeraw(&raw_opts);
 
-    if (openpty(&s_master_fd, NULL, slave_name, &raw_opts, NULL) < 0) {
+    if (openpty(&s_master_fd, &slave_fd, slave_name, &raw_opts, NULL) < 0) {
         perror("[UART] openpty failed");
         return HAL_ERROR;
+    }
+
+    if (slave_fd >= 0) {
+        close(slave_fd);
     }
 
     // Set master non-blocking
