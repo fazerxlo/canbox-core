@@ -73,6 +73,7 @@ static const can_router_rule_t ROUTER_TABLE[] = {
 void can_router_init(void) {
     memset(&s_current_state, 0, sizeof(s_current_state));
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
+    hu_protocol_init();
 }
 
 void can_router_process_can(const can_frame_t *frame) {

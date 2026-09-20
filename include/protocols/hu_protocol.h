@@ -8,6 +8,7 @@
 extern "C" {
 #endif
 
+void hu_protocol_init(void);
 void hu_protocol_feed_byte(uint8_t byte);
 void hu_protocol_send_heartbeat(void);
 void hu_protocol_send_wheel_key(const vehicle_wheel_t *wheel);

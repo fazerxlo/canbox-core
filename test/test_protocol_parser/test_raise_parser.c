@@ -5,18 +5,15 @@
 static raise_packet_t s_last_packet;
 static int s_rx_call_count = 0;
 
-static void test_rx_callback(const raise_packet_t *packet) {
+static void test_raise_rx_callback(const raise_packet_t *packet) {
     s_rx_call_count++;
     s_last_packet = *packet;
 }
 
-void setUp(void) {
+void setUp_raise(void) {
     s_rx_call_count = 0;
     memset(&s_last_packet, 0, sizeof(s_last_packet));
-    proto_raise_init(test_rx_callback);
-}
-
-void tearDown(void) {
+    proto_raise_init(test_raise_rx_callback);
 }
 
 // 1. Verify standard packet serialization and checksum calculation
@@ -119,16 +116,4 @@ void test_raise_resync_on_invalid_length(void) {
     TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
     TEST_ASSERT_EQUAL_HEX8(0x02, s_last_packet.cmd);
     TEST_ASSERT_EQUAL_HEX8(0x10, s_last_packet.payload[0]);
-}
-
-int main(void) {
-    UNITY_BEGIN();
-    RUN_TEST(test_raise_serialize_valid_packet);
-    RUN_TEST(test_raise_serialize_buffer_too_small);
-    RUN_TEST(test_raise_parse_valid_frame);
-    RUN_TEST(test_raise_parse_zero_length_payload);
-    RUN_TEST(test_raise_reject_corrupted_checksum);
-    RUN_TEST(test_raise_ignore_preceding_noise);
-    RUN_TEST(test_raise_resync_on_invalid_length);
-    return UNITY_END();
 }
