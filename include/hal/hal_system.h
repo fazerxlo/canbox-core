@@ -16,6 +16,12 @@ typedef enum {
     HAL_STATUS_OVERFLOW = -4
 } hal_status_t;
 
+#define HAL_OK       HAL_STATUS_OK
+#define HAL_ERROR    HAL_STATUS_ERROR
+#define HAL_BUSY     HAL_STATUS_BUSY
+#define HAL_TIMEOUT  HAL_STATUS_TIMEOUT
+#define HAL_OVERFLOW HAL_STATUS_OVERFLOW
+
 /**
  * @brief Initialize system clocks, NVIC, and low-level peripherals.
  */

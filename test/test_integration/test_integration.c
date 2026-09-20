@@ -155,11 +155,15 @@ void test_integration_hu_uart_to_canbox_version_query(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_resp, rx_buf, sizeof(expected_resp));
 }
 
+// Scenario tests
+void test_scenario_ignition_off_after_power_on(void);
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_integration_steering_wheel_volume_up_pipeline);
     RUN_TEST(test_integration_door_status_pipeline);
     RUN_TEST(test_integration_telemetry_periodic_pipeline);
     RUN_TEST(test_integration_hu_uart_to_canbox_version_query);
+    RUN_TEST(test_scenario_ignition_off_after_power_on);
     return UNITY_END();
 }

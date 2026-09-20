@@ -1,5 +1,6 @@
 #include "hal/hal_uart.h"
 #include "driver/uart.h"
+#include "driver/gpio.h"
 #include <string.h>
 
 #define HU_UART_PORT      UART_NUM_1

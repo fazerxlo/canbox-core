@@ -42,6 +42,10 @@ static void handle_can_0x036(const can_frame_t *frame, vehicle_state_t *state) {
 
     state->reverse_gear          = (frame->data[1] & (1 << 7)) != 0;
     state->handbrake             = (frame->data[1] & (1 << 0)) != 0;
+
+    if (frame->dlc >= 5) {
+        state->ignition_state    = (vehicle_ignition_state_t)frame->data[4];
+    }
 }
 
 // ID 0x0B6: Engine speed and vehicle road speed

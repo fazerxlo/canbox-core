@@ -32,6 +32,10 @@ static void psa_decode_doors(const can_frame_t *frame, vehicle_state_t *state) {
 
     state->reverse_gear          = (frame->data[1] & (1 << 7)) != 0;
     state->handbrake             = (frame->data[1] & (1 << 0)) != 0;
+
+    if (frame->dlc >= 5) {
+        state->ignition_state    = (vehicle_ignition_state_t)frame->data[4];
+    }
 }
 
 static void psa_decode_engine_speed(const can_frame_t *frame, vehicle_state_t *state) {

@@ -1,5 +1,6 @@
 #include "hal/hal_can.h"
 #include "driver/twai.h"
+#include "driver/gpio.h"
 #include <string.h>
 
 #define CAN_TX_PIN GPIO_NUM_5

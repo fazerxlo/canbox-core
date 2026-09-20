@@ -54,15 +54,23 @@ typedef struct {
     uint8_t temp_passenger;  // Raw scale: (val * 0.5) deg C
 } vehicle_climate_t;
 
+typedef enum {
+    VEHICLE_IGNITION_OFF   = 0x00,
+    VEHICLE_IGNITION_ON    = 0x01,
+    VEHICLE_IGNITION_ACC   = 0x02,
+    VEHICLE_IGNITION_CRANK = 0x03
+} vehicle_ignition_state_t;
+
 typedef struct {
-    vehicle_doors_t   doors;
-    vehicle_wheel_t   wheel;
-    vehicle_climate_t climate;
-    uint16_t          speed_kmh;
-    uint16_t          rpm;
-    int16_t           steering_angle_deg;
-    bool              reverse_gear;
-    bool              handbrake;
+    vehicle_doors_t          doors;
+    vehicle_wheel_t          wheel;
+    vehicle_climate_t        climate;
+    vehicle_ignition_state_t ignition_state;
+    uint16_t                 speed_kmh;
+    uint16_t                 rpm;
+    int16_t                  steering_angle_deg;
+    bool                     reverse_gear;
+    bool                     handbrake;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);
