@@ -157,6 +157,7 @@ void test_integration_hu_uart_to_canbox_version_query(void) {
 
 // Scenario tests
 void test_scenario_ignition_off_after_power_on(void);
+void test_scenario_lights_off_side_light_on_headlights_on(void);
 
 int main(void) {
     UNITY_BEGIN();
@@ -165,5 +166,6 @@ int main(void) {
     RUN_TEST(test_integration_telemetry_periodic_pipeline);
     RUN_TEST(test_integration_hu_uart_to_canbox_version_query);
     RUN_TEST(test_scenario_ignition_off_after_power_on);
+    RUN_TEST(test_scenario_lights_off_side_light_on_headlights_on);
     return UNITY_END();
 }

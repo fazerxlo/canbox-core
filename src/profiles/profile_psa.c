@@ -18,6 +18,15 @@ static void psa_decode_wheel_keys(const can_frame_t *frame, vehicle_state_t *sta
         default:   state->wheel.active_key = WHEEL_KEY_NONE; break;
     }
     state->wheel.press_state = (btn != 0) ? 1 : 0;
+
+    if (frame->dlc >= 5) {
+        uint8_t light_flags = frame->data[4];
+        state->lights.side_light = (light_flags & (1 << 7)) != 0;
+        state->lights.headlights = (light_flags & (1 << 6)) != 0;
+        state->lights.high_beam  = (light_flags & (1 << 5)) != 0;
+        state->lights.front_fog  = (light_flags & (1 << 4)) != 0;
+        state->lights.rear_fog   = (light_flags & (1 << 3)) != 0;
+    }
 }
 
 static void psa_decode_doors(const can_frame_t *frame, vehicle_state_t *state) {

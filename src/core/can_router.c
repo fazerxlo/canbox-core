@@ -12,9 +12,9 @@ static inline uint16_t unpack_be16(const uint8_t *data) {
 
 /* Example Vehicle CAN Handlers (Standard PSA/VW/General CAN layout) */
 
-// ID 0x128: Steering wheel keys & stalks
+// ID 0x128: Steering wheel keys & stalks / lighting
 static void handle_can_0x128(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 2) return;
+    if (frame->dlc < 1) return;
 
     uint8_t btn = frame->data[0];
     switch (btn) {
@@ -27,6 +27,15 @@ static void handle_can_0x128(const can_frame_t *frame, vehicle_state_t *state) {
         default:   state->wheel.active_key = WHEEL_KEY_NONE; break;
     }
     state->wheel.press_state = (btn != 0) ? 1 : 0;
+
+    if (frame->dlc >= 5) {
+        uint8_t light_flags = frame->data[4];
+        state->lights.side_light = (light_flags & (1 << 7)) != 0;
+        state->lights.headlights = (light_flags & (1 << 6)) != 0;
+        state->lights.high_beam  = (light_flags & (1 << 5)) != 0;
+        state->lights.front_fog  = (light_flags & (1 << 4)) != 0;
+        state->lights.rear_fog   = (light_flags & (1 << 3)) != 0;
+    }
 }
 
 // ID 0x036: Door contact sensors & reverse gear

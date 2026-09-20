@@ -54,6 +54,16 @@ typedef struct {
     uint8_t temp_passenger;  // Raw scale: (val * 0.5) deg C
 } vehicle_climate_t;
 
+typedef struct {
+    bool side_light;      // Side lights / Parking / Position lights
+    bool headlights;      // Headlights / Low beam / Dipped beam
+    bool high_beam;       // High beam / Main beam
+    bool front_fog;       // Front fog lights
+    bool rear_fog;        // Rear fog lights
+} vehicle_lights_t;
+
+typedef vehicle_lights_t lights_state_t;
+
 typedef enum {
     VEHICLE_IGNITION_OFF   = 0x00,
     VEHICLE_IGNITION_ON    = 0x01,
@@ -65,6 +75,7 @@ typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
     vehicle_climate_t        climate;
+    vehicle_lights_t         lights;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;
