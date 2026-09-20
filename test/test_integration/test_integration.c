@@ -155,6 +155,58 @@ void test_integration_hu_uart_to_canbox_version_query(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_resp, rx_buf, sizeof(expected_resp));
 }
 
+#include "core/vehicle_profile.h"
+#include "protocols/raise_car_mapping.h"
+
+void test_integration_raise_runtime_car_selection(void) {
+    // 1. Initially active profile is PSA
+    TEST_ASSERT_EQUAL_INT(VEHICLE_PROFILE_PSA_2004, vehicle_profile_get_active()->id);
+
+    // 2. Android Head Unit sends Car Selection frame for VAG PQ35 (Brand: 0x02, Model: 0x01):
+    // Sync(0x2E), Cmd(0xCA), Len(0x02), Brand(0x02), Model(0x01), Checksum(0x30)
+    // Sum = 0xCA + 0x02 + 0x02 + 0x01 = 0xCF -> CS = ~0xCF = 0x30
+    const uint8_t select_vag[] = { 0x2E, 0xCA, 0x02, 0x02, 0x01, 0x30 };
+    for (size_t i = 0; i < sizeof(select_vag); i++) {
+        can_router_process_uart_byte(select_vag[i]);
+    }
+
+    uint8_t rx_buf[32];
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // Expected ACK frame: Sync(0x2E), Cmd(0xCA), Len(0x03), Brand(0x02), Model(0x01), Status(0x01), Checksum(0x2E)
+    // Sum = 0xCA + 0x03 + 0x02 + 0x01 + 0x01 = 0xD1 -> CS = ~0xD1 = 0x2E
+    const uint8_t expected_ack[] = { 0x2E, 0xCA, 0x03, 0x02, 0x01, 0x01, 0x2E };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_ack), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    // Verify active profile switched to VAG
+    TEST_ASSERT_EQUAL_INT(VEHICLE_PROFILE_VAG_PQ35, vehicle_profile_get_active()->id);
+
+    // 3. Inject VAG CAN frame on CAN ID 0x5C0 (Vol Up = 0x06)
+    can_frame_t vag_can = {
+        .id = 0x5C0,
+        .dlc = 1,
+        .data = { 0x06 }
+    };
+    can_router_process_can(&vag_can);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // Expected Raise wheel key Vol Up: Sync(0x2E), Cmd(0x01), Len(0x02), Key(0x01, 0x00), CS(0xFB)
+    const uint8_t expected_key[] = { 0x2E, 0x01, 0x02, 0x01, 0x00, 0xFB };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_key), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_key, rx_buf, sizeof(expected_key));
+
+    // 4. Switch back to PSA (Brand: 0x01, Model: 0x01)
+    // Sum = 0xCA + 0x02 + 0x01 + 0x01 = 0xCE -> CS = ~0xCE = 0x31
+    const uint8_t select_psa[] = { 0x2E, 0xCA, 0x02, 0x01, 0x01, 0x31 };
+    for (size_t i = 0; i < sizeof(select_psa); i++) {
+        can_router_process_uart_byte(select_psa[i]);
+    }
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_INT(VEHICLE_PROFILE_PSA_2004, vehicle_profile_get_active()->id);
+}
+
 // Scenario tests
 void test_scenario_ignition_off_after_power_on(void);
 void test_scenario_lights_off_side_light_on_headlights_on(void);
@@ -165,6 +217,7 @@ int main(void) {
     RUN_TEST(test_integration_door_status_pipeline);
     RUN_TEST(test_integration_telemetry_periodic_pipeline);
     RUN_TEST(test_integration_hu_uart_to_canbox_version_query);
+    RUN_TEST(test_integration_raise_runtime_car_selection);
     RUN_TEST(test_scenario_ignition_off_after_power_on);
     RUN_TEST(test_scenario_lights_off_side_light_on_headlights_on);
     return UNITY_END();

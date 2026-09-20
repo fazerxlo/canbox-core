@@ -21,6 +21,8 @@ void test_raise_parse_zero_length_payload(void);
 void test_raise_reject_corrupted_checksum(void);
 void test_raise_ignore_preceding_noise(void);
 void test_raise_resync_on_invalid_length(void);
+void test_raise_car_mapping_lookup(void);
+void test_raise_parse_car_model_select_packet(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -59,6 +61,8 @@ int main(void) {
     RUN_TEST(test_raise_reject_corrupted_checksum);
     RUN_TEST(test_raise_ignore_preceding_noise);
     RUN_TEST(test_raise_resync_on_invalid_length);
+    RUN_TEST(test_raise_car_mapping_lookup);
+    RUN_TEST(test_raise_parse_car_model_select_packet);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

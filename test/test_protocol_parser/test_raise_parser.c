@@ -117,3 +117,48 @@ void test_raise_resync_on_invalid_length(void) {
     TEST_ASSERT_EQUAL_HEX8(0x02, s_last_packet.cmd);
     TEST_ASSERT_EQUAL_HEX8(0x10, s_last_packet.payload[0]);
 }
+
+// 8. Verify Raise car mapping lookup
+#include "protocols/raise_car_mapping.h"
+void test_raise_car_mapping_lookup(void) {
+    vehicle_profile_id_t profile;
+
+    // Test PSA mapping
+    TEST_ASSERT_TRUE(raise_car_mapping_get_profile(RAISE_BRAND_PSA, RAISE_MODEL_PSA_2004, &profile));
+    TEST_ASSERT_EQUAL_INT(VEHICLE_PROFILE_PSA_2004, profile);
+
+    // Test VAG mapping
+    TEST_ASSERT_TRUE(raise_car_mapping_get_profile(RAISE_BRAND_VAG, RAISE_MODEL_VAG_PQ35, &profile));
+    TEST_ASSERT_EQUAL_INT(VEHICLE_PROFILE_VAG_PQ35, profile);
+
+    // Test Unknown brand / model
+    TEST_ASSERT_FALSE(raise_car_mapping_get_profile(0xFF, 0x01, &profile));
+    TEST_ASSERT_FALSE(raise_car_mapping_get_profile(RAISE_BRAND_PSA, 0xFF, &profile));
+
+    // Test reverse mapping
+    uint8_t brand = 0, model = 0;
+    TEST_ASSERT_TRUE(raise_car_mapping_get_codes(VEHICLE_PROFILE_PSA_2004, &brand, &model));
+    TEST_ASSERT_EQUAL_HEX8(RAISE_BRAND_PSA, brand);
+    TEST_ASSERT_EQUAL_HEX8(RAISE_MODEL_PSA_2004, model);
+
+    TEST_ASSERT_TRUE(raise_car_mapping_get_codes(VEHICLE_PROFILE_VAG_PQ35, &brand, &model));
+    TEST_ASSERT_EQUAL_HEX8(RAISE_BRAND_VAG, brand);
+    TEST_ASSERT_EQUAL_HEX8(RAISE_MODEL_VAG_PQ35, model);
+}
+
+// 9. Verify parsing of Car Model Select frame (0xCA)
+void test_raise_parse_car_model_select_packet(void) {
+    // Cmd: 0xCA, Len: 0x02, Payload: Brand 0x01, Model 0x01
+    // Sum = 0xCA + 0x02 + 0x01 + 0x01 = 0xCE -> CS = ~0xCE = 0x31
+    const uint8_t stream[] = { 0x2E, 0xCA, 0x02, 0x01, 0x01, 0x31 };
+
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        proto_raise_feed_byte(stream[i]);
+    }
+
+    TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(RAISE_CMD_CAR_MODEL_SELECT, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_HEX8(0x02, s_last_packet.len);
+    TEST_ASSERT_EQUAL_HEX8(0x01, s_last_packet.payload[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, s_last_packet.payload[1]);
+}

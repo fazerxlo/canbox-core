@@ -2,11 +2,12 @@
 #include <stddef.h>
 
 extern const vehicle_profile_t g_profile_psa;
+extern const vehicle_profile_t g_profile_vag;
 
 static const vehicle_profile_t *s_available_profiles[] = {
-    [VEHICLE_PROFILE_PSA_2004] = &g_profile_psa,
-    [VEHICLE_PROFILE_VAG_PQ35] = NULL,
-    [VEHICLE_PROFILE_RENAULT] = NULL,
+    [VEHICLE_PROFILE_PSA_2004]   = &g_profile_psa,
+    [VEHICLE_PROFILE_VAG_PQ35]   = &g_profile_vag,
+    [VEHICLE_PROFILE_RENAULT]    = NULL,
     [VEHICLE_PROFILE_TOYOTA_TNGA] = NULL,
 };
 

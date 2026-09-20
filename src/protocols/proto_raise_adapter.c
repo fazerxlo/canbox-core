@@ -1,5 +1,7 @@
 #include "protocols/hu_protocol.h"
 #include "protocols/hu_protocol_driver.h"
+#include "protocols/raise_car_mapping.h"
+#include "core/vehicle_profile.h"
 #include "proto_raise.h"
 #include "hal/hal_uart.h"
 
@@ -13,8 +15,23 @@ static void on_raise_packet_received(const raise_packet_t *packet) {
         // Echo firmware version back: "SW001"
         const uint8_t ver[] = { 'S', 'W', '0', '0', '1' };
         uint8_t tx_buf[16];
-        size_t len = proto_raise_serialize(0x7F, ver, sizeof(ver), tx_buf, sizeof(tx_buf));
+        size_t len = proto_raise_serialize(RAISE_CMD_VERSION_REQ, ver, sizeof(ver), tx_buf, sizeof(tx_buf));
         hal_uart_write(tx_buf, len);
+    } else if (packet->cmd == RAISE_CMD_CAR_MODEL_SELECT) {
+        // Car model selection command: payload[0] = Brand, payload[1] = Model
+        if (packet->len >= 2) {
+            uint8_t brand = packet->payload[0];
+            uint8_t model = packet->payload[1];
+            vehicle_profile_id_t profile_id;
+            if (raise_car_mapping_get_profile(brand, model, &profile_id)) {
+                vehicle_profile_set_active(profile_id);
+                // Send confirmation response back: [Brand, Model, Status (0x01 = Active)]
+                uint8_t ack_payload[3] = { brand, model, 0x01 };
+                uint8_t tx_buf[16];
+                size_t len = proto_raise_serialize(RAISE_CMD_CAR_MODEL_SELECT, ack_payload, sizeof(ack_payload), tx_buf, sizeof(tx_buf));
+                hal_uart_write(tx_buf, len);
+            }
+        }
     }
 }
 

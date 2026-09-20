@@ -18,6 +18,7 @@ extern "C" {
 #define RAISE_CMD_STEERING_RAD 0x26
 #define RAISE_CMD_TELEMETRY    0x29
 #define RAISE_CMD_VERSION_REQ  0x7F
+#define RAISE_CMD_CAR_MODEL_SELECT 0xCA
 
 typedef struct {
     uint8_t cmd;
