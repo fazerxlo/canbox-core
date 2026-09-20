@@ -14,8 +14,10 @@ extern "C" {
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
 #define PSA_CAN_ID_FUEL_RANGE_TEMP  0x165
+#define PSA_CAN_ID_ALERTS_INDICATORS 0x168
 #define PSA_CAN_ID_JBL_AMPLIFIER    0x1A0
 #define PSA_CAN_ID_TRIP1            0x1A5
+#define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
 #define PSA_CAN_ID_DOORS_BODY       0x221
 #define PSA_CAN_ID_REAR_RADAR_AAS   0x260
@@ -177,6 +179,47 @@ size_t build_raise_cd_changer(const cd_changer_state_t *st, uint8_t *out, size_t
 
 void psa_decode_rds_name_0x396(const uint8_t *data, uint8_t dlc, char out_name[9]);
 size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len);
+
+/* --------------------------------------------------------------------------
+ * 2.1 Direct TPMS Numeric Readings & Fault Classification
+ * -------------------------------------------------------------------------- */
+typedef struct {
+    uint16_t pressure_dbar[4]; /* FL, FR, RL, RR in 0.1 Bar */
+    int16_t  temperature_c[4]; /* FL, FR, RL, RR in deg C (-40..+215) */
+    uint8_t  alarm_code[4];    /* 0=OK, 1=Low, 2=Puncture, 3=Lost, 4=LowBat */
+} canbox_tpms_state_t;
+
+size_t build_raise_tpms_numeric(const canbox_tpms_state_t *tpms, uint8_t *out);
+size_t build_raise_tpms_temp_alarms(const canbox_tpms_state_t *tpms, uint8_t *out);
+size_t build_raise_tpms_discrete(const uint8_t alarms[4], uint8_t *out);
+
+/* --------------------------------------------------------------------------
+ * 2.2 Stop & Start (S&S) Telemetry & Timer
+ * -------------------------------------------------------------------------- */
+size_t build_raise_start_stop(bool is_active, uint32_t stop_time_sec, uint8_t *out);
+
+/* --------------------------------------------------------------------------
+ * 2.3 Cruise Control & Speed Memory Presets
+ * -------------------------------------------------------------------------- */
+size_t build_raise_cruise_memory(bool active, uint8_t target_spd, const uint8_t presets[5], uint8_t *out);
+void psa_decode_cruise_0x1a8(const uint8_t *data, uint8_t dlc, bool *active, uint8_t *set_speed_kmh, uint32_t *partial_odo_m);
+
+/* --------------------------------------------------------------------------
+ * 2.4 Driver Assistance & ADAS Features
+ * -------------------------------------------------------------------------- */
+typedef struct {
+    bool    blind_spot_warning;
+    bool    fatigue_coffee_cup;
+    uint8_t lane_departure_state; /* 0=None, 1=Left, 2=Right */
+    uint8_t speed_limit_tsr;      /* km/h */
+    bool    esp_active;
+    uint8_t aeb_risk_level;       /* 0=None, 1=Risk, 2=Braking */
+} canbox_adas_state_t;
+
+size_t build_raise_adas(const canbox_adas_state_t *adas, uint8_t *out);
+void psa_decode_alerts_0x168(const uint8_t *data, uint8_t dlc,
+                             bool *tpms_fault, bool *tpms_underinflation,
+                             bool *tpms_puncture, bool *esp_fault);
 
 #ifdef __cplusplus
 }

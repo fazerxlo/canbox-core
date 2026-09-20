@@ -509,3 +509,186 @@ size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len) {
     out[11] = (uint8_t)(sum ^ 0xFF);
     return 12;
 }
+
+/* --------------------------------------------------------------------------
+ * 2.1 Direct TPMS Numeric Readings & Fault Classification
+ * -------------------------------------------------------------------------- */
+size_t build_raise_tpms_numeric(const canbox_tpms_state_t *tpms, uint8_t *out) {
+    if (!tpms || !out) {
+        return 0;
+    }
+    out[0] = 0x2E;
+    out[1] = 0x66;
+    out[2] = 0x06;
+    out[3] = 0x01; /* Real-time mode */
+    out[4] = (uint8_t)tpms->pressure_dbar[0];
+    out[5] = (uint8_t)tpms->pressure_dbar[1];
+    out[6] = (uint8_t)tpms->pressure_dbar[2];
+    out[7] = (uint8_t)tpms->pressure_dbar[3];
+    out[8] = 0x00; /* Unit: Bar * 0.1 */
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 8; i++) {
+        sum += out[i];
+    }
+    out[9] = (uint8_t)(sum ^ 0xFF);
+    return 10;
+}
+
+size_t build_raise_tpms_temp_alarms(const canbox_tpms_state_t *tpms, uint8_t *out) {
+    if (!tpms || !out) {
+        return 0;
+    }
+    out[0] = 0x2E;
+    out[1] = 0x68;
+    out[2] = 0x08;
+    for (int i = 0; i < 4; i++) {
+        int16_t t = tpms->temperature_c[i] + 40;
+        out[3 + i] = (t < 0) ? 0 : ((t > 255) ? 255 : (uint8_t)t);
+    }
+    for (int i = 0; i < 4; i++) {
+        out[7 + i] = tpms->alarm_code[i];
+    }
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 10; i++) {
+        sum += out[i];
+    }
+    out[11] = (uint8_t)(sum ^ 0xFF);
+    return 12;
+}
+
+size_t build_raise_tpms_discrete(const uint8_t alarms[4], uint8_t *out) {
+    if (!alarms || !out) {
+        return 0;
+    }
+    out[0] = 0x2E;
+    out[1] = 0x18;
+    out[2] = 0x04;
+    out[3] = alarms[0];
+    out[4] = alarms[1];
+    out[5] = alarms[2];
+    out[6] = alarms[3];
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 6; i++) {
+        sum += out[i];
+    }
+    out[7] = (uint8_t)(sum ^ 0xFF);
+    return 8;
+}
+
+/* --------------------------------------------------------------------------
+ * 2.2 Stop & Start (S&S) Telemetry & Timer
+ * -------------------------------------------------------------------------- */
+size_t build_raise_start_stop(bool is_active, uint32_t stop_time_sec, uint8_t *out) {
+    if (!out) {
+        return 0;
+    }
+    out[0] = 0x2E;
+    out[1] = 0x71;
+    out[2] = 0x05;
+    out[3] = is_active ? 0x01 : 0x00;
+    out[4] = (uint8_t)((stop_time_sec >> 24) & 0xFF);
+    out[5] = (uint8_t)((stop_time_sec >> 16) & 0xFF);
+    out[6] = (uint8_t)((stop_time_sec >> 8) & 0xFF);
+    out[7] = (uint8_t)(stop_time_sec & 0xFF);
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 7; i++) {
+        sum += out[i];
+    }
+    out[8] = (uint8_t)(sum ^ 0xFF);
+    return 9;
+}
+
+/* --------------------------------------------------------------------------
+ * 2.3 Cruise Control & Speed Memory Presets
+ * -------------------------------------------------------------------------- */
+size_t build_raise_cruise_memory(bool active, uint8_t target_spd, const uint8_t presets[5], uint8_t *out) {
+    if (!out) {
+        return 0;
+    }
+    out[0] = 0x2E;
+    out[1] = 0x72;
+    out[2] = 0x07;
+    out[3] = active ? 0x01 : 0x00;
+    out[4] = target_spd;
+    if (presets) {
+        memcpy(&out[5], presets, 5);
+    } else {
+        memset(&out[5], 0, 5);
+    }
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 9; i++) {
+        sum += out[i];
+    }
+    out[10] = (uint8_t)(sum ^ 0xFF);
+    return 11;
+}
+
+void psa_decode_cruise_0x1a8(const uint8_t *data, uint8_t dlc, bool *active, uint8_t *set_speed_kmh, uint32_t *partial_odo_m) {
+    if (!data || dlc < 3) {
+        return;
+    }
+    if (active) {
+        uint8_t status = (data[0] >> 3) & 0x07;
+        *active = (status == 1 || status == 2);
+    }
+    if (set_speed_kmh) {
+        uint16_t spd_raw = read_be16(&data[1]);
+        if (spd_raw == 0xFFFF) {
+            *set_speed_kmh = 0;
+        } else {
+            *set_speed_kmh = (uint8_t)(spd_raw / 100);
+        }
+    }
+    if (partial_odo_m && dlc >= 8) {
+        uint32_t odo_raw = ((uint32_t)data[5] << 16) | ((uint32_t)data[6] << 8) | (uint32_t)data[7];
+        *partial_odo_m = (odo_raw == 0xFFFFFF) ? 0 : odo_raw;
+    }
+}
+
+/* --------------------------------------------------------------------------
+ * 2.4 Driver Assistance & ADAS Features
+ * -------------------------------------------------------------------------- */
+size_t build_raise_adas(const canbox_adas_state_t *adas, uint8_t *out) {
+    if (!adas || !out) {
+        return 0;
+    }
+    out[0] = 0x2E;
+    out[1] = 0x70;
+    out[2] = 0x06;
+    out[3] = adas->blind_spot_warning ? 0x80 : 0x00;
+    out[4] = adas->fatigue_coffee_cup ? 0x80 : 0x00;
+    out[5] = adas->lane_departure_state;
+    out[6] = adas->speed_limit_tsr;
+    out[7] = adas->esp_active ? 0x01 : 0x00;
+    out[8] = adas->aeb_risk_level;
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 8; i++) {
+        sum += out[i];
+    }
+    out[9] = (uint8_t)(sum ^ 0xFF);
+    return 10;
+}
+
+void psa_decode_alerts_0x168(const uint8_t *data, uint8_t dlc,
+                             bool *tpms_fault, bool *tpms_underinflation,
+                             bool *tpms_puncture, bool *esp_fault) {
+    if (!data) return;
+    if (tpms_fault && dlc >= 1) {
+        *tpms_fault = (data[0] & 0x01) != 0;
+    }
+    if (tpms_underinflation && dlc >= 2) {
+        *tpms_underinflation = (data[1] & 0x80) != 0;
+    }
+    if (tpms_puncture && dlc >= 2) {
+        *tpms_puncture = (data[1] & 0x40) != 0;
+    }
+    if (esp_fault && dlc >= 4) {
+        *esp_fault = (data[3] & 0x10) != 0;
+    }
+}
+

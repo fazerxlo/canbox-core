@@ -13,13 +13,9 @@ extern "C" {
 #define RAISE_MAX_PAYLOAD_LEN  64
 
 // Command IDs commonly used in Raise definitions
-#define RAISE_CMD_WHEEL_KEY    0x01
-#define RAISE_CMD_DOOR_STATUS  0x24
-#define RAISE_CMD_STEERING_RAD 0x26
-#define RAISE_CMD_TELEMETRY    0x29
-#define RAISE_CMD_VERSION_REQ  0x7F
 #define RAISE_CMD_WHEEL_KEY        0x01
 #define RAISE_CMD_STALK_KEY        0x02
+#define RAISE_CMD_TPMS_DISCRETE    0x18
 #define RAISE_CMD_HVAC             0x21
 #define RAISE_CMD_DOOR_STATUS      0x24
 #define RAISE_CMD_STEERING_RAD     0x26
@@ -36,6 +32,11 @@ extern "C" {
 #define RAISE_CMD_CD_CHANGER       0x54
 #define RAISE_CMD_RDS_NAME         0x55
 #define RAISE_CMD_AMPLIFIER        0x56
+#define RAISE_CMD_TPMS_NUMERIC     0x66
+#define RAISE_CMD_TPMS_TEMPS       0x68
+#define RAISE_CMD_ADAS             0x70
+#define RAISE_CMD_START_STOP       0x71
+#define RAISE_CMD_CRUISE_MEMORY    0x72
 #define RAISE_CMD_VERSION_REQ      0x7F
 #define RAISE_CMD_CAR_MODEL_SELECT 0xCA
 

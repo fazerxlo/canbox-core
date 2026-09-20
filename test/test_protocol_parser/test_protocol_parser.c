@@ -42,6 +42,16 @@ void test_peugeot_407_steering_wheel_angle(void);
 void test_peugeot_407_jbl_amplifier(void);
 void test_peugeot_407_cd_changer_and_rds(void);
 
+// Peugeot 407 SPEC_02 test declarations
+void test_psa_extended_tpms_numeric(void);
+void test_psa_extended_tpms_temp_and_alarms(void);
+void test_psa_extended_tpms_discrete_alarms(void);
+void test_psa_extended_start_stop(void);
+void test_psa_extended_cruise_memory(void);
+void test_psa_extended_decode_cruise_0x1a8(void);
+void test_psa_extended_adas(void);
+void test_psa_extended_decode_alerts_0x168(void);
+
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
 void test_hiworld_parse_valid_stream(void);
@@ -97,6 +107,16 @@ int main(void) {
     RUN_TEST(test_peugeot_407_steering_wheel_angle);
     RUN_TEST(test_peugeot_407_jbl_amplifier);
     RUN_TEST(test_peugeot_407_cd_changer_and_rds);
+
+    // Peugeot 407 SPEC_02 Extended Unit Tests & Verification Vectors
+    RUN_TEST(test_psa_extended_tpms_numeric);
+    RUN_TEST(test_psa_extended_tpms_temp_and_alarms);
+    RUN_TEST(test_psa_extended_tpms_discrete_alarms);
+    RUN_TEST(test_psa_extended_start_stop);
+    RUN_TEST(test_psa_extended_cruise_memory);
+    RUN_TEST(test_psa_extended_decode_cruise_0x1a8);
+    RUN_TEST(test_psa_extended_adas);
+    RUN_TEST(test_psa_extended_decode_alerts_0x168);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

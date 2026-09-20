@@ -139,15 +139,31 @@ static void psa_decode_hvac_0x1d0_profile(const can_frame_t *frame, vehicle_stat
     state->climate.temp_passenger  = hvac.pass_temp_raw;
 }
 
+static void psa_decode_cruise_0x1a8_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)state;
+    bool active = false;
+    uint8_t set_spd = 0;
+    uint32_t odo = 0;
+    psa_decode_cruise_0x1a8(frame->data, frame->dlc, &active, &set_spd, &odo);
+}
+
+static void psa_decode_alerts_0x168_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)state;
+    bool tpms_fault = false, tpms_under = false, tpms_punc = false, esp_fault = false;
+    psa_decode_alerts_0x168(frame->data, frame->dlc, &tpms_fault, &tpms_under, &tpms_punc, &esp_fault);
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
-    { PSA_CAN_ID_REVERSE_IGNITION, psa_decode_doors_0x036 },
-    { PSA_CAN_ID_STEERING_ANGLE,   psa_decode_steering_angle_0x0e6_profile },
-    { PSA_CAN_ID_STALK_BUTTONS,    psa_decode_stalk_0x0f6 },
-    { 0x128,                       psa_decode_wheel_keys_0x128 },
-    { 0x0B6,                       psa_decode_engine_speed_0x0b6 },
-    { 0x0E8,                       psa_decode_steering_angle_0x0e8 },
-    { PSA_CAN_ID_CLIMATE_HVAC,     psa_decode_hvac_0x1d0_profile },
-    { PSA_CAN_ID_DOORS_BODY,       psa_decode_doors_0x221_profile },
+    { PSA_CAN_ID_REVERSE_IGNITION,  psa_decode_doors_0x036 },
+    { PSA_CAN_ID_STEERING_ANGLE,    psa_decode_steering_angle_0x0e6_profile },
+    { PSA_CAN_ID_STALK_BUTTONS,     psa_decode_stalk_0x0f6 },
+    { 0x128,                        psa_decode_wheel_keys_0x128 },
+    { PSA_CAN_ID_ALERTS_INDICATORS, psa_decode_alerts_0x168_profile },
+    { PSA_CAN_ID_CRUISE_CONTROL,    psa_decode_cruise_0x1a8_profile },
+    { 0x0B6,                        psa_decode_engine_speed_0x0b6 },
+    { 0x0E8,                        psa_decode_steering_angle_0x0e8 },
+    { PSA_CAN_ID_CLIMATE_HVAC,      psa_decode_hvac_0x1d0_profile },
+    { PSA_CAN_ID_DOORS_BODY,        psa_decode_doors_0x221_profile },
 };
 
 static void psa_init(void) {

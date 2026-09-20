@@ -465,3 +465,220 @@ void test_peugeot_407_cd_changer_and_rds(void) {
     TEST_ASSERT_EQUAL_HEX8(' ', out_rds[9]);
     TEST_ASSERT_EQUAL_HEX8(' ', out_rds[10]);
 }
+
+/* --------------------------------------------------------------------------
+ * 2.1 Direct TPMS Numeric Readings & Fault Classification Tests
+ * -------------------------------------------------------------------------- */
+void test_psa_extended_tpms_numeric(void) {
+    canbox_tpms_state_t tpms;
+    memset(&tpms, 0, sizeof(tpms));
+    tpms.pressure_dbar[0] = 24; // 2.4 Bar (0x18)
+    tpms.pressure_dbar[1] = 24;
+    tpms.pressure_dbar[2] = 24;
+    tpms.pressure_dbar[3] = 24;
+
+    uint8_t out[16];
+    size_t len = build_raise_tpms_numeric(&tpms, out);
+    TEST_ASSERT_EQUAL_UINT32(10, len);
+    TEST_ASSERT_EQUAL_HEX8(0x2E, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x66, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x06, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[3]); // Mode: Real-time
+    TEST_ASSERT_EQUAL_HEX8(0x18, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x18, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x18, out[6]);
+    TEST_ASSERT_EQUAL_HEX8(0x18, out[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[8]); // Unit: Bar * 0.1
+
+    uint8_t expected_cs = (uint8_t)((0x66 + 0x06 + 0x01 + 0x18 + 0x18 + 0x18 + 0x18 + 0x00) ^ 0xFF);
+    TEST_ASSERT_EQUAL_HEX8(expected_cs, out[9]);
+    TEST_ASSERT_EQUAL_UINT32(0, build_raise_tpms_numeric(NULL, out));
+}
+
+void test_psa_extended_tpms_temp_and_alarms(void) {
+    canbox_tpms_state_t tpms;
+    memset(&tpms, 0, sizeof(tpms));
+    tpms.temperature_c[0] = 20; // 20 + 40 = 60 (0x3C)
+    tpms.temperature_c[1] = 25; // 25 + 40 = 65 (0x41)
+    tpms.temperature_c[2] = 18; // 18 + 40 = 58 (0x3A)
+    tpms.temperature_c[3] = 19; // 19 + 40 = 59 (0x3B)
+
+    tpms.alarm_code[0] = 0; // Normal
+    tpms.alarm_code[1] = 1; // Low pressure
+    tpms.alarm_code[2] = 2; // Puncture
+    tpms.alarm_code[3] = 4; // Low battery
+
+    uint8_t out[16];
+    size_t len = build_raise_tpms_temp_alarms(&tpms, out);
+    TEST_ASSERT_EQUAL_UINT32(12, len);
+    TEST_ASSERT_EQUAL_HEX8(0x2E, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x68, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x08, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x3C, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x41, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x3A, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x3B, out[6]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[9]);
+    TEST_ASSERT_EQUAL_HEX8(0x04, out[10]);
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 10; i++) sum += out[i];
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)(sum ^ 0xFF), out[11]);
+
+    // Test extreme temperatures clamping
+    tpms.temperature_c[0] = -50; // Underflow clamped to 0
+    tpms.temperature_c[1] = 250; // Overflow clamped to 255
+    build_raise_tpms_temp_alarms(&tpms, out);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, out[4]);
+}
+
+void test_psa_extended_tpms_discrete_alarms(void) {
+    uint8_t alarms[4] = { 0x01, 0x00, 0x00, 0x01 };
+    uint8_t out[16];
+    size_t len = build_raise_tpms_discrete(alarms, out);
+    TEST_ASSERT_EQUAL_UINT32(8, len);
+    TEST_ASSERT_EQUAL_HEX8(0x2E, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x18, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x04, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[6]);
+
+    uint8_t expected_cs = (uint8_t)((0x18 + 0x04 + 0x01 + 0x00 + 0x00 + 0x01) ^ 0xFF);
+    TEST_ASSERT_EQUAL_HEX8(expected_cs, out[7]);
+}
+
+/* --------------------------------------------------------------------------
+ * 2.2 Stop & Start (S&S) Telemetry & Timer Tests
+ * -------------------------------------------------------------------------- */
+void test_psa_extended_start_stop(void) {
+    // Vector: Active, 125 seconds (0x0000007D)
+    uint8_t out[16];
+    size_t len = build_raise_start_stop(true, 125, out);
+    TEST_ASSERT_EQUAL_UINT32(9, len);
+    TEST_ASSERT_EQUAL_HEX8(0x2E, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x71, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x05, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[6]);
+    TEST_ASSERT_EQUAL_HEX8(0x7D, out[7]);
+
+    uint8_t expected_cs = (uint8_t)((0x71 + 0x05 + 0x01 + 0x00 + 0x00 + 0x00 + 0x7D) ^ 0xFF);
+    TEST_ASSERT_EQUAL_HEX8(expected_cs, out[8]);
+
+    // Test Inactive, 3600 seconds (0x00000E10)
+    len = build_raise_start_stop(false, 3600, out);
+    TEST_ASSERT_EQUAL_UINT32(9, len);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, out[6]);
+    TEST_ASSERT_EQUAL_HEX8(0x10, out[7]);
+}
+
+/* --------------------------------------------------------------------------
+ * 2.3 Cruise Control & Speed Memory Presets Tests
+ * -------------------------------------------------------------------------- */
+void test_psa_extended_cruise_memory(void) {
+    const uint8_t presets[5] = { 50, 70, 90, 110, 130 };
+    uint8_t out[16];
+    size_t len = build_raise_cruise_memory(true, 110, presets, out);
+    TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_HEX8(0x2E, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x72, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x07, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[3]); // Active
+    TEST_ASSERT_EQUAL_HEX8(110, out[4]);  // Target speed
+    TEST_ASSERT_EQUAL_HEX8(50,  out[5]);
+    TEST_ASSERT_EQUAL_HEX8(70,  out[6]);
+    TEST_ASSERT_EQUAL_HEX8(90,  out[7]);
+    TEST_ASSERT_EQUAL_HEX8(110, out[8]);
+    TEST_ASSERT_EQUAL_HEX8(130, out[9]);
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 9; i++) sum += out[i];
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)(sum ^ 0xFF), out[10]);
+}
+
+void test_psa_extended_decode_cruise_0x1a8(void) {
+    // 1. Cruise active at 110.00 km/h (0x2AF8), partial odo 1234.567 km (0x12D687 = 1234567 m)
+    const uint8_t can_1a8_active[] = { 0x48, 0x2A, 0xF8, 0x00, 0x00, 0x12, 0xD6, 0x87 };
+    bool active = false;
+    uint8_t set_spd = 0;
+    uint32_t partial_odo = 0;
+
+    psa_decode_cruise_0x1a8(can_1a8_active, sizeof(can_1a8_active), &active, &set_spd, &partial_odo);
+    TEST_ASSERT_TRUE(active);
+    TEST_ASSERT_EQUAL_UINT8(110, set_spd);
+    TEST_ASSERT_EQUAL_UINT32(1234567, partial_odo);
+
+    // 2. Idle / Standby with no set speed (0xFFFF) and no partial odo (0xFFFFFF)
+    const uint8_t can_1a8_idle[] = { 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF };
+    psa_decode_cruise_0x1a8(can_1a8_idle, sizeof(can_1a8_idle), &active, &set_spd, &partial_odo);
+    TEST_ASSERT_FALSE(active);
+    TEST_ASSERT_EQUAL_UINT8(0, set_spd);
+    TEST_ASSERT_EQUAL_UINT32(0, partial_odo);
+
+    // 3. Limiter at 130 km/h (0x32C8 = 13000), odo 123 m (0x00007B)
+    const uint8_t can_1a8_limiter[] = { 0x88, 0x32, 0xC8, 0x00, 0x00, 0x00, 0x00, 0x7B };
+    psa_decode_cruise_0x1a8(can_1a8_limiter, sizeof(can_1a8_limiter), &active, &set_spd, &partial_odo);
+    TEST_ASSERT_TRUE(active);
+    TEST_ASSERT_EQUAL_UINT8(130, set_spd);
+    TEST_ASSERT_EQUAL_UINT32(123, partial_odo);
+}
+
+/* --------------------------------------------------------------------------
+ * 2.4 Driver Assistance & ADAS Features Tests
+ * -------------------------------------------------------------------------- */
+void test_psa_extended_adas(void) {
+    canbox_adas_state_t adas;
+    memset(&adas, 0, sizeof(adas));
+    adas.blind_spot_warning = true;  // 0x80
+    adas.fatigue_coffee_cup = true;  // 0x80
+    adas.lane_departure_state = 2;   // Right line departure
+    adas.speed_limit_tsr = 90;       // 90 km/h (0x5A)
+    adas.esp_active = true;          // 0x01
+    adas.aeb_risk_level = 2;         // Emergency braking
+
+    uint8_t out[16];
+    size_t len = build_raise_adas(&adas, out);
+    TEST_ASSERT_EQUAL_UINT32(10, len);
+    TEST_ASSERT_EQUAL_HEX8(0x2E, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x70, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x06, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x80, out[3]); // Blind spot
+    TEST_ASSERT_EQUAL_HEX8(0x80, out[4]); // Fatigue
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[5]); // Lane departure right
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[6]); // TSR 90 km/h
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[7]); // ESP active
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[8]); // AEB level 2
+
+    uint8_t sum = 0;
+    for (size_t i = 1; i <= 8; i++) sum += out[i];
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)(sum ^ 0xFF), out[9]);
+}
+
+void test_psa_extended_decode_alerts_0x168(void) {
+    const uint8_t can_168_alerts[] = { 0x01, 0xC0, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00 };
+    bool tpms_fault = false, underinfl = false, puncture = false, esp_fault = false;
+
+    psa_decode_alerts_0x168(can_168_alerts, sizeof(can_168_alerts), &tpms_fault, &underinfl, &puncture, &esp_fault);
+    TEST_ASSERT_TRUE(tpms_fault);
+    TEST_ASSERT_TRUE(underinfl);
+    TEST_ASSERT_TRUE(puncture);
+    TEST_ASSERT_TRUE(esp_fault);
+
+    const uint8_t can_168_clear[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    psa_decode_alerts_0x168(can_168_clear, sizeof(can_168_clear), &tpms_fault, &underinfl, &puncture, &esp_fault);
+    TEST_ASSERT_FALSE(tpms_fault);
+    TEST_ASSERT_FALSE(underinfl);
+    TEST_ASSERT_FALSE(puncture);
+    TEST_ASSERT_FALSE(esp_fault);
+}
+
