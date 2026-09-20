@@ -16,15 +16,18 @@ enum {
 };
 
 static inline bool validate_checksum(canbox_dialect_t dialect, uint8_t running_sum, uint8_t rx_cs) {
+    uint8_t expected = 0;
     switch (dialect) {
         case CANBOX_DIALECT_RAISE:
-            return (uint8_t)(~running_sum) == rx_cs;
+            expected = (uint8_t)(~running_sum);
+            return expected == rx_cs;
 
         case CANBOX_DIALECT_HIWORLD:
             return running_sum == rx_cs;
 
         case CANBOX_DIALECT_BAGOO:
-            return (uint8_t)((~running_sum) + 1) == rx_cs;
+            expected = (uint8_t)((~running_sum) + 1);
+            return expected == rx_cs;
 
         default:
             return false;

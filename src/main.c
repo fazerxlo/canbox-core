@@ -16,12 +16,12 @@ int main(void) {
 
     while (1) {
         can_frame_t rx_can_frame;
-        if (hal_can_receive(&rx_can_frame) == HAL_OK) {
+        if (hal_can_receive(&rx_can_frame) == HAL_STATUS_OK) {
             can_router_process_can(&rx_can_frame);
         }
 
         uint8_t uart_byte;
-        while (hal_uart_read_byte(&uart_byte) == HAL_OK) {
+        while (hal_uart_read_byte(&uart_byte) == HAL_STATUS_OK) {
             can_router_process_uart_byte(uart_byte);
         }
 

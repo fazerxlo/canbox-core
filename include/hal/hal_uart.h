@@ -25,7 +25,7 @@ hal_status_t hal_uart_init(uart_baudrate_t baudrate);
 /**
  * @brief Non-blocking check and read of a single byte from RX buffer.
  * @param[out] byte Storage for retrieved byte.
- * @return HAL_OK if byte was read, HAL_EMPTY/HAL_TIMEOUT if RX buffer is empty.
+ * @return HAL_STATUS_OK if byte was read, HAL_STATUS_TIMEOUT if RX buffer is empty.
  */
 hal_status_t hal_uart_read_byte(uint8_t *byte);
 

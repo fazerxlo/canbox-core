@@ -47,14 +47,13 @@ hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count);
 
 /**
  * @brief Push a CAN frame to the hardware TX mailbox/buffer.
- * @return HAL_OK on enqueue, HAL_BUSY or HAL_OVERFLOW if mailbox/ringbuffer is full.
+ * @return HAL_STATUS_OK on enqueue, HAL_STATUS_BUSY or HAL_STATUS_OVERFLOW if mailbox/ringbuffer is full.
  */
 hal_status_t hal_can_send(const can_frame_t *frame);
 
 /**
- * @brief Non-blocking read of the next received CAN frame.
- * @param[out] frame Destination pointer for retrieved frame.
- * @return HAL_OK if frame retrieved, HAL_TIMEOUT/HAL_EMPTY if no frames waiting.
+ * @brief Retrieves the next frame from the reception ring buffer (non-blocking).
+ * @return HAL_STATUS_OK if frame retrieved, HAL_STATUS_TIMEOUT/HAL_STATUS_ERROR if no frames waiting.
  */
 hal_status_t hal_can_receive(can_frame_t *frame);
 

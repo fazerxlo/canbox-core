@@ -9,9 +9,9 @@ static struct timespec s_start_time;
 
 hal_status_t hal_system_init(void) {
     if (clock_gettime(CLOCK_MONOTONIC, &s_start_time) != 0) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 uint32_t hal_get_tick_ms(void) {

@@ -26,7 +26,7 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     s_can_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (s_can_fd < 0) {
         perror("[CAN] Socket creation failed");
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     struct ifreq ifr;
@@ -40,7 +40,7 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
                 CAN_INTERFACE_NAME, CAN_INTERFACE_NAME, CAN_INTERFACE_NAME);
         close(s_can_fd);
         s_can_fd = -1;
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     struct sockaddr_can addr;
@@ -52,7 +52,7 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
         perror("[CAN] Socket bind failed");
         close(s_can_fd);
         s_can_fd = -1;
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     // Set non-blocking operation
@@ -61,16 +61,16 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
         perror("[CAN] Setting non-blocking mode failed");
         close(s_can_fd);
         s_can_fd = -1;
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     printf("[CAN] Initialized on %s\n", CAN_INTERFACE_NAME);
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
     if (s_can_fd < 0 || count == 0 || !filters) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     struct can_filter rfilter[count];
@@ -86,15 +86,15 @@ hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
 
     if (setsockopt(s_can_fd, SOL_CAN_RAW, CAN_RAW_FILTER, &rfilter, sizeof(rfilter)) < 0) {
         perror("[CAN] Failed to apply filters");
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_send(const can_frame_t *frame) {
     if (s_can_fd < 0 || !frame) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     struct can_frame linux_frame;
@@ -114,17 +114,17 @@ hal_status_t hal_can_send(const can_frame_t *frame) {
     ssize_t bytes_written = write(s_can_fd, &linux_frame, sizeof(linux_frame));
     if (bytes_written != sizeof(linux_frame)) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return HAL_BUSY;
+            return HAL_STATUS_BUSY;
         }
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_receive(can_frame_t *frame) {
     if (s_can_fd < 0 || !frame) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     struct can_frame linux_frame;
@@ -132,13 +132,13 @@ hal_status_t hal_can_receive(can_frame_t *frame) {
 
     if (bytes_read < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return HAL_TIMEOUT; // Queue empty
+            return HAL_STATUS_TIMEOUT; // Queue empty
         }
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     if ((size_t)bytes_read < sizeof(linux_frame)) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     frame->is_extended = (linux_frame.can_id & CAN_EFF_FLAG) != 0;
@@ -149,5 +149,5 @@ hal_status_t hal_can_receive(can_frame_t *frame) {
     memcpy(frame->data, linux_frame.data, linux_frame.can_dlc);
     frame->timestamp_ms = hal_get_tick_ms();
 
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }

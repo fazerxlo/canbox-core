@@ -7,7 +7,7 @@ hal_status_t hal_gpio_init(void) {
     for (int i = 0; i < 8; i++) {
         s_gpio_states[i] = false;
     }
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 void hal_gpio_write(hal_gpio_pin_t pin, bool state) {

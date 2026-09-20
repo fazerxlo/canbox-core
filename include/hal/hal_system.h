@@ -9,11 +9,11 @@ extern "C" {
 #endif
 
 typedef enum {
-    HAL_OK       =  0,
-    HAL_ERROR    = -1,
-    HAL_BUSY     = -2,
-    HAL_TIMEOUT  = -3,
-    HAL_OVERFLOW = -4
+    HAL_STATUS_OK       =  0,
+    HAL_STATUS_ERROR    = -1,
+    HAL_STATUS_BUSY     = -2,
+    HAL_STATUS_TIMEOUT  = -3,
+    HAL_STATUS_OVERFLOW = -4
 } hal_status_t;
 
 /**
