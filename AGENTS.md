@@ -19,34 +19,34 @@ Before proposing code changes or completing a task, ensure the change compiles a
 
 * **Run Native Test Runner (Unit Tests):**
 ```bash
-.platformio/penv/bin/pio test -e native_test_runner
+~/.platformio/penv/bin/pio test -e native_test_runner
 
 ```
 
 * **Run Integration Pipeline Tests:**
 ```bash
-.platformio/penv/bin/pio test -e integration_test
+~/.platformio/penv/bin/pio test -e integration_test
 
 ```
 
 
 * **Build STM32 Firmware Target:**
 ```bash
-.platformio/penv/bin/pio run -e stm32_cbox
+~/.platformio/penv/bin/pio run -e stm32_cbox
 
 ```
 
 
 * **Build ESP32 Firmware Target:**
 ```bash
-.platformio/penv/bin/pio run -e esp32_cbox
+~/.platformio/penv/bin/pio run -e esp32_cbox
 
 ```
 
 
 * **Execute Interactive Desktop Simulator:**
 ```bash
-CANBOX_CAN_IFACE="vcan0" .platformio/penv/bin/pio run -e native_test -t exec
+CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec
 
 ```
 

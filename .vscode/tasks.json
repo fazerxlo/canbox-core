@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Integration Tests",
+            "type": "shell",
+            "command": "~/.platformio/penv/bin/pio test -e integration_test --without-testing",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build Native Unit Tests",
+            "type": "shell",
+            "command": "~/.platformio/penv/bin/pio test -e native_test_runner --without-testing",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        }
+    ]
+}
+
