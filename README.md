@@ -171,10 +171,11 @@ The test suite runs natively on Linux via the Unity framework:
 # Run protocol parser and checksum unit tests
 pio test -e native_test_runner
 
-# Run end-to-end CAN-to-UART integration pipeline tests
+# Run end-to-end CAN-to-UART integration and CAN log scenario tests
 pio test -e integration_test
-
 ```
+
+For instructions on writing and adding scenario tests using real vehicle CAN logs, see [Scenario-Based Integration Testing Guide](test/test_integration/README.md).
 
 ---
 
