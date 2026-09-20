@@ -33,7 +33,7 @@ hal_status_t hal_system_init(void) {
     // Configure SysTick for 1ms
     SysTick_Config(SystemCoreClock / 1000);
 
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 uint32_t hal_get_tick_ms(void) {

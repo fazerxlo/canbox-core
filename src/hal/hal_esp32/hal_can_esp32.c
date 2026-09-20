@@ -46,16 +46,16 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
     if (twai_driver_install(&g_config, &t_config, &f_config) != ESP_OK) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     if (twai_start() != ESP_OK) {
         twai_driver_uninstall();
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     s_twai_installed = true;
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
@@ -63,12 +63,12 @@ hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
     // If complex software multi-filtering is required, filter inside can_router.c.
     (void)filters;
     (void)count;
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_send(const can_frame_t *frame) {
     if (!s_twai_installed || !frame) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     twai_message_t tx_msg;
@@ -83,26 +83,26 @@ hal_status_t hal_can_send(const can_frame_t *frame) {
     // Non-blocking transmission request (timeout = 0)
     esp_err_t err = twai_transmit(&tx_msg, 0);
     if (err == ESP_OK) {
-        return HAL_OK;
+        return HAL_STATUS_OK;
     } else if (err == ESP_ERR_TIMEOUT) {
-        return HAL_BUSY;
+        return HAL_STATUS_BUSY;
     }
 
-    return HAL_ERROR;
+    return HAL_STATUS_ERROR;
 }
 
 hal_status_t hal_can_receive(can_frame_t *frame) {
     if (!s_twai_installed || !frame) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     twai_message_t rx_msg;
     // Non-blocking fetch from driver internal queue
     esp_err_t err = twai_receive(&rx_msg, 0);
     if (err == ESP_ERR_TIMEOUT) {
-        return HAL_TIMEOUT;
+        return HAL_STATUS_TIMEOUT;
     } else if (err != ESP_OK) {
-        return HAL_ERROR;
+        return HAL_STATUS_ERROR;
     }
 
     frame->id          = rx_msg.identifier;
@@ -112,5 +112,5 @@ hal_status_t hal_can_receive(can_frame_t *frame) {
     memcpy(frame->data, rx_msg.data, rx_msg.data_length_code);
     frame->timestamp_ms = hal_get_tick_ms();
 
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }

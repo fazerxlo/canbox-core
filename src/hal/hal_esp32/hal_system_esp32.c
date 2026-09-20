@@ -6,7 +6,7 @@
 
 hal_status_t hal_system_init(void) {
     // Clocks and core peripherals are brought up by ESP-IDF secondary bootloader
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 uint32_t hal_get_tick_ms(void) {

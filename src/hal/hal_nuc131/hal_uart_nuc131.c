@@ -38,12 +38,12 @@ hal_status_t hal_uart_init(uart_baudrate_t baudrate) {
     UART0->IER |= UART_IER_RDA_IEN_Msk;
     NVIC_EnableIRQ(UART02_IRQn);
 
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_uart_read_byte(uint8_t *byte) {
-    if (!byte) return HAL_ERROR;
-    return ring_buffer_pop(&s_uart_rx_rb, byte) ? HAL_OK : HAL_TIMEOUT;
+    if (!byte) return HAL_STATUS_ERROR;
+    return ring_buffer_pop(&s_uart_rx_rb, byte) ? HAL_STATUS_OK : HAL_STATUS_TIMEOUT;
 }
 
 size_t hal_uart_read(uint8_t *buffer, size_t max_len) {
@@ -56,18 +56,18 @@ size_t hal_uart_read(uint8_t *buffer, size_t max_len) {
 }
 
 hal_status_t hal_uart_write(const uint8_t *data, size_t len) {
-    if (!data || len == 0) return HAL_ERROR;
+    if (!data || len == 0) return HAL_STATUS_ERROR;
 
     for (size_t i = 0; i < len; i++) {
         while (UART0->FSR & UART_FSR_TX_FULL_Msk); // Wait until FIFO is not full
         UART0->DATA = data[i];
     }
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_uart_flush_tx(void) {
     while (!(UART0->FSR & UART_FSR_TE_FLAG_Msk)); // Wait for transmitter empty
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 void UART02_IRQHandler(void) {

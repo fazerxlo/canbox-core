@@ -25,7 +25,7 @@ hal_status_t hal_gpio_init(void) {
     };
     gpio_config(&io_conf_in);
 
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 void hal_gpio_write(hal_gpio_pin_t pin, bool state) {

@@ -101,21 +101,21 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     CAN->CON |= (CAN_CON_IE_Msk | CAN_CON_EIE_Msk);
 
     NVIC_EnableIRQ(CAN0_IRQn);
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
     (void)filters;
     (void)count;
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_send(const can_frame_t *frame) {
-    if (!frame) return HAL_ERROR;
+    if (!frame) return HAL_STATUS_ERROR;
 
     // Check if Object 1 is busy transmitting
     if (CAN->TXREQ1 & (1U << (CAN_TX_OBJ - 1))) {
-        return HAL_BUSY;
+        return HAL_STATUS_BUSY;
     }
 
     can_wait_if1();
@@ -147,12 +147,12 @@ hal_status_t hal_can_send(const can_frame_t *frame) {
 
     // Transfer shadow registers to Object 1
     CAN->IF1_CREQ = CAN_TX_OBJ;
-    return HAL_OK;
+    return HAL_STATUS_OK;
 }
 
 hal_status_t hal_can_receive(can_frame_t *frame) {
-    if (!frame) return HAL_ERROR;
-    return ring_buffer_pop(&s_can_rx_rb, frame) ? HAL_OK : HAL_TIMEOUT;
+    if (!frame) return HAL_STATUS_ERROR;
+    return ring_buffer_pop(&s_can_rx_rb, frame) ? HAL_STATUS_OK : HAL_STATUS_TIMEOUT;
 }
 
 void CAN0_IRQHandler(void) {
