@@ -4,6 +4,7 @@ set(srcs
     "core/ring_buffer.c"
     "core/vehicle_profile.c"
     "profiles/profile_psa.c"
+    "profiles/peugeot_407.c"
     "profiles/profile_vag.c"
     "protocols/canbox_parser.c"
     "protocols/hu_protocol.c"

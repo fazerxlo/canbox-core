@@ -4,10 +4,12 @@
 
 void setUp_raise(void);
 void setUp_hiworld(void);
+void setUp_peugeot_407(void);
 
 void setUp(void) {
     setUp_raise();
     setUp_hiworld();
+    setUp_peugeot_407();
 }
 
 void tearDown(void) {
@@ -23,6 +25,22 @@ void test_raise_ignore_preceding_noise(void);
 void test_raise_resync_on_invalid_length(void);
 void test_raise_car_mapping_lookup(void);
 void test_raise_parse_car_model_select_packet(void);
+
+// Peugeot 407 SPEC_01 test declarations
+void test_peugeot_407_stalk_buttons_press_and_release(void);
+void test_peugeot_407_stalk_rotary_encoder(void);
+void test_peugeot_407_verification_vector_1_vol_up(void);
+void test_peugeot_407_verification_vector_2_climate(void);
+void test_peugeot_407_hvac_defrost_and_recirc(void);
+void test_peugeot_407_verification_vector_3_parking_radar(void);
+void test_peugeot_407_front_parking_radar(void);
+void test_peugeot_407_trip_computer_0x165_and_0x1a5(void);
+void test_peugeot_407_reverse_state(void);
+void test_peugeot_407_verification_vector_4_doors(void);
+void test_peugeot_407_doors_all_open_with_handbrake(void);
+void test_peugeot_407_steering_wheel_angle(void);
+void test_peugeot_407_jbl_amplifier(void);
+void test_peugeot_407_cd_changer_and_rds(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -63,6 +81,22 @@ int main(void) {
     RUN_TEST(test_raise_resync_on_invalid_length);
     RUN_TEST(test_raise_car_mapping_lookup);
     RUN_TEST(test_raise_parse_car_model_select_packet);
+
+    // Peugeot 407 SPEC_01 Unit Tests & Verification Vectors
+    RUN_TEST(test_peugeot_407_stalk_buttons_press_and_release);
+    RUN_TEST(test_peugeot_407_stalk_rotary_encoder);
+    RUN_TEST(test_peugeot_407_verification_vector_1_vol_up);
+    RUN_TEST(test_peugeot_407_verification_vector_2_climate);
+    RUN_TEST(test_peugeot_407_hvac_defrost_and_recirc);
+    RUN_TEST(test_peugeot_407_verification_vector_3_parking_radar);
+    RUN_TEST(test_peugeot_407_front_parking_radar);
+    RUN_TEST(test_peugeot_407_trip_computer_0x165_and_0x1a5);
+    RUN_TEST(test_peugeot_407_reverse_state);
+    RUN_TEST(test_peugeot_407_verification_vector_4_doors);
+    RUN_TEST(test_peugeot_407_doors_all_open_with_handbrake);
+    RUN_TEST(test_peugeot_407_steering_wheel_angle);
+    RUN_TEST(test_peugeot_407_jbl_amplifier);
+    RUN_TEST(test_peugeot_407_cd_changer_and_rds);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);
