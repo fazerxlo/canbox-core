@@ -1,19 +1,34 @@
 #include "protocols/hu_protocol.h"
 #include "protocols/hu_protocol_driver.h"
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 extern const hu_protocol_driver_t g_hu_protocol_raise;
 extern const hu_protocol_driver_t g_hu_protocol_hiworld;
+extern const hu_protocol_driver_t g_hu_protocol_bagoo;
 
 static const hu_protocol_driver_t *s_available_protocols[] = {
     [HU_PROTOCOL_RAISE]   = &g_hu_protocol_raise,
     [HU_PROTOCOL_HIWORLD] = &g_hu_protocol_hiworld,
-    [HU_PROTOCOL_BAGOO]   = NULL,
+    [HU_PROTOCOL_BAGOO]   = &g_hu_protocol_bagoo,
 };
 
 static const hu_protocol_driver_t *s_active_driver = &g_hu_protocol_raise;
 
 void hu_protocol_init(void) {
+#if defined(PLATFORM_LINUX)
+    const char *proto_env = getenv("CANBOX_HU_PROTOCOL");
+    if (proto_env && proto_env[0] != '\0') {
+        if (strcasecmp(proto_env, "raise") == 0 || strcasecmp(proto_env, "rzc") == 0) {
+            s_active_driver = &g_hu_protocol_raise;
+        } else if (strcasecmp(proto_env, "hiworld") == 0) {
+            s_active_driver = &g_hu_protocol_hiworld;
+        } else if (strcasecmp(proto_env, "bagoo") == 0 || strcasecmp(proto_env, "psa15") == 0) {
+            s_active_driver = &g_hu_protocol_bagoo;
+        }
+    }
+#endif
     if (s_active_driver && s_active_driver->init) {
         s_active_driver->init();
     }

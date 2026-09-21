@@ -8,7 +8,7 @@ int main(void) {
     hal_system_init();
     hal_gpio_init();
     hal_can_init(CAN_BAUD_500K);
-    hal_uart_init(UART_BAUD_38400); // Standard rate for many Chinese CAN boxes
+    hal_uart_init(UART_BAUD_38400); // 38400 baud standard for Raise/PSA protocol
 
     can_router_init();
 

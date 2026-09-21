@@ -26,8 +26,7 @@ static inline bool validate_checksum(canbox_dialect_t dialect, uint8_t running_s
             return running_sum == rx_cs;
 
         case CANBOX_DIALECT_BAGOO:
-            expected = (uint8_t)((~running_sum) + 1);
-            return expected == rx_cs;
+            return running_sum == rx_cs;
 
         default:
             return false;

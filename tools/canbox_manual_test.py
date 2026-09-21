@@ -247,11 +247,18 @@ def main():
         help="Path to physical USB serial dongle (e.g. /dev/ttyUSB0). If omitted, auto-discovery is performed.",
     )
     parser.add_argument(
+        "--protocol",
+        "-P",
+        default="bagoo",
+        choices=["bagoo", "raise", "hiworld"],
+        help="Head Unit protocol dialect (default: bagoo for Peugeot 407 / PSA 15)",
+    )
+    parser.add_argument(
         "--baudrate",
         "-b",
         type=int,
-        default=38400,
-        help="UART Baud rate (default: 38400 - standard for Raise/PSA)",
+        default=19200,
+        help="UART Baud rate (default: 19200 for Peugeot 407 Raise/Bagoo)",
     )
     parser.add_argument(
         "--iface",
@@ -319,12 +326,14 @@ def main():
 
         app_env = os.environ.copy()
         app_env["CANBOX_CAN_IFACE"] = args.iface
+        app_env["CANBOX_HU_PROTOCOL"] = args.protocol
         if serial_port:
             app_env["CANBOX_UART_DEVICE"] = serial_port
             app_env["CANBOX_UART_BAUD"] = str(args.baudrate)
 
         print(f"[*] Starting OpenCanbox Core binary: {NATIVE_BINARY_PATH}")
         print(f"    - CAN Interface : {args.iface}")
+        print(f"    - HU Protocol   : {args.protocol.upper()}")
         print(f"    - Serial Target : {serial_port if serial_port else '/tmp/ttyCanbox (PTY)'}")
         print(f"    - Baud Rate     : {args.baudrate}")
 

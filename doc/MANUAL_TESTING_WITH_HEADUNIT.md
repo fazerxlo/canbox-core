@@ -45,7 +45,8 @@ Before sending data, ensure your Head Unit is configured to listen for the simul
    - **Model:** `407` (or `Generic PSA 2004+`)
 4. Save and allow the Head Unit to restart the CAN service.
 5. Default UART communication parameters configured in OpenCanbox Core:
-   - **Baud Rate:** `38400`
+   - **Baud Rate:** `19200` (Standard for Peugeot 407 Raise / PSA protocol)
+   - **Voltage Level:** `3.3V TTL`
    - **Data Bits:** `8`
    - **Parity:** `None`
    - **Stop Bits:** `1` (8N1)
@@ -120,7 +121,43 @@ python3 tools/canbox_manual_test.py \
 
 ---
 
-## 5. Available Test Scenario CAN Logs
+## 5. Direct Serial Packet Replay (`tools/replay_serial.py`)
+
+If you want to test the Head Unit's reaction directly to recorded CANBox serial packets without running the full CAN translator / simulator on `vcan0`, use [`tools/replay_serial.py`](file:///home/Fazer/git/canbox-core/tools/replay_serial.py).
+
+This tool streams raw binary (`.bin`) or hex-dumped text (`.txt`) serial packets directly over USB-UART to the Head Unit's MCU, automatically parsing individual frames (using `0xFD` / `0x2E` headers) and pacing transmissions with configurable inter-packet delays.
+
+### 5.1 Quick Start Examples
+
+```bash
+# 1. Single-pass replay of the Peugeot 407 dump (auto-detects USB serial adapter @ 38400 baud)
+python3 tools/replay_serial.py test_data/dump.bin
+
+# 2. Continuous loop replay with 1.0s pause between cycles
+python3 tools/replay_serial.py test_data/dump.bin --loop --loop-delay 1.0
+
+# 3. Explicit serial port, baud rate, and 50ms inter-packet delay
+python3 tools/replay_serial.py test_data/dump.bin -p /dev/ttyUSB0 -b 38400 -d 0.05
+
+# 4. Replay directly from a hex-formatted text dump
+python3 tools/replay_serial.py test_data/dump.txt --loop
+```
+
+### 5.2 Command-Line Options
+
+| Option | Short | Default | Description |
+|:---|:---:|:---|:---|
+| `file` | | `test_data/dump.bin` | Path to binary (`.bin`) or hex text (`.txt`) file to replay |
+| `--port` | `-p` | Auto-detect | Serial port device (e.g. `/dev/ttyUSB0`, `/dev/ttyACM0`) |
+| `--baud` | `-b` | `38400` | Serial baud rate (Raise/RZC protocol standard: 38400) |
+| `--packet-delay` | `-d` | `0.05` | Delay in seconds between individual packets (allows HU MCU to process) |
+| `--loop` | `-l` | `False` | Loop packet playback indefinitely |
+| `--loop-delay` | | `1.0` | Delay in seconds between loop iterations |
+| `--raw-stream` | | `False` | Stream entire binary payload at once without packet parsing |
+
+---
+
+## 6. Available Test Scenario CAN Logs
 
 The following pre-recorded CAN captures are available in [`test/test_integration/data/`](file:///home/Fazer/git/canbox-core/test/test_integration/data/):
 
@@ -146,47 +183,48 @@ python3 tools/canbox_manual_test.py --csv test/test_integration/data/ignition_of
 
 ---
 
-## 6. Manual Verification Checklist on Android HU
+## 7. Manual Verification Checklist on Android HU
 
-When the script is running, verify the following interactive behaviors on the Head Unit:
+When replaying dumps or streaming CAN logs, verify the following interactive behaviors on the Head Unit:
 
 - [ ] **UART Link Heartbeat:** The Head Unit should not display "CANBus Disconnected" or "No CAN Box".
-- [ ] **Lighting / Dimmer:** Status bar headlights icon toggles, backlight dims when headlights are active.
-- [ ] **Door Popup:** Opening a door in the CAN log displays the door overlay vehicle graphic.
-- [ ] **Climate / HVAC Popup:** Temperature, fan speed, dual-zone AC, and defrost indicators reflect CAN state.
-- [ ] **Steering Wheel Key Controls:** Volume Up/Down, Mode, Mute, Next/Prev track respond on the HU.
-- [ ] **Trip & Telemetry:** Speed (km/h) and RPM indicators on the HU dashboard app move according to playback.
-- [ ] **Parking Radar / Distance Bars:** Proximity sensors show colored distance bars on the reverse / radar screen.
+- [ ] **Trip Computer Screen (`0x34` / `0x35`):** Displays Average Fuel Consumption (7.3 L/100km), Average Speed (37 km/h), and Trip Distance (56.9 km).
+- [ ] **Trip Reset Animations:** Fuel/Speed display `--.-` followed by all fields clearing (`---`) upon trip reset.
+- [ ] **Ambient Temperature (`0x36`):** Status bar displays outside temperature (~$5^\circ\text{C}$).
+- [ ] **Lighting / Dimmer (`0x38`):** DRL icon, Adaptive Headlights, and interior mood lighting update.
+- [ ] **Vehicle Settings & BSI Menu (`0x7D`):** Options in the Car Settings application reflect the vehicle configuration.
+- [ ] **Steering Wheel Key Controls (`0x01` / `0x02`):** Volume Up/Down, Mode, Mute, Next/Prev track respond on the HU.
 
 ---
 
-## 7. Troubleshooting & Diagnostics
+## 8. Troubleshooting & Diagnostics
 
-### 7.1 "Permission Denied" on `/dev/ttyUSB0`
+### 8.1 "Permission Denied" on `/dev/ttyUSB0`
 If your user does not have permission to access the serial port:
 ```bash
 sudo usermod -aG dialout $USER
 sudo chmod 666 /dev/ttyUSB0
 ```
 
-### 7.2 Monitor Raw UART Data Sent to HU
+### 8.2 Monitor Raw UART Data Sent to HU
 To observe the exact binary packets being transmitted to the Head Unit in real time:
 ```bash
 # Using hexdump to inspect raw UART stream from a second terminal
 sudo minicom -D /dev/ttyUSB0 -b 38400 -H
 ```
 
-### 7.3 Monitor CAN Messages on `vcan0`
+### 8.3 Monitor CAN Messages on `vcan0`
 To inspect the CAN stream generated by the replayer:
 ```bash
 candump vcan0
 ```
 
-### 7.4 Resetting the Virtual CAN Interface
+### 8.4 Resetting the Virtual CAN Interface
 If `vcan0` gets into a bad state:
 ```bash
 sudo ip link delete vcan0 type vcan
 sudo ip link add dev vcan0 type vcan
 sudo ip link set up vcan0
 ```
+
 

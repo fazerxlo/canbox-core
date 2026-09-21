@@ -4,11 +4,13 @@
 
 void setUp_raise(void);
 void setUp_hiworld(void);
+void setUp_bagoo(void);
 void setUp_peugeot_407(void);
 
 void setUp(void) {
     setUp_raise();
     setUp_hiworld();
+    setUp_bagoo();
     setUp_peugeot_407();
 }
 
@@ -25,6 +27,13 @@ void test_raise_ignore_preceding_noise(void);
 void test_raise_resync_on_invalid_length(void);
 void test_raise_car_mapping_lookup(void);
 void test_raise_parse_car_model_select_packet(void);
+
+// Bagoo protocol test declarations
+void test_bagoo_serialize_valid_packet(void);
+void test_bagoo_serialize_buffer_too_small(void);
+void test_bagoo_parse_valid_dump_frames(void);
+void test_bagoo_reject_corrupted_checksum(void);
+void test_bagoo_ignore_preceding_noise(void);
 
 // Peugeot 407 SPEC_01 test declarations
 void test_peugeot_407_stalk_buttons_press_and_release(void);
@@ -66,10 +75,11 @@ void test_hu_protocol_driver_switching(void) {
     TEST_ASSERT_TRUE(hu_protocol_set_active(HU_PROTOCOL_HIWORLD));
     TEST_ASSERT_EQUAL_STRING("Hiworld", hu_protocol_get_active()->name);
 
+    TEST_ASSERT_TRUE(hu_protocol_set_active(HU_PROTOCOL_BAGOO));
+    TEST_ASSERT_EQUAL_STRING("Bagoo", hu_protocol_get_active()->name);
+
     // Invalid protocol ID
     TEST_ASSERT_FALSE(hu_protocol_set_active(HU_PROTOCOL_COUNT));
-    // Unimplemented Bagoo
-    TEST_ASSERT_FALSE(hu_protocol_set_active(HU_PROTOCOL_BAGOO));
 
     // Reset back to Raise for default
     TEST_ASSERT_TRUE(hu_protocol_set_active(HU_PROTOCOL_RAISE));
@@ -91,6 +101,13 @@ int main(void) {
     RUN_TEST(test_raise_resync_on_invalid_length);
     RUN_TEST(test_raise_car_mapping_lookup);
     RUN_TEST(test_raise_parse_car_model_select_packet);
+
+    // Bagoo Protocol Unit Tests
+    RUN_TEST(test_bagoo_serialize_valid_packet);
+    RUN_TEST(test_bagoo_serialize_buffer_too_small);
+    RUN_TEST(test_bagoo_parse_valid_dump_frames);
+    RUN_TEST(test_bagoo_reject_corrupted_checksum);
+    RUN_TEST(test_bagoo_ignore_preceding_noise);
 
     // Peugeot 407 SPEC_01 Unit Tests & Verification Vectors
     RUN_TEST(test_peugeot_407_stalk_buttons_press_and_release);

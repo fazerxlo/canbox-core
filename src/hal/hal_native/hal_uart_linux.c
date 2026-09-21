@@ -34,6 +34,15 @@ hal_status_t hal_uart_init(uart_baudrate_t baudrate) {
         s_master_fd = -1;
     }
 
+    const char *baud_env = getenv("CANBOX_UART_BAUD");
+    if (baud_env && baud_env[0] != '\0') {
+        int b = atoi(baud_env);
+        if (b == 9600) baudrate = UART_BAUD_9600;
+        else if (b == 19200) baudrate = UART_BAUD_19200;
+        else if (b == 38400) baudrate = UART_BAUD_38400;
+        else if (b == 115200) baudrate = UART_BAUD_115200;
+    }
+
     const char *uart_dev = getenv("CANBOX_UART_DEVICE");
     if (uart_dev && uart_dev[0] != '\0') {
         s_master_fd = open(uart_dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
