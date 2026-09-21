@@ -18,12 +18,57 @@
 
 static int s_master_fd = -1;
 
-hal_status_t hal_uart_init(uart_baudrate_t baudrate) {
-    (void)baudrate; // Ignored for virtual pseudo-terminals
+static speed_t baudrate_to_speed(uart_baudrate_t baudrate) {
+    switch (baudrate) {
+        case UART_BAUD_9600:   return B9600;
+        case UART_BAUD_19200:  return B19200;
+        case UART_BAUD_38400:  return B38400;
+        case UART_BAUD_115200: return B115200;
+        default:               return B38400;
+    }
+}
 
+hal_status_t hal_uart_init(uart_baudrate_t baudrate) {
     if (s_master_fd >= 0) {
         close(s_master_fd);
         s_master_fd = -1;
+    }
+
+    const char *uart_dev = getenv("CANBOX_UART_DEVICE");
+    if (uart_dev && uart_dev[0] != '\0') {
+        s_master_fd = open(uart_dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
+        if (s_master_fd < 0) {
+            perror("[UART] Failed to open physical serial device");
+            return HAL_STATUS_ERROR;
+        }
+
+        struct termios tty;
+        if (tcgetattr(s_master_fd, &tty) != 0) {
+            perror("[UART] tcgetattr failed");
+            close(s_master_fd);
+            s_master_fd = -1;
+            return HAL_STATUS_ERROR;
+        }
+
+        cfmakeraw(&tty);
+        speed_t speed = baudrate_to_speed(baudrate);
+        cfsetispeed(&tty, speed);
+        cfsetospeed(&tty, speed);
+
+        tty.c_cflag |= (CLOCAL | CREAD);
+        tty.c_cflag &= ~CSTOPB;
+        tty.c_cflag &= ~CRTSCTS;
+        tty.c_cflag &= ~PARENB;
+
+        if (tcsetattr(s_master_fd, TCSANOW, &tty) != 0) {
+            perror("[UART] tcsetattr failed");
+            close(s_master_fd);
+            s_master_fd = -1;
+            return HAL_STATUS_ERROR;
+        }
+
+        printf("[UART] Physical serial device opened: %s (Baud: %d)\n", uart_dev, (int)baudrate);
+        return HAL_STATUS_OK;
     }
 
     char slave_name[64];

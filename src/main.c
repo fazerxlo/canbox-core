@@ -15,14 +15,17 @@ int main(void) {
     uint32_t last_heartbeat = 0;
 
     while (1) {
+        bool activity = false;
         can_frame_t rx_can_frame;
         if (hal_can_receive(&rx_can_frame) == HAL_STATUS_OK) {
             can_router_process_can(&rx_can_frame);
+            activity = true;
         }
 
         uint8_t uart_byte;
         while (hal_uart_read_byte(&uart_byte) == HAL_STATUS_OK) {
             can_router_process_uart_byte(uart_byte);
+            activity = true;
         }
 
         uint32_t now = hal_get_tick_ms();
@@ -30,7 +33,16 @@ int main(void) {
             last_heartbeat = now;
             can_router_periodic_100ms();
             hal_gpio_toggle(GPIO_PIN_LED_STATUS);
+            activity = true;
         }
+
+#if defined(PLATFORM_LINUX)
+        if (!activity) {
+            hal_delay_ms(1);
+        }
+#else
+        (void)activity;
+#endif
     }
 
     return 0;

@@ -15,6 +15,7 @@
 #include <net/if.h>
 #include <linux/can.h>
 #include <linux/can/raw.h>
+#include <stdlib.h>
 
 #define CAN_INTERFACE_NAME "vcan0"
 
@@ -23,6 +24,11 @@ static int s_can_fd = -1;
 hal_status_t hal_can_init(can_baudrate_t baudrate) {
     (void)baudrate; // Baudrate is determined by the virtual link setup on Linux host
 
+    const char *iface = getenv("CANBOX_CAN_IFACE");
+    if (!iface || iface[0] == '\0') {
+        iface = CAN_INTERFACE_NAME;
+    }
+
     s_can_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (s_can_fd < 0) {
         perror("[CAN] Socket creation failed");
@@ -30,14 +36,14 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     }
 
     struct ifreq ifr;
-    strncpy(ifr.ifr_name, CAN_INTERFACE_NAME, IFNAMSIZ - 1);
+    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
     ifr.ifr_name[IFNAMSIZ - 1] = '\0';
 
     if (ioctl(s_can_fd, SIOCGIFINDEX, &ifr) < 0) {
         fprintf(stderr, "[CAN] Interface %s not found. Run:\n"
                         "  sudo ip link add dev %s type vcan\n"
                         "  sudo ip link set up %s\n",
-                CAN_INTERFACE_NAME, CAN_INTERFACE_NAME, CAN_INTERFACE_NAME);
+                iface, iface, iface);
         close(s_can_fd);
         s_can_fd = -1;
         return HAL_STATUS_ERROR;
@@ -64,7 +70,7 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
         return HAL_STATUS_ERROR;
     }
 
-    printf("[CAN] Initialized on %s\n", CAN_INTERFACE_NAME);
+    printf("[CAN] Initialized on %s\n", iface);
     return HAL_STATUS_OK;
 }
 
