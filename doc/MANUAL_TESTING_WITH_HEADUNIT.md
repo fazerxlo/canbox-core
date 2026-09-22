@@ -17,9 +17,9 @@ Connect the USB dongle to the CANBox / Protocol connector on the back of your An
 |      Laptop / Linux       |                    |     Android Head Unit     |
 |   (USB Serial Adapter)    |                    |    (CANBox / UART Port)   |
 |                           |                    |                           |
-|       GND [Pin] ----------+--------------------+---------- GND [Pin]       |
-|       TXD [Pin] ---------\ /-------------------+---------- RXD [Pin]       |
-|       RXD [Pin] ----------X--------------------+---------- TXD [Pin]       |
+|       GND [Pin4] ----------+--------------------+------ GND [Pin]          |
+|       TXD [Pin2] ---------\ /-------------------+------ RXD [Pin Violet]   |
+|       RXD [Pin3] ----------X--------------------+------ TXD [Pin Green ]   |
 +---------------------------+ \                  +---------------------------+
                                \
                                 +---------------- 12V Power & ACC (to bench PSU)
@@ -72,7 +72,7 @@ Before sending data, ensure your Head Unit is configured to listen for the simul
 
 ## 4. Running the Automated Python Test Harness
 
-The Python runner [`tools/canbox_manual_test.py`](file:///home/Fazer/git/canbox-core/tools/canbox_manual_test.py) manages the complete test lifecycle:
+The Python runner [`tools/canbox_manual_test.py`](file://tools/canbox_manual_test.py) manages the complete test lifecycle:
 * Sets up the virtual CAN interface (`vcan0`).
 * Detects your USB serial dongle (e.g., `/dev/ttyUSB0`).
 * Launches the OpenCanbox Core application in native mode.
@@ -123,7 +123,7 @@ python3 tools/canbox_manual_test.py \
 
 ## 5. Direct Serial Packet Replay (`tools/replay_serial.py`)
 
-If you want to test the Head Unit's reaction directly to recorded CANBox serial packets without running the full CAN translator / simulator on `vcan0`, use [`tools/replay_serial.py`](file:///home/Fazer/git/canbox-core/tools/replay_serial.py).
+If you want to test the Head Unit's reaction directly to recorded CANBox serial packets without running the full CAN translator / simulator on `vcan0`, use [`tools/replay_serial.py`](file://tools/replay_serial.py).
 
 This tool streams raw binary (`.bin`) or hex-dumped text (`.txt`) serial packets directly over USB-UART to the Head Unit's MCU, automatically parsing individual frames (using `0xFD` / `0x2E` headers) and pacing transmissions with configurable inter-packet delays.
 
@@ -159,7 +159,7 @@ python3 tools/replay_serial.py test_data/dump.txt --loop
 
 ## 6. Available Test Scenario CAN Logs
 
-The following pre-recorded CAN captures are available in [`test/test_integration/data/`](file:///home/Fazer/git/canbox-core/test/test_integration/data/):
+The following pre-recorded CAN captures are available in [`test/test_integration/data/`](file://test/test_integration/data/):
 
 ### Scenario 1: Lights Off $\to$ Side Lights $\to$ Headlights
 * **File:** `test/test_integration/data/lights_off_side_light_on_headlights_on.csv`
