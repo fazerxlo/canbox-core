@@ -114,29 +114,31 @@ def ensure_app_built():
 
 
 class CanCsvReader:
-    """Reads and parses the project standard 14-column CAN capture CSV."""
+    """Reads and parses standard 14-column and generic CAN capture CSV files."""
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, time_unit="auto"):
         self.filepath = filepath
+        self.time_unit = time_unit.lower()
         self.frames = []
+        self.detected_unit = "us"
         self._load()
 
     def _load(self):
         if not os.path.isfile(self.filepath):
             raise FileNotFoundError(f"CAN log CSV file not found: {self.filepath}")
 
+        raw_entries = []
         with open(self.filepath, "r", encoding="utf-8", errors="ignore") as f:
             reader = csv.reader(f)
-            header = next(reader, None)
-
             for row in reader:
                 if not row or len(row) < 7:
                     continue
+                # Clean timestamp string
+                raw_ts_str = row[0].strip().lstrip("(").rstrip(")")
                 try:
-                    ts_us = int(row[0].strip())
+                    raw_ts = float(raw_ts_str)
                     can_id = int(row[1].strip(), 16)
                     is_extended = row[2].strip().lower() in ("true", "1")
-                    # Dir=row[3], Bus=row[4]
                     dlc = int(row[5].strip())
                     dlc = min(max(dlc, 0), 8)
                     data = []
@@ -144,8 +146,8 @@ class CanCsvReader:
                         byte_str = row[6 + i].strip()
                         data.append(int(byte_str, 16) if byte_str else 0)
 
-                    self.frames.append({
-                        "ts_us": ts_us,
+                    raw_entries.append({
+                        "raw_ts": raw_ts,
                         "can_id": can_id,
                         "is_extended": is_extended,
                         "data": data,
@@ -153,10 +155,70 @@ class CanCsvReader:
                 except (ValueError, IndexError):
                     continue
 
-        if not self.frames:
+        if not raw_entries:
             raise ValueError(f"No valid CAN frames found in CSV: {self.filepath}")
 
+        # Determine time scale multiplier to convert to microseconds
+        multiplier = 1.0
+        if self.time_unit == "auto":
+            # Auto-detect based on timestamp span and consecutive deltas
+            min_ts = raw_entries[0]["raw_ts"]
+            max_ts = raw_entries[-1]["raw_ts"]
+            span = abs(max_ts - min_ts)
+            
+            deltas = []
+            for i in range(1, min(len(raw_entries), 50)):
+                d = raw_entries[i]["raw_ts"] - raw_entries[i-1]["raw_ts"]
+                if d > 0:
+                    deltas.append(d)
+            avg_delta = (sum(deltas) / len(deltas)) if deltas else 0
+
+            # Classification heuristics
+            if "." in str(raw_entries[0]["raw_ts"]) and span < 5000:
+                # Floating point with small span -> Seconds
+                self.detected_unit = "s"
+                multiplier = 1_000_000.0
+            elif avg_delta > 0 and avg_delta < 0.5:
+                # Sub-second consecutive deltas -> Seconds
+                self.detected_unit = "s"
+                multiplier = 1_000_000.0
+            elif span >= 1_000_000_000_000 or (avg_delta >= 500_000 and span > 10_000_000_000):
+                # Nanoseconds
+                self.detected_unit = "ns"
+                multiplier = 0.001
+            elif span < 100_000 and (avg_delta == 0 or avg_delta < 500):
+                # Milliseconds
+                self.detected_unit = "ms"
+                multiplier = 1_000.0
+            else:
+                # Default Microseconds
+                self.detected_unit = "us"
+                multiplier = 1.0
+        elif self.time_unit == "s":
+            self.detected_unit = "s"
+            multiplier = 1_000_000.0
+        elif self.time_unit == "ms":
+            self.detected_unit = "ms"
+            multiplier = 1_000.0
+        elif self.time_unit == "ns":
+            self.detected_unit = "ns"
+            multiplier = 0.001
+        else:
+            self.detected_unit = "us"
+            multiplier = 1.0
+
+        for entry in raw_entries:
+            ts_us = int(entry["raw_ts"] * multiplier)
+            self.frames.append({
+                "ts_us": ts_us,
+                "can_id": entry["can_id"],
+                "is_extended": entry["is_extended"],
+                "data": entry["data"],
+            })
+
+        total_dur_s = (self.frames[-1]["ts_us"] - self.frames[0]["ts_us"]) / 1_000_000.0
         print(f"[OK] Loaded {len(self.frames)} CAN frames from {os.path.basename(self.filepath)}")
+        print(f"     Timestamp unit: {self.detected_unit.upper()} | Total scenario duration: {total_dur_s:.2f}s")
 
 
 def replay_can_loop(
@@ -167,7 +229,7 @@ def replay_can_loop(
     inter_loop_delay=0.5,
     stop_event_check=None,
 ):
-    """Streams CAN frames sequentially over Linux SocketCAN respecting timestamps."""
+    """Streams CAN frames sequentially over Linux SocketCAN respecting real timestamps."""
     can_socket = socket.socket(socket.AF_CAN, socket.SOCK_RAW, CAN_RAW)
     try:
         can_socket.bind((iface,))
@@ -178,8 +240,9 @@ def replay_can_loop(
     loop_count = 0
     total_sent = 0
     start_time = time.time()
+    total_log_duration_s = (frames[-1]["ts_us"] - frames[0]["ts_us"]) / 1_000_000.0
 
-    print(f"[*] Starting CAN log playback on interface '{iface}' (Speed: {speed}x)...")
+    print(f"[*] Starting CAN log playback on interface '{iface}' (Speed: {speed}x, Duration: {total_log_duration_s:.2f}s)...")
 
     try:
         while True:
@@ -187,7 +250,7 @@ def replay_can_loop(
             loop_start_sim_us = frames[0]["ts_us"]
             loop_start_real = time.perf_counter()
 
-            for frame in frames:
+            for idx, frame in enumerate(frames):
                 if stop_event_check and stop_event_check():
                     return
 
@@ -196,8 +259,13 @@ def replay_can_loop(
                 real_delta_s = time.perf_counter() - loop_start_real
                 sleep_needed = sim_delta_s - real_delta_s
 
-                if sleep_needed > 0.0005:
-                    time.sleep(sleep_needed)
+                # Coarse sleep for larger intervals to yield CPU
+                if sleep_needed > 0.002:
+                    time.sleep(sleep_needed - 0.001)
+
+                # High-precision busy spin for sub-millisecond accuracy
+                while (time.perf_counter() - loop_start_real) < sim_delta_s:
+                    pass
 
                 raw_frame = parse_can_frame(
                     frame["can_id"],
@@ -210,17 +278,19 @@ def replay_can_loop(
                 except OSError as e:
                     print(f"[WARN] CAN send error: {e}")
 
-            elapsed = time.time() - start_time
-            rate = total_sent / max(elapsed, 0.001)
-            print(
-                f"\r[CAN Replay] Loop #{loop_count} complete | Total Frames: {total_sent} | "
-                f"Rate: {rate:.1f} fps | Elapsed: {elapsed:.1f}s",
-                end="",
-                flush=True,
-            )
+                # Progress display every ~50 frames or on last frame
+                if (idx % 50 == 0) or (idx == len(frames) - 1):
+                    cur_sim_s = (frame["ts_us"] - loop_start_sim_us) / 1_000_000.0
+                    print(
+                        f"\r[CAN Replay] Loop #{loop_count} | Frame {idx + 1}/{len(frames)} | "
+                        f"Sim Time: {cur_sim_s:5.2f}s / {total_log_duration_s:5.2f}s | "
+                        f"Total Sent: {total_sent}",
+                        end="",
+                        flush=True,
+                    )
 
             if not loop:
-                print("\n[OK] Single pass replay finished.")
+                print(f"\n[OK] Single pass replay finished ({len(frames)} frames in {time.perf_counter() - loop_start_real:.2f}s).")
                 break
 
             if inter_loop_delay > 0:
@@ -239,6 +309,13 @@ def main():
         "-c",
         default=DEFAULT_LOG_PATH,
         help=f"Path to CAN log CSV file (default: {os.path.basename(DEFAULT_LOG_PATH)})",
+    )
+    parser.add_argument(
+        "--time-unit",
+        "-u",
+        choices=["auto", "us", "ms", "s", "ns"],
+        default="auto",
+        help="Timestamp unit in CSV file (default: auto)",
     )
     parser.add_argument(
         "--serial-port",
@@ -346,7 +423,7 @@ def main():
 
     # 4. Load CSV CAN Log
     try:
-        reader = CanCsvReader(args.csv)
+        reader = CanCsvReader(args.csv, time_unit=args.time_unit)
     except Exception as e:
         print(f"[ERROR] {e}")
         if app_process:

@@ -111,7 +111,9 @@ python3 tools/canbox_manual_test.py \
 |:---|:---|:---|:---|
 | `--serial-port` | `-p` | Auto-detect | Path to USB serial device (e.g. `/dev/ttyUSB0`, `/dev/ttyACM0`) |
 | `--csv` | `-c` | `lights_off_...csv` | Path to 14-column CAN log CSV capture |
-| `--baudrate` | `-b` | `38400` | UART Baud rate (Raise protocol uses 38400) |
+| `--time-unit` | `-u` | `auto` | Timestamp unit (`auto`, `us`, `ms`, `s`, `ns`) |
+| `--protocol` | `-P` | `bagoo` | HU protocol driver (`bagoo`, `raise`, `hiworld`) |
+| `--baudrate` | `-b` | `19200` | UART Baud rate (default `19200` for Bagoo/Raise Peugeot) |
 | `--iface` | `-i` | `vcan0` | CAN interface name |
 | `--speed` | `-s` | `1.0` | Replay speed multiplier (e.g. `2.0` = 2x speed) |
 | `--no-loop` | | `False` | Play log once and stop (omit to loop infinitely) |
