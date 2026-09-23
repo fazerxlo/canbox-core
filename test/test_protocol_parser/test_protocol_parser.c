@@ -66,6 +66,12 @@ void test_hiworld_serialize_valid_packet(void);
 void test_hiworld_parse_valid_stream(void);
 void test_hiworld_reject_bad_checksum(void);
 void test_hiworld_resync_after_false_sync1(void);
+void test_hiworld_verification_vector_1_car_type_set(void);
+void test_hiworld_verification_vector_2_version_report(void);
+void test_hiworld_verification_vector_3_feature_enables(void);
+void test_hiworld_verification_vector_4_gps_time_sync(void);
+void test_hiworld_connection_periodic_ping(void);
+void test_hiworld_car_mapping_lookup(void);
 
 // Driver manager tests
 void test_hu_protocol_driver_switching(void) {
@@ -140,6 +146,12 @@ int main(void) {
     RUN_TEST(test_hiworld_parse_valid_stream);
     RUN_TEST(test_hiworld_reject_bad_checksum);
     RUN_TEST(test_hiworld_resync_after_false_sync1);
+    RUN_TEST(test_hiworld_verification_vector_1_car_type_set);
+    RUN_TEST(test_hiworld_verification_vector_2_version_report);
+    RUN_TEST(test_hiworld_verification_vector_3_feature_enables);
+    RUN_TEST(test_hiworld_verification_vector_4_gps_time_sync);
+    RUN_TEST(test_hiworld_connection_periodic_ping);
+    RUN_TEST(test_hiworld_car_mapping_lookup);
 
     return UNITY_END();
 }

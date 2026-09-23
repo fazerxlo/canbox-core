@@ -12,23 +12,23 @@ typedef enum {
 
 static hiworld_parser_state_t s_state = HW_STATE_WAIT_SYNC1;
 static hiworld_packet_t       s_rx_packet;
-static uint8_t                s_frame_len = 0; // Length field (Cmd + Payload)
+static uint8_t                s_payload_len = 0;
 static uint8_t                s_payload_idx = 0;
 static uint8_t                s_running_sum = 0;
 static hiworld_rx_callback_t  s_rx_callback = NULL;
 
-static inline uint8_t calc_checksum(uint8_t len_field, uint8_t cmd, const uint8_t *payload, uint8_t payload_len) {
-    uint8_t sum = len_field + cmd;
+static inline uint8_t calc_checksum(uint8_t payload_len, uint8_t cmd, const uint8_t *payload) {
+    uint8_t sum = (uint8_t)(payload_len + cmd);
     for (uint8_t i = 0; i < payload_len; i++) {
-        sum += payload[i];
+        sum = (uint8_t)(sum + payload[i]);
     }
-    return sum;
+    return (uint8_t)((sum - 1) & 0xFF);
 }
 
 void proto_hiworld_init(hiworld_rx_callback_t rx_cb) {
     s_rx_callback = rx_cb;
     s_state = HW_STATE_WAIT_SYNC1;
-    s_frame_len = 0;
+    s_payload_len = 0;
     s_payload_idx = 0;
     s_running_sum = 0;
     memset(&s_rx_packet, 0, sizeof(s_rx_packet));
@@ -51,14 +51,12 @@ void proto_hiworld_feed_byte(uint8_t byte) {
             break;
 
         case HW_STATE_WAIT_LEN:
-            // Minimum valid length is 1 (Command ID itself)
-            // Maximum length is 1 + HIWORLD_MAX_PAYLOAD_LEN
-            if (byte == 0 || byte > (HIWORLD_MAX_PAYLOAD_LEN + 1)) {
+            if (byte > HIWORLD_MAX_PAYLOAD_LEN) {
                 s_state = (byte == HIWORLD_SYNC_1) ? HW_STATE_WAIT_SYNC2 : HW_STATE_WAIT_SYNC1;
                 break;
             }
-            s_frame_len = byte;
-            s_rx_packet.payload_len = byte - 1;
+            s_payload_len = byte;
+            s_rx_packet.payload_len = byte;
             s_running_sum = byte;
             s_payload_idx = 0;
             s_state = HW_STATE_WAIT_CMD;
@@ -66,7 +64,7 @@ void proto_hiworld_feed_byte(uint8_t byte) {
 
         case HW_STATE_WAIT_CMD:
             s_rx_packet.cmd = byte;
-            s_running_sum += byte;
+            s_running_sum = (uint8_t)(s_running_sum + byte);
 
             if (s_rx_packet.payload_len == 0) {
                 s_state = HW_STATE_WAIT_CHECKSUM;
@@ -77,15 +75,16 @@ void proto_hiworld_feed_byte(uint8_t byte) {
 
         case HW_STATE_WAIT_PAYLOAD:
             s_rx_packet.payload[s_payload_idx++] = byte;
-            s_running_sum += byte;
+            s_running_sum = (uint8_t)(s_running_sum + byte);
 
             if (s_payload_idx >= s_rx_packet.payload_len) {
                 s_state = HW_STATE_WAIT_CHECKSUM;
             }
             break;
 
-        case HW_STATE_WAIT_CHECKSUM:
-            if (byte == s_running_sum) {
+        case HW_STATE_WAIT_CHECKSUM: {
+            uint8_t expected_cs = (uint8_t)((s_running_sum - 1) & 0xFF);
+            if (byte == expected_cs) {
                 if (s_rx_callback) {
                     s_rx_callback(&s_rx_packet);
                 }
@@ -95,6 +94,7 @@ void proto_hiworld_feed_byte(uint8_t byte) {
                 s_state = (byte == HIWORLD_SYNC_1) ? HW_STATE_WAIT_SYNC2 : HW_STATE_WAIT_SYNC1;
             }
             break;
+        }
 
         default:
             s_state = HW_STATE_WAIT_SYNC1;
@@ -108,8 +108,7 @@ size_t proto_hiworld_serialize(uint8_t cmd, const uint8_t *payload, uint8_t payl
         return 0;
     }
 
-    uint8_t len_field = payload_len + 1; // cmd + payload length
-    size_t total_size = 2 + 1 + 1 + (size_t)payload_len + 1; // Sync(2) + Len(1) + Cmd(1) + Data(N) + CS(1)
+    size_t total_size = (size_t)(payload_len + 5); // Sync(2) + Len(1) + Cmd(1) + Data(N) + CS(1)
 
     if (max_out < total_size) {
         return 0;
@@ -117,14 +116,14 @@ size_t proto_hiworld_serialize(uint8_t cmd, const uint8_t *payload, uint8_t payl
 
     out_buf[0] = HIWORLD_SYNC_1;
     out_buf[1] = HIWORLD_SYNC_2;
-    out_buf[2] = len_field;
+    out_buf[2] = payload_len;
     out_buf[3] = cmd;
 
     if (payload_len > 0 && payload != NULL) {
         memcpy(&out_buf[4], payload, payload_len);
     }
 
-    out_buf[4 + payload_len] = calc_checksum(len_field, cmd, payload, payload_len);
+    out_buf[4 + payload_len] = calc_checksum(payload_len, cmd, payload);
 
     return total_size;
 }

@@ -84,7 +84,7 @@ canbox-core/
 │       └── hal_nuc131/          # Nuvoton NUC131 Bosch C_CAN drivers
 └── test/
     ├── test_protocol_parser/    # Unity tests for parser & checksum verification
-    └── test_integration/        # Unity tests for CAN-to-UART pipeline
+    └── test_integration/        # Unity tests for multi-driver CAN-to-UART pipeline & scenarios
 
 ```
 
@@ -171,7 +171,7 @@ The test suite runs natively on Linux via the Unity framework:
 # Run protocol parser and checksum unit tests
 pio test -e native_test_runner
 
-# Run end-to-end CAN-to-UART integration and CAN log scenario tests
+# Run end-to-end multi-driver CAN-to-UART integration and CAN log scenario tests
 pio test -e integration_test
 ```
 

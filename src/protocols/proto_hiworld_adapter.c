@@ -1,31 +1,51 @@
 #include "protocols/hu_protocol.h"
 #include "protocols/hu_protocol_driver.h"
+#include "protocols/hiworld_connection.h"
+#include "protocols/hiworld_car_mapping.h"
 #include "proto_hiworld.h"
 #include "hal/hal_uart.h"
-
+#include "hal/hal_can.h"
 #include <stdbool.h>
 
+static hiworld_connection_ctx_t s_hw_conn_ctx;
+static bool s_hiworld_initialized = false;
+
+static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
+    (void)car_model_id;
+    can_baudrate_t baud = CAN_BAUD_125K;
+    if (baud_rate == 500000) {
+        baud = CAN_BAUD_500K;
+    } else if (baud_rate == 250000) {
+        baud = CAN_BAUD_250K;
+    }
+    hal_can_init(baud);
+}
+
 static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
-    // Android head unit control messages (e.g. HU settings sync)
     (void)packet;
 }
 
-static bool s_hiworld_initialized = false;
+static void uart_tx_adapter(const uint8_t *buf, size_t len) {
+    hal_uart_write(buf, len);
+}
 
 static void ensure_hiworld_initialized(void) {
     if (!s_hiworld_initialized) {
         proto_hiworld_init(on_hiworld_packet_received);
+        hiworld_conn_init(&s_hw_conn_ctx, "HW_PSA_V2.04.01", uart_tx_adapter, on_can_config_callback);
         s_hiworld_initialized = true;
     }
 }
 
 static void hiworld_init(void) {
     proto_hiworld_init(on_hiworld_packet_received);
+    hiworld_conn_init(&s_hw_conn_ctx, "HW_PSA_V2.04.01", uart_tx_adapter, on_can_config_callback);
     s_hiworld_initialized = true;
 }
 
 static void hiworld_feed_byte(uint8_t byte) {
     ensure_hiworld_initialized();
+    hiworld_conn_process_rx_byte(&s_hw_conn_ctx, byte);
     proto_hiworld_feed_byte(byte);
 }
 
@@ -45,13 +65,13 @@ static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
         default:                     hw_key_code = 0x00; break;
     }
 
-    // Hiworld Key Payload: [Key Code, Press Status (1 = pressed, 0 = released)]
+    /* Hiworld Key Payload: [Key Code, Press Status (1 = pressed, 0 = released)] */
     uint8_t payload[2];
     payload[0] = hw_key_code;
     payload[1] = wheel->press_state;
 
     uint8_t tx_buf[16];
-    size_t len = proto_hiworld_serialize(HIWORLD_CMD_WHEEL_KEY, payload, sizeof(payload), 
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_BASE_INFO, payload, sizeof(payload), 
                                          tx_buf, sizeof(tx_buf));
     if (len > 0) {
         hal_uart_write(tx_buf, len);
@@ -59,8 +79,8 @@ static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
 }
 
 static void hiworld_send_doors(const vehicle_doors_t *doors) {
-    // Hiworld Door Status (Cmd 0x21)
-    // Payload byte 0: bit0: Dvr, bit1: Pas, bit2: RL, bit3: RR, bit4: Trunk, bit5: Hood
+    /* Hiworld Door Status (Cmd 0x12) */
+    /* Payload byte 0: bit0: Dvr, bit1: Pas, bit2: RL, bit3: RR, bit4: Trunk, bit5: Hood */
     uint8_t d_byte = 0;
     if (doors->door_driver)     d_byte |= (1 << 0);
     if (doors->door_passenger)  d_byte |= (1 << 1);
@@ -71,7 +91,7 @@ static void hiworld_send_doors(const vehicle_doors_t *doors) {
 
     uint8_t payload[1] = { d_byte };
     uint8_t tx_buf[16];
-    size_t len = proto_hiworld_serialize(HIWORLD_CMD_DOOR_STATUS, payload, sizeof(payload), 
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_DOOR_WINDOW_STATE, payload, sizeof(payload), 
                                          tx_buf, sizeof(tx_buf));
     if (len > 0) {
         hal_uart_write(tx_buf, len);
@@ -79,13 +99,13 @@ static void hiworld_send_doors(const vehicle_doors_t *doors) {
 }
 
 static void hiworld_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) {
-    // Hiworld Steering Angle (Cmd 0x26): 2 bytes signed Little-Endian
+    /* Hiworld Steering Angle (Cmd 0x11): 2 bytes signed Little-Endian */
     uint8_t angle_payload[2];
     angle_payload[0] = (uint8_t)(angle & 0xFF);
     angle_payload[1] = (uint8_t)((angle >> 8) & 0xFF);
 
     uint8_t tx_buf[16];
-    size_t len = proto_hiworld_serialize(HIWORLD_CMD_TRACK_ANGLE, angle_payload, sizeof(angle_payload), 
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_BASE_INFO, angle_payload, sizeof(angle_payload), 
                                          tx_buf, sizeof(tx_buf));
     if (len > 0) {
         hal_uart_write(tx_buf, len);

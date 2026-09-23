@@ -23,7 +23,8 @@ static inline bool validate_checksum(canbox_dialect_t dialect, uint8_t running_s
             return expected == rx_cs;
 
         case CANBOX_DIALECT_HIWORLD:
-            return running_sum == rx_cs;
+            expected = (uint8_t)((running_sum - 1) & 0xFF);
+            return expected == rx_cs;
 
         case CANBOX_DIALECT_BAGOO:
             return running_sum == rx_cs;
@@ -90,13 +91,13 @@ void canbox_parser_feed_byte(canbox_parser_t *parser, uint8_t byte) {
 
         case STATE_LEN:
             if (parser->dialect == CANBOX_DIALECT_HIWORLD) {
-                if (byte < 1 || byte > (CANBOX_MAX_PAYLOAD + 1)) {
-                    parser->state = STATE_SYNC_1;
+                if (byte > CANBOX_MAX_PAYLOAD) {
+                    parser->state = (byte == SYNC_HIWORLD_1) ? STATE_SYNC_2 : STATE_SYNC_1;
                     break;
                 }
                 parser->running_sum += byte;
-                parser->expected_len = byte - 1;
-                parser->rx_frame.len = parser->expected_len;
+                parser->expected_len = byte;
+                parser->rx_frame.len = byte;
                 parser->state = STATE_CMD;
             } else {
                 if (byte > CANBOX_MAX_PAYLOAD) {

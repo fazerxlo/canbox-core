@@ -1,6 +1,6 @@
-# Scenario-Based CAN Log Integration Testing
+# Multi-Driver Scenario-Based CAN Log Integration Testing
 
-This directory contains end-to-end integration tests that replay real-world automotive CAN bus captures against the **OpenCanbox Core** firmware pipeline and verify decoded vehicle state transitions and serial Head Unit (Raise / Hiworld) outputs.
+This directory contains end-to-end integration tests that run multiple Head Unit protocol drivers (**Raise**, **Hiworld**, **Bagoo**) in one unified test suite, replaying real-world automotive CAN bus captures against the **OpenCanbox Core** firmware pipeline and verifying decoded vehicle state transitions and serial Head Unit UART outputs.
 
 ---
 
@@ -23,7 +23,7 @@ Scenario tests replay recorded `.csv` CAN logs chronologically through the route
 |   +-----------------------------------------------------------------------------------------+   |
 |   |                                     CANBOX CORE                                         |   |
 |   |  - vehicle_profile (PSA, VAG, etc.) -> Decodes raw signals into vehicle_state_t         |   |
-|   |  - can_router -> Dispatches events to Head Unit protocol driver (Raise / Hiworld)       |   |
+|   |  - can_router -> Dispatches events to Head Unit protocol driver (Raise)                 |   |
 |   +-----------------------------------------------------------------------------------------+   |
 |                                             |                                                   |
 |                                             v                                                   |

@@ -13,18 +13,16 @@ extern "C" {
 #define HIWORLD_SYNC_2           0xA5
 #define HIWORLD_MAX_PAYLOAD_LEN  64
 
-// Common Hiworld Command IDs
+/* Common Hiworld Command IDs */
 #define HIWORLD_CMD_WHEEL_KEY    0x11
-#define HIWORLD_CMD_AIR_CON      0x12
-#define HIWORLD_CMD_DOOR_STATUS  0x21
-#define HIWORLD_CMD_RADAR_FRONT  0x22
-#define HIWORLD_CMD_RADAR_REAR   0x23
-#define HIWORLD_CMD_TRACK_ANGLE  0x26
+#define HIWORLD_CMD_DOORS        0x12
+#define HIWORLD_CMD_AIR_CON      0x31
+#define HIWORLD_CMD_RADAR        0x41
 #define HIWORLD_CMD_HEARTBEAT    0xFF
 
 typedef struct {
     uint8_t cmd;
-    uint8_t payload_len; // N = Length - 1
+    uint8_t payload_len; /* Pure payload length L */
     uint8_t payload[HIWORLD_MAX_PAYLOAD_LEN];
 } hiworld_packet_t;
 
