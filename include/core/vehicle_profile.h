@@ -34,6 +34,7 @@ typedef struct {
     void                     (*init)(void);
 } vehicle_profile_t;
 
+void vehicle_profile_init(void);
 bool vehicle_profile_set_active(vehicle_profile_id_t profile_id);
 const vehicle_profile_t *vehicle_profile_get_active(void);
 void vehicle_profile_process_frame(const can_frame_t *frame, vehicle_state_t *state);

@@ -4,33 +4,35 @@
 **Target Platform:** Pure C99 Embedded CAN Translator & Desktop Simulator  
 **Vehicle Network:** Peugeot 407 (PSA Comfort CAN Bus @ 125 kbps, 11-bit Standard ID)  
 **Primary Driver Protocol:** Hiworld (`0x5A 0xA5` sync header, additive sum checksum)  
-**Cross-Compatible Protocols:** Raise (RZC `0x2E`), Bagoo (`0xD5`/`0xFD`), Simple Soft (XP `0x2E`)
+**Cross-Compatible Protocols:** Raise (RZC `0x2E`), Bagoo (`0xD5`/`0xFD`), Simple Soft (XP `0x2E`)  
+**Cross-Referenced Ground Truth:** `signal-db/steering_wheel.yaml` (`Msg0C5`), `QF_Canbus.apk` (`PeugeotDataParser.java`)
 
 ---
 
 # 1. Functional Domain & Architecture Overview
 
-The Peugeot 407 Steering Column Control Module integrates an optical Steering Wheel Angle Sensor (SAS). The absolute steering wheel position is broadcast at high frequency (every 20 ms) over the PSA Comfort CAN bus on CAN ID `0x0E6`. 
+The Peugeot 407 Steering Column Control Module integrates an optical Steering Wheel Angle Sensor (SAS). The absolute steering wheel position is broadcast at high frequency (every 50 ms) over the PSA Comfort CAN bus on CAN ID **`0x0C5`**.
 
-When the vehicle is placed in reverse gear (detected on CAN ID `0x036`), the CAN box translates steering angle telemetry into headunit trajectory frames. The Android infotainment system uses this data to dynamically bend reverse camera parking guidelines in real time.
+*(Note: CAN ID `0x0E6` in PSA CAN2004 represents ABS wheel pulse counter ticks `MSG_IS_DAT_ABR` used for dead reckoning navigation, whereas `0x0C5` is the dedicated SAS angle frame).*
+
+When the vehicle is placed in reverse gear, the CAN box translates steering angle telemetry into headunit trajectory frames. The Android infotainment system uses this data to dynamically bend reverse camera parking guidelines in real time.
 
 ```
 +------------------------------------------------------------------------------------+
 |                         Peugeot 407 Steering Wheel Sensor (SAS)                    |
-|                [16-Bit Signed Angle Telemetry, Cycle Time: 20 ms]                  |
+|                [16-Bit Signed Angle Telemetry, Cycle Time: 50 ms]                  |
 +------------------------------------------------------------------------------------+
                                           │
-                                   [PSA CAN 0x0E6]
+                                   [PSA CAN 0x0C5]
                                           ▼
 +------------------------------------------------------------------------------------+
 |                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Captures fast 20 ms steering angle frames (CAN ID 0x0E6)                      |
-|   2. Interlocks angle reporting with Reverse Gear state (CAN ID 0x036)             |
-|   3. Converts 0.1 deg signed values into Headunit Vendor Endianness                |
-|   4. Dispatches Hiworld (Cmd 0x26, Big-Endian) / Raise (Cmd 0x29, Little-Endian)   |
+|   1. Captures fast 50 ms steering angle frames (CAN ID 0x0C5)                      |
+|   2. Interlocks angle reporting with Reverse Gear state                            |
+|   3. Dispatches Hiworld (Cmd 0x11, Bytes 6-7) / Raise (Cmd 0x29, Little-Endian)    |
 +------------------------------------------------------------------------------------+
                                           │
-                   [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
+                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
                                           ▼
 +------------------------------------------------------------------------------------+
 |                     Android Headunit Reverse Parking Application                   |
@@ -42,10 +44,11 @@ When the vehicle is placed in reverse gear (detected on CAN ID `0x036`), the CAN
 
 # 2. PSA CAN Bus Bitfield Specification
 
-### 2.1 PSA Steering Angle Frame (`0x0E6`)
-- **CAN ID:** `0x0E6` (Standard 11-bit Identifier)
-- **DLC:** 8 bytes (Bytes 0–1 active angle, Bytes 2–3 angular velocity, Bytes 4–7 status)
-- **Transmission Cycle:** Fast periodic 20 ms
+### 2.1 PSA Steering Angle Frame (`0x0C5`)
+- **CAN ID:** `0x0C5` (Standard 11-bit Identifier)
+- **DLC:** 4 bytes
+- **Transmission Cycle:** Periodic 50 ms
+- **Quiescent / Center Frame:** `00 00 00 00`
 
 ```
 +--------+--------+------------------------------------+-----------------------------+
@@ -55,12 +58,9 @@ When the vehicle is placed in reverse gear (detected on CAN ID `0x036`), the CAN
 +--------+--------+------------------------------------+-----------------------------+
 | Byte 1 | 7..0   | Steering Angle Low Byte (LSB)      | Signed 16-bit Big-Endian    |
 +--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | 7..0   | Steering Angular Velocity High Byte| Angular rate (deg/sec * 10) |
+| Byte 2 | 7..0   | Reserved Padding                   | Always 0x00                 |
 +--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | 7..0   | Steering Angular Velocity Low Byte | Angular rate (deg/sec * 10) |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | Bit 7  | SAS Calibration / Zero Point Valid | 1 = Valid, 0 = Uncalibrated |
-|        | Bit 0  | SAS Hardware Fault                 | 1 = Sensor Error            |
+| Byte 3 | 7..0   | Reserved Padding                   | Always 0x00                 |
 +--------+--------+------------------------------------+-----------------------------+
 ```
 
@@ -77,14 +77,19 @@ $$\text{SignedValue}_{16} = \text{Round}(\text{Angle}_{^\circ} \times 10.0)$$
 
 # 3. Headunit Serial Protocol Mappings
 
-### 3.1 Hiworld Steering Angle Telemetry (`Cmd 0x26`)
+### 3.1 Hiworld Base Info Frame Steering Telemetry (`Cmd 0x11`)
+In the Hiworld PSA protocol, steering wheel angle is multiplexed inside the Base Info Frame (`Cmd 0x11`):
 - **Sync Header:** `0x5A 0xA5`
-- **Length:** `0x03` (1-byte Cmd + 2-byte Payload)
-- **Command ID:** `0x26`
-- **Payload Layout (2 Bytes - Big Endian):**
-  - `Byte 0`: Angle High Byte (`Angle >> 8`)
-  - `Byte 1`: Angle Low Byte (`Angle & 0xFF`)
-- **Checksum:** 8-bit sum modulo 256 over `Length + CmdID + Payload`.
+- **Length ($L$):** `0x08` (8 payload bytes)
+- **Command ID:** `0x11` (`17` decimal / `Handle.CarBaseInfo`)
+- **Payload Layout (8 Bytes):**
+  - `Byte 0..1`: Reserved / Key status (`0x00 0x00`)
+  - `Byte 2..3`: Key Code & State (`0x00 0x00` when idle)
+  - `Byte 4..5`: Reserved (`0x00 0x00`)
+  - `Byte 6`: **Angle High Byte** (Signed 16-bit MSB, Big Endian)
+  - `Byte 7`: **Angle Low Byte** (Signed 16-bit LSB, Big Endian)
+- **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
+- **Total Frame Wire Length:** 13 bytes (`5A A5 08 11 [8 Bytes] Checksum`)
 
 ### 3.2 Raise Steering Angle Compatibility Format (`Cmd 0x29`):
 - **Sync Header:** `0x2E`
@@ -108,11 +113,12 @@ $$\text{SignedValue}_{16} = \text{Round}(\text{Angle}_{^\circ} \times 10.0)$$
 #include <stddef.h>
 #include <string.h>
 
+#define HIWORLD_SOF1         0x5A
+#define HIWORLD_SOF2         0xA5
+#define HIWORLD_CMD_CAR_BASE 0x11
+
 typedef struct {
     int16_t angle_deci_deg; /* Signed 0.1 deg: -5400..+5400 */
-    int16_t angular_velocity;
-    bool    calibrated;
-    bool    sensor_fault;
     bool    reverse_gear_active;
 } psa_sas_state_t;
 
@@ -128,49 +134,42 @@ static inline void psa_sas_init(psa_sas_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
     ctx->uart_tx = uart_tx;
 }
 
-/* Transmit Hiworld Steering Angle (Cmd 0x26, Big Endian) */
+/* Transmit Hiworld Steering Angle (Cmd 0x11, Big Endian) */
 static inline void psa_sas_send_hiworld(psa_sas_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[7];
-    p[0] = 0x5A;
-    p[1] = 0xA5;
-    p[2] = 0x03; /* Length: 1 Cmd + 2 Payload */
-    p[3] = 0x26; /* Cmd ID */
-    p[4] = (uint8_t)(((uint16_t)ctx->state.angle_deci_deg >> 8) & 0xFF); /* MSB */
-    p[5] = (uint8_t)((uint16_t)ctx->state.angle_deci_deg & 0xFF);        /* LSB */
+    uint8_t p[13];
+    p[0] = HIWORLD_SOF1;
+    p[1] = HIWORLD_SOF2;
+    p[2] = 0x08;                 /* Length: 8 Payload bytes */
+    p[3] = HIWORLD_CMD_CAR_BASE; /* Cmd ID: 0x11 */
+    p[4] = 0x00;
+    p[5] = 0x00;
+    p[6] = 0x00;                 /* Key Code (idle) */
+    p[7] = 0x00;                 /* Key State (idle) */
+    p[8] = 0x00;
+    p[9] = 0x00;
+    p[10] = (uint8_t)(((uint16_t)ctx->state.angle_deci_deg >> 8) & 0xFF); /* Angle MSB */
+    p[11] = (uint8_t)((uint16_t)ctx->state.angle_deci_deg & 0xFF);        /* Angle LSB */
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 5; i++) {
+    for (size_t i = 2; i <= 11; i++) {
         sum += p[i];
     }
-    p[6] = sum;
+    p[12] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 7);
+    ctx->uart_tx(p, 13);
 }
 
-/* Process PSA CAN 0x0E6 Frame */
-static inline void psa_sas_process_can_0x0E6(psa_sas_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+/* Process PSA CAN 0x0C5 Frame */
+static inline void psa_sas_process_can_0x0C5(psa_sas_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
     if (dlc < 2) return;
 
     /* Big-endian signed 16-bit unpack */
     int16_t raw_angle = (int16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
     ctx->state.angle_deci_deg = raw_angle;
 
-    if (dlc >= 4) {
-        ctx->state.angular_velocity = (int16_t)(((uint16_t)data[2] << 8) | (uint16_t)data[3]);
-    }
-    if (dlc >= 5) {
-        ctx->state.calibrated   = (data[4] & 0x80) ? true : false;
-        ctx->state.sensor_fault = (data[4] & 0x01) ? true : false;
-    }
-
     psa_sas_send_hiworld(ctx);
-}
-
-/* Update Reverse Gear Interlock */
-static inline void psa_sas_set_reverse_gear(psa_sas_ctx_t *ctx, bool reverse_on) {
-    ctx->state.reverse_gear_active = reverse_on;
 }
 
 #endif /* CANBOX_SAS_H */
@@ -181,26 +180,28 @@ static inline void psa_sas_set_reverse_gear(psa_sas_ctx_t *ctx, bool reverse_on)
 # 5. Verification Vectors & Simulation Harness
 
 ### Vector 1: Steering Centered (0.0°)
-- **CAN ID `0x0E6` Injection:**
+- **CAN ID `0x0C5` Injection:**
   ```bash
-  cansend vcan0 0E6#0000000080000000
+  cansend vcan0 0C5#00000000
   ```
-- **Expected UART Output (Hiworld `0x26`):**
-  - Frame: `5A A5 03 26 00 00 29`
+- **Expected UART Output (Hiworld `0x11`):**
+  - Frame: `5A A5 08 11 00 00 00 00 00 00 00 00 18`
+  - Checksum Calculation: `(0x08 + 0x11 - 1) & 0xFF = 0x18`
 
 ### Vector 2: Steering Turned Right +90.0° (+900 = 0x0384)
-- **CAN ID `0x0E6` Injection:**
+- **CAN ID `0x0C5` Injection:**
   ```bash
-  cansend vcan0 0E6#0384000080000000
+  cansend vcan0 0C5#03840000
   ```
-- **Expected UART Output (Hiworld `0x26`):**
-  - Frame: `5A A5 03 26 03 84 B0`
+- **Expected UART Output (Hiworld `0x11`):**
+  - Frame: `5A A5 08 11 00 00 00 00 00 00 03 84 9F`
+  - Checksum Calculation: `(0x08 + 0x11 + 0x03 + 0x84 - 1) & 0xFF = 0x9F`
 
 ### Vector 3: Steering Turned Left -90.0° (-900 = 0xFC7C)
-- **CAN ID `0x0E6` Injection:**
+- **CAN ID `0x0C5` Injection:**
   ```bash
-  cansend vcan0 0E6#FC7C000080000000
+  cansend vcan0 0C5#FC7C0000
   ```
-- **Expected UART Output (Hiworld `0x26`):**
-  - Frame: `5A A5 03 26 FC 7C A1`
-
+- **Expected UART Output (Hiworld `0x11`):**
+  - Frame: `5A A5 08 11 00 00 00 00 00 00 FC 7C 90`
+  - Checksum Calculation: `(0x08 + 0x11 + 0xFC + 0x7C - 1) & 0xFF = 0x90`

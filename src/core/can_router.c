@@ -9,6 +9,7 @@ static vehicle_state_t s_last_sent_state;
 void can_router_init(void) {
     memset(&s_current_state, 0, sizeof(s_current_state));
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
+    vehicle_profile_init();
     hu_protocol_init();
 }
 

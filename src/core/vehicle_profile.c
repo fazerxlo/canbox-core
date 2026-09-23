@@ -11,7 +11,28 @@ static const vehicle_profile_t *s_available_profiles[] = {
     [VEHICLE_PROFILE_TOYOTA_TNGA] = NULL,
 };
 
+#if defined(PLATFORM_LINUX)
+#include <stdlib.h>
+#include <strings.h>
+#endif
+
 static const vehicle_profile_t *s_active_profile = &g_profile_psa;
+
+void vehicle_profile_init(void) {
+#if defined(PLATFORM_LINUX)
+    const char *prof_env = getenv("CANBOX_VEHICLE_PROFILE");
+    if (prof_env && prof_env[0] != '\0') {
+        if (strcasecmp(prof_env, "psa") == 0 || strcasecmp(prof_env, "psa_2004") == 0 || strcasecmp(prof_env, "peugeot_407") == 0) {
+            vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+        } else if (strcasecmp(prof_env, "vag") == 0 || strcasecmp(prof_env, "vag_pq35") == 0) {
+            vehicle_profile_set_active(VEHICLE_PROFILE_VAG_PQ35);
+        }
+    }
+#endif
+    if (s_active_profile && s_active_profile->init) {
+        s_active_profile->init();
+    }
+}
 
 bool vehicle_profile_set_active(vehicle_profile_id_t profile_id) {
     if (profile_id >= VEHICLE_PROFILE_COUNT) {

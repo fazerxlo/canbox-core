@@ -4,35 +4,39 @@
 **Target Platform:** Pure C99 Embedded CAN Translator & Desktop Simulator  
 **Vehicle Network:** Peugeot 407 (PSA Comfort CAN Bus @ 125 kbps, 11-bit Standard ID)  
 **Primary Driver Protocol:** Hiworld (`0x5A 0xA5` sync header, additive sum checksum)  
-**Cross-Compatible Protocols:** Raise (RZC `0x2E`), Bagoo (`0xD5`/`0xFD`), Simple Soft (XP `0x2E`)
+**Cross-Compatible Protocols:** Raise (RZC `0x2E`), Bagoo (`0xD5`/`0xFD`), Simple Soft (XP `0x2E`)  
+**Cross-Referenced Ground Truth:** `signal-db/tyres.yaml` (`Msg1E1`, `Msg361`, `Msg3A1`), `QF_Canbus.apk` (`PeugeotDataParser.java`)
 
 ---
 
 # 1. Functional Domain & Architecture Overview
 
-The Peugeot 407 features active TPMS wheel transmitters in all four road wheels (and optionally the spare wheel). The TPMS ECU / BSI receives 433 MHz RF broadcasts from each wheel sensor and bridges tire pressure, internal temperature, and alarm states onto the PSA Comfort CAN bus via CAN ID `0x385` and `0x221`.
+The Peugeot 407 features active TPMS wheel transmitters in all four road wheels (and optionally the spare wheel). The TPMS ECU / BSI receives 433 MHz RF broadcasts from each wheel sensor and bridges tire pressure and diagnostic alarm states onto the PSA Comfort CAN bus via:
+- **`0x1E1` (Wheel Status Enum / `MSG_DONNEES_ETAT_ROUES`, 250 ms):** Wheel state enum (OK, under-inflated, puncture, sensor missing) for FL, FR, RR, RL, spare wheel, and overall system state.
+- **`0x361` (Direct Measurements & Status, 500 ms):** 2 bytes per wheel (FL, FR, RR, RL) carrying a 2-bit diagnostic status and a 14-bit physical pressure scaled by 0.1 Bar/LSB.
+- **`0x3A1` (Direct Pressures / `MSG_DONNEES_PRESSION_ROUES`, 250 ms):** 1 byte per wheel scaled by 0.05 Bar/LSB.
+- **`0x168` Byte 1 (Combine Warning Overlay):** Bits 7..6 carry instrument cluster TPMS warning lamp illumination flags.
 
 ```
 +------------------------------------------------------------------------------------+
 |                         Peugeot 407 Direct TPMS Wheel Sensors                      |
-|                  [FL, FR, RL, RR Pressure (Bar), Temp (C), Alarms]                 |
+|             [0x1E1 Status Enum, 0x361 (14-bit 0.1 Bar), 0x3A1 (0.05 Bar)]          |
 +------------------------------------------------------------------------------------+
                                           │
-                                 [PSA CAN 0x385 / 0x221]
+                               [PSA CAN 0x361 / 0x1E1]
                                           ▼
 +------------------------------------------------------------------------------------+
 |                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Extracts 4-wheel numeric pressures (0.1 Bar) & temperatures (deg C)          |
-|   2. Classifies discrete alarm states (Under-inflation, Puncture, Battery Low)    |
+|   1. Extracts 4-wheel numeric pressures (0.1 Bar / 0.05 Bar) from 0x361 / 0x3A1    |
+|   2. Classifies discrete alarm states (Under-inflation, Puncture, Battery Low)     |
 |   3. Dispatches Hiworld 0x18 (Discrete) & 0x66 / 0x68 (Numeric TPMS)               |
-|   4. Accepts Android Calibration Reset Downlink (Cmd 0x80) -> Injects CAN 0x221    |
 +------------------------------------------------------------------------------------+
                                           │
-                   [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
+                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
                                           ▼
 +------------------------------------------------------------------------------------+
 |                       Android Headunit Vehicle Info / TPMS App                     |
-|           (Renders 4-wheel car model with real-time numeric Bar/PSI & C)           |
+|           (Renders 4-wheel car model with real-time numeric Bar/PSI)               |
 +------------------------------------------------------------------------------------+
 ```
 
@@ -40,52 +44,42 @@ The Peugeot 407 features active TPMS wheel transmitters in all four road wheels 
 
 # 2. PSA CAN Bus Bitfield Specification
 
-### 2.1 PSA Direct Tire Telemetry Frame (`0x385`)
-- **CAN ID:** `0x385` (Standard 11-bit Identifier)
-- **DLC:** 8 bytes
-- **Cycle Rate:** Periodic 1000 ms or immediate on sudden pressure drop ($> 0.2\text{ Bar/min}$)
+### 2.1 PSA Direct Tire Telemetry Frame (`0x361`)
+- **CAN ID:** `0x361` (Standard 11-bit Identifier, DLC: 8, Period: 500 ms)
+- **Slot Encoding (2 Bytes per Wheel):**
+  - Bytes 0–1: Front Left (FL)
+  - Bytes 2–3: Front Right (FR)
+  - Bytes 4–5: Rear Right (RR)
+  - Bytes 6–7: Rear Left (RL)
 
 ```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Bit Mask / Value Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | 7..0   | Front Left (FL) Pressure Raw       | 0..250 (0.1 Bar per LSB)    |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | 7..0   | Front Right (FR) Pressure Raw      | 0..250 (0.1 Bar per LSB)    |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | 7..0   | Rear Left (RL) Pressure Raw        | 0..250 (0.1 Bar per LSB)    |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | 7..0   | Rear Right (RR) Pressure Raw       | 0..250 (0.1 Bar per LSB)    |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | 7..0   | Front Left (FL) Temperature Raw    | Raw - 40 = Degrees Celsius  |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 5 | 7..0   | Front Right (FR) Temperature Raw   | Raw - 40 = Degrees Celsius  |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 6 | 7..0   | Rear Left (RL) Temperature Raw     | Raw - 40 = Degrees Celsius  |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 7 | 7..0   | Rear Right (RR) Temperature Raw    | Raw - 40 = Degrees Celsius  |
-+--------+--------+------------------------------------+-----------------------------+
++---------------+--------+------------------------------------+-----------------------------+
+| Byte Range    | Bit    | Function / Signal Name             | Bit Mask / Value Definition |
++---------------+--------+------------------------------------+-----------------------------+
+| High Byte     | 15..14 | Wheel Diagnostic State             | 00 = OK                     |
+|               |        |                                    | 01 = UNDER_INFLATED         |
+|               |        |                                    | 10 = PUNCTURE               |
+|               |        |                                    | 11 = SENSOR_FAULT / NO_DATA |
+| High + Low    | 13..0  | Physical Tire Pressure Raw         | 0..16383 (0.1 Bar per LSB)  |
+|               |        |                                    | 0x3FFF = Sensor Missing     |
++---------------+--------+------------------------------------+-----------------------------+
 ```
 
-### 2.2 PSA Discrete Alarm States Frame (`0x221` Byte 3)
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | Bit 7  | Spare Wheel Pressure Alarm         | 1 = Warning Active          |
-|        | Bit 6  | Sensor Battery Low Warning         | 1 = Battery Low             |
-|        | Bit 5  | Sensor RF Missing / Offline        | 1 = No Signal               |
-|        | Bit 4  | Calibration / Learning Mode Active | 1 = In Progress             |
-|        | Bit 3  | Rear Right (RR) Low / Puncture     | 1 = Fault / 0 = Normal      |
-|        | Bit 2  | Rear Left (RL) Low / Puncture      | 1 = Fault / 0 = Normal      |
-|        | Bit 1  | Front Right (FR) Low / Puncture    | 1 = Fault / 0 = Normal      |
-|        | Bit 0  | Front Left (FL) Low / Puncture     | 1 = Fault / 0 = Normal      |
-+--------+--------+------------------------------------+-----------------------------+
-```
+### 2.2 PSA Wheel Status Enum Frame (`0x1E1`)
+- **CAN ID:** `0x1E1` (Standard 11-bit Identifier, DLC: 8, Period: 250 ms)
+- `Byte 0 (FL)`: `(state & 0x07) << 3`
+- `Byte 1 (FR)`: `(state & 0x07) << 3`
+- `Byte 2 (RR)`: `(state & 0x07) << 3`
+- `Byte 3 (RL)`: `(state & 0x07) << 3`
+- `Byte 4 (Spare)`: `(state & 0x07) << 3`
+- `Byte 5`: `tpms_system_state` (0x20 = nominal)
 
-### 2.3 Physical Formulas:
-$$\text{Pressure (Bar)} = \frac{\text{RawByte}}{10.0} \quad (\text{e.g. } 24 \implies 2.4\text{ Bar})$$
-$$\text{Pressure (PSI)} = \text{Pressure (Bar)} \times 14.5038$$
-$$\text{Pressure (kPa)} = \text{Pressure (Bar)} \times 100.0$$
-$$\text{Temperature } (^\circ\text{C}) = \text{RawByte} - 40 \quad (\text{e.g. } 65 \implies +25^\circ\text{C})$$
+### 2.3 PSA Direct Pressures in 0.05 Bar (`0x3A1`)
+- **CAN ID:** `0x3A1` (DLC: 8, Period: 250 ms)
+- `Byte 0 (FL)`: $\text{Round}(\text{Pressure}_{\text{bar}} / 0.05)$
+- `Byte 1 (FR)`: $\text{Round}(\text{Pressure}_{\text{bar}} / 0.05)$
+- `Byte 2 (RR)`: $\text{Round}(\text{Pressure}_{\text{bar}} / 0.05)$
+- `Byte 3 (RL)`: $\text{Round}(\text{Pressure}_{\text{bar}} / 0.05)$
 
 ---
 
@@ -93,17 +87,18 @@ $$\text{Temperature } (^\circ\text{C}) = \text{RawByte} - 40 \quad (\text{e.g. }
 
 ### 3.1 Hiworld Discrete TPMS Alarm (`Cmd 0x18`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length:** `0x05` (1-byte Cmd + 4-byte Payload)
+- **Length ($L$):** `0x04` (4 payload bytes)
 - **Command ID:** `0x18`
 - **Payload Layout (4 Bytes):**
-  - `Byte 0`: Front Left Alarm (`0x00`=Normal, `0x01`=Low Pressure, `0x02`=Puncture, `0x03`=Offline)
+  - `Byte 0`: Front Left Alarm (`0x00` = Normal, `0x01` = Low Pressure, `0x02` = Puncture, `0x03` = Offline)
   - `Byte 1`: Front Right Alarm
   - `Byte 2`: Rear Left Alarm
   - `Byte 3`: Rear Right Alarm
-- **Checksum:** 8-bit sum modulo 256 over `Length + CmdID + Payload`.
+- **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
 
 ### 3.2 Hiworld Universal Direct Numeric Pressures (`Cmd 0x66`)
-- **Length:** `0x07` (1-byte Cmd + 6-byte Payload)
+- **Sync Header:** `0x5A 0xA5`
+- **Length ($L$):** `0x06` (6 payload bytes)
 - **Command ID:** `0x66`
 - **Payload Layout (6 Bytes):**
   - `Byte 0`: Mode Flag (`0x01` = Live numeric reading)
@@ -112,18 +107,7 @@ $$\text{Temperature } (^\circ\text{C}) = \text{RawByte} - 40 \quad (\text{e.g. }
   - `Byte 3`: RL Pressure in $0.1\text{ Bar}$
   - `Byte 4`: RR Pressure in $0.1\text{ Bar}$
   - `Byte 5`: Pressure Unit (`0x00` = Bar, `0x01` = PSI, `0x02` = kPa)
-
-### 3.3 Hiworld Direct Tire Temperatures & Classification (`Cmd 0x68`)
-- **Length:** `0x09` (1-byte Cmd + 8-byte Payload)
-- **Command ID:** `0x68`
-- **Payload Layout (8 Bytes):**
-  - `Byte 0..3`: Tire Temperatures (FL, FR, RL, RR) as signed $^\circ\text{C}$ offset by $+40$ (e.g. $25^\circ\text{C} = 65 = \text{0x41}$).
-  - `Byte 4..7`: Sensor Battery & RF Health status.
-
-### 3.4 TPMS Calibration Reset Downlink (`Cmd 0x80`)
-When the user clicks "Calibrate / Re-learn TPMS" in Android settings:
-- **UART Command:** `5A A5 03 80 10 00 93`
-- **CAN Action:** CAN box injects BSI calibration trigger frame into CAN ID `0x221`.
+- **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
 
 ---
 
@@ -138,114 +122,127 @@ When the user clicks "Calibrate / Re-learn TPMS" in Android settings:
 #include <stddef.h>
 #include <string.h>
 
-typedef enum {
-    TPMS_ALARM_OK       = 0,
-    TPMS_ALARM_LOW      = 1,
-    TPMS_ALARM_PUNCTURE = 2,
-    TPMS_ALARM_OFFLINE  = 3,
-    TPMS_ALARM_BAT_LOW  = 4
-} tpms_alarm_t;
+#define HIWORLD_SOF1              0x5A
+#define HIWORLD_SOF2              0xA5
+#define HIWORLD_CMD_TPMS_NUMERIC  0x66
+#define HIWORLD_CMD_TPMS_DISCRETE 0x18
 
 typedef struct {
-    uint16_t pressure_dbar[4]; /* FL=0, FR=1, RL=2, RR=3 in 0.1 Bar units */
-    int16_t  temperature_c[4]; /* FL, FR, RL, RR in deg C */
-    uint8_t  alarm_state[4];   /* tpms_alarm_t enum */
-    bool     calibrating;
+    uint8_t fl_press_bar_deci; /* 0.1 Bar: 24 = 2.4 Bar */
+    uint8_t fr_press_bar_deci;
+    uint8_t rl_press_bar_deci;
+    uint8_t rr_press_bar_deci;
+    uint8_t fl_state;          /* 0=OK, 1=LOW, 2=PUNCTURE, 3=FAULT */
+    uint8_t fr_state;
+    uint8_t rl_state;
+    uint8_t rr_state;
 } psa_tpms_state_t;
 
 typedef void (*canbox_uart_tx_fn)(const uint8_t *buf, size_t len);
-typedef void (*canbox_can_tx_fn)(uint32_t id, const uint8_t *data, uint8_t dlc);
 
 typedef struct {
-    psa_tpms_state_t state;
+    psa_tpms_state_t  state;
     canbox_uart_tx_fn uart_tx;
-    canbox_can_tx_fn  can_tx;
 } psa_tpms_ctx_t;
 
-static inline void psa_tpms_init(psa_tpms_ctx_t *ctx, canbox_uart_tx_fn uart_tx, canbox_can_tx_fn can_tx) {
+static inline void psa_tpms_init(psa_tpms_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
     memset(ctx, 0, sizeof(psa_tpms_ctx_t));
+    ctx->state.fl_press_bar_deci = 24; /* 2.4 Bar default */
+    ctx->state.fr_press_bar_deci = 24;
+    ctx->state.rr_press_bar_deci = 22; /* 2.2 Bar default */
+    ctx->state.rl_press_bar_deci = 22;
     ctx->uart_tx = uart_tx;
-    ctx->can_tx  = can_tx;
 }
 
-/* Transmit Hiworld Numeric Pressure Telemetry (Cmd 0x66) */
-static inline void psa_tpms_send_numeric_hiworld(psa_tpms_ctx_t *ctx) {
+/* Transmit Hiworld Numeric TPMS Frame (Cmd 0x66) */
+static inline void psa_tpms_send_numeric(psa_tpms_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[10];
-    p[0] = 0x5A;
-    p[1] = 0xA5;
-    p[2] = 0x07; /* Length: 1 Cmd + 6 Payload */
-    p[3] = 0x66; /* Cmd ID */
-    p[4] = 0x01; /* Mode: Live readings */
-    p[5] = (uint8_t)(ctx->state.pressure_dbar[0]);
-    p[6] = (uint8_t)(ctx->state.pressure_dbar[1]);
-    p[7] = (uint8_t)(ctx->state.pressure_dbar[2]);
-    p[8] = (uint8_t)(ctx->state.pressure_dbar[3]);
-    p[9] = 0x00; /* Unit: 0.1 Bar */
+    uint8_t p[11];
+    p[0] = HIWORLD_SOF1;
+    p[1] = HIWORLD_SOF2;
+    p[2] = 0x06;                     /* Length: 6 Payload bytes */
+    p[3] = HIWORLD_CMD_TPMS_NUMERIC; /* Cmd 0x66 */
+    p[4] = 0x01;                     /* Mode: Live */
+    p[5] = ctx->state.fl_press_bar_deci;
+    p[6] = ctx->state.fr_press_bar_deci;
+    p[7] = ctx->state.rl_press_bar_deci;
+    p[8] = ctx->state.rr_press_bar_deci;
+    p[9] = 0x00;                     /* Unit: Bar */
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) sum += p[i];
-    p[10] = sum;
+    for (size_t i = 2; i <= 9; i++) {
+        sum += p[i];
+    }
+    p[10] = (uint8_t)((sum - 1) & 0xFF);
 
     ctx->uart_tx(p, 11);
 }
 
-/* Transmit Hiworld Discrete Alarm State Telemetry (Cmd 0x18) */
-static inline void psa_tpms_send_discrete_hiworld(psa_tpms_ctx_t *ctx) {
+/* Transmit Hiworld Discrete TPMS Alarm Frame (Cmd 0x18) */
+static inline void psa_tpms_send_discrete(psa_tpms_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[8];
-    p[0] = 0x5A;
-    p[1] = 0xA5;
-    p[2] = 0x05; /* Length: 1 Cmd + 4 Payload */
-    p[3] = 0x18; /* Cmd ID */
-    p[4] = ctx->state.alarm_state[0];
-    p[5] = ctx->state.alarm_state[1];
-    p[6] = ctx->state.alarm_state[2];
-    p[7] = ctx->state.alarm_state[3];
+    uint8_t p[9];
+    p[0] = HIWORLD_SOF1;
+    p[1] = HIWORLD_SOF2;
+    p[2] = 0x04;                      /* Length: 4 Payload bytes */
+    p[3] = HIWORLD_CMD_TPMS_DISCRETE; /* Cmd 0x18 */
+    p[4] = ctx->state.fl_state;
+    p[5] = ctx->state.fr_state;
+    p[6] = ctx->state.rl_state;
+    p[7] = ctx->state.rr_state;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 7; i++) sum += p[i];
-    p[8] = sum;
+    for (size_t i = 2; i <= 7; i++) {
+        sum += p[i];
+    }
+    p[8] = (uint8_t)((sum - 1) & 0xFF);
 
     ctx->uart_tx(p, 9);
 }
 
-/* Process PSA CAN ID 0x385 (Direct Pressures & Temperatures) */
-static inline void psa_tpms_process_can_0x385(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+/* Process PSA CAN 0x361 Frame */
+static inline void psa_tpms_process_can_0x361(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
     if (dlc < 8) return;
 
-    for (int i = 0; i < 4; i++) {
-        ctx->state.pressure_dbar[i] = data[i];
-        ctx->state.temperature_c[i] = (int16_t)data[i + 4] - 40;
+    uint16_t fl_raw = ((uint16_t)data[0] << 8) | data[1];
+    uint16_t fr_raw = ((uint16_t)data[2] << 8) | data[3];
+    uint16_t rr_raw = ((uint16_t)data[4] << 8) | data[5];
+    uint16_t rl_raw = ((uint16_t)data[6] << 8) | data[7];
+
+    ctx->state.fl_state = (fl_raw >> 14) & 0x03;
+    ctx->state.fr_state = (fr_raw >> 14) & 0x03;
+    ctx->state.rr_state = (rr_raw >> 14) & 0x03;
+    ctx->state.rl_state = (rl_raw >> 14) & 0x03;
+
+    if (ctx->state.fl_state != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.fl_press_bar_deci = (uint8_t)(fl_raw & 0x3FFF);
+    }
+    if (ctx->state.fr_state != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.fr_press_bar_deci = (uint8_t)(fr_raw & 0x3FFF);
+    }
+    if (ctx->state.rr_state != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.rr_press_bar_deci = (uint8_t)(rr_raw & 0x3FFF);
+    }
+    if (ctx->state.rl_state != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.rl_press_bar_deci = (uint8_t)(rl_raw & 0x3FFF);
     }
 
-    psa_tpms_send_numeric_hiworld(ctx);
+    psa_tpms_send_numeric(ctx);
+    psa_tpms_send_discrete(ctx);
 }
 
-/* Process PSA CAN ID 0x221 (Discrete Alarm Flags) */
-static inline void psa_tpms_process_can_0x221(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+/* Process PSA CAN 0x3A1 Frame (0.05 Bar LSB) */
+static inline void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
     if (dlc < 4) return;
-    uint8_t b3 = data[3];
 
-    ctx->state.alarm_state[0] = (b3 & 0x01) ? TPMS_ALARM_LOW : TPMS_ALARM_OK;
-    ctx->state.alarm_state[1] = (b3 & 0x02) ? TPMS_ALARM_LOW : TPMS_ALARM_OK;
-    ctx->state.alarm_state[2] = (b3 & 0x04) ? TPMS_ALARM_LOW : TPMS_ALARM_OK;
-    ctx->state.alarm_state[3] = (b3 & 0x08) ? TPMS_ALARM_LOW : TPMS_ALARM_OK;
-    ctx->state.calibrating    = (b3 & 0x10) ? true : false;
+    ctx->state.fl_press_bar_deci = (uint8_t)((data[0] * 5 + 5) / 10);
+    ctx->state.fr_press_bar_deci = (uint8_t)((data[1] * 5 + 5) / 10);
+    ctx->state.rr_press_bar_deci = (uint8_t)((data[2] * 5 + 5) / 10);
+    ctx->state.rl_press_bar_deci = (uint8_t)((data[3] * 5 + 5) / 10);
 
-    psa_tpms_send_discrete_hiworld(ctx);
-}
-
-/* Handle Android Downlink TPMS Calibration Command */
-static inline void psa_tpms_process_downlink(psa_tpms_ctx_t *ctx, uint8_t cmd_param) {
-    if (!ctx->can_tx) return;
-    (void)cmd_param;
-
-    /* Inject TPMS Re-calibration request into PSA BSI (CAN ID 0x221) */
-    uint8_t can_data[8] = { 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00 };
-    ctx->can_tx(0x221, can_data, 8);
+    psa_tpms_send_numeric(ctx);
 }
 
 #endif /* CANBOX_TPMS_H */
@@ -255,21 +252,10 @@ static inline void psa_tpms_process_downlink(psa_tpms_ctx_t *ctx, uint8_t cmd_pa
 
 # 5. Verification Vectors & Simulation Harness
 
-### Vector 1: Normal Pressures (FL=2.4 Bar, FR=2.4 Bar, RL=2.2 Bar, RR=2.2 Bar) @ 25°C
-- **CAN ID `0x385` Injection:**
-  - Pressures: `24 24 22 22` (`0x18 0x18 0x16 0x16`)
-  - Temperatures ($25^\circ\text{C} + 40 = 65 = \text{0x41}$): `41 41 41 41`
+### Vector 1: Nominal Pressures on CAN 0x361 (FL=2.4, FR=2.4, RR=2.2, RL=2.2 Bar)
+- **CAN ID `0x361` Injection:**
   ```bash
-  cansend vcan0 385#1818161641414141
+  cansend vcan0 361#0018001800160016
   ```
-- **Expected UART Output (Hiworld Numeric `0x66`):**
-  - Frame: `5A A5 07 66 01 18 18 16 16 00 D0`
-
-### Vector 2: Front Left Puncture / Low Pressure Alarm
-- **CAN ID `0x221` Injection:**
-  ```bash
-  cansend vcan0 221#0000000100000000
-  ```
-- **Expected UART Output (Hiworld Discrete `0x18`):**
-  - Frame: `5A A5 05 18 01 00 00 00 1E`
-
+- **Expected UART Output (Hiworld `0x66`):**
+  - Frame: `5A A5 06 66 01 18 18 16 16 00 D2`

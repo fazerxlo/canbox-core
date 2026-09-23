@@ -24,6 +24,11 @@ static int s_can_fd = -1;
 hal_status_t hal_can_init(can_baudrate_t baudrate) {
     (void)baudrate; // Baudrate is determined by the virtual link setup on Linux host
 
+    if (s_can_fd >= 0) {
+        close(s_can_fd);
+        s_can_fd = -1;
+    }
+
     const char *iface = getenv("CANBOX_CAN_IFACE");
     if (!iface || iface[0] == '\0') {
         iface = CAN_INTERFACE_NAME;
@@ -70,7 +75,6 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
         return HAL_STATUS_ERROR;
     }
 
-    printf("[CAN] Initialized on %s\n", iface);
     return HAL_STATUS_OK;
 }
 
