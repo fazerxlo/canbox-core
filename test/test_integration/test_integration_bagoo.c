@@ -37,9 +37,9 @@ void test_integration_bagoo_door_status_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_BAGOO);
 
     can_frame_t frame = {
-        .id = 0x036,
-        .dlc = 4,
-        .data = { 0x11, 0x00, 0x00, 0x00 } // Driver door (bit 0) + Trunk (bit 4)
+        .id = 0x220,
+        .dlc = 2,
+        .data = { 0x88, 0x00 } // Driver door (bit 7: 0x80) + Trunk (bit 3: 0x08)
     };
     can_router_process_can(&frame);
 

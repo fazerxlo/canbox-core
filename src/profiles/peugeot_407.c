@@ -343,7 +343,7 @@ size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_l
 /* --------------------------------------------------------------------------
  * 1.5 Doors & Body Status
  * -------------------------------------------------------------------------- */
-void psa_decode_doors_0x221(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors) {
+void psa_decode_doors_0x220(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors) {
     if (!data || !doors || dlc < 1) return;
     memset(doors, 0, sizeof(*doors));
 
@@ -353,10 +353,19 @@ void psa_decode_doors_0x221(const uint8_t *data, uint8_t dlc, psa_doors_body_t *
     doors->rear_right_door = (data[0] & 0x10) != 0;
     doors->trunk           = (data[0] & 0x08) != 0;
     doors->hood            = (data[0] & 0x04) != 0;
+    doors->rear_window     = (data[0] & 0x02) != 0;
+    doors->fuel_flap       = (data[0] & 0x01) != 0;
 
     if (dlc >= 2) {
-        doors->handbrake   = (data[1] & 0x01) != 0;
+        doors->auto_rear_wiper       = (data[1] & 0x80) != 0;
+        doors->auto_locking          = (data[1] & 0x10) != 0;
+        doors->parking_radar_enabled = (data[1] & 0x08) != 0;
+        doors->handbrake             = (data[1] & 0x01) != 0;
     }
+}
+
+void psa_decode_doors_0x221(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors) {
+    psa_decode_doors_0x220(data, dlc, doors);
 }
 
 size_t build_raise_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len) {
@@ -388,6 +397,121 @@ size_t build_raise_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max
     }
     out[11] = (uint8_t)(sum ^ 0xFF);
     return 12;
+}
+
+size_t build_hiworld_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len) {
+    if (!doors || !out || max_len < 15) {
+        return 0;
+    }
+
+    out[0] = HIWORLD_SOF1;        /* 0x5A */
+    out[1] = HIWORLD_SOF2;        /* 0xA5 */
+    out[2] = 0x0A;                /* Length: 10 Payload bytes */
+    out[3] = HIWORLD_CMD_DOOR;    /* Cmd: 0x12 */
+    out[4] = 0x00;                /* Byte 0 */
+    out[5] = 0x04;                /* Byte 1 */
+
+    uint8_t b2 = 0x04;          /* Base active flag */
+    if (doors->driver_door)     b2 |= 0x80;
+    if (doors->pass_door)       b2 |= 0x40;
+    if (doors->rear_left_door)  b2 |= 0x20;
+    if (doors->rear_right_door) b2 |= 0x10;
+    if (doors->trunk)           b2 |= 0x08;
+    if (doors->hood)            b2 |= 0x04;
+    out[6] = b2;
+
+    out[7]  = 0x00;
+    out[8]  = 0x00;
+    out[9]  = 0x00;
+    out[10] = 0x00;
+    out[11] = 0x00;
+    out[12] = 0x00;
+    out[13] = 0x03;               /* Byte 9: Sub-type */
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 13; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[14] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 15;
+}
+
+size_t build_hiworld_doors_state(const psa_doors_state_t *state, uint8_t *out, size_t max_len) {
+    if (!state || !out || max_len < 15) {
+        return 0;
+    }
+
+    out[0] = HIWORLD_SOF1;        /* 0x5A */
+    out[1] = HIWORLD_SOF2;        /* 0xA5 */
+    out[2] = 0x0A;                /* Length: 10 Payload bytes */
+    out[3] = HIWORLD_CMD_DOOR;    /* Cmd: 0x12 */
+    out[4] = 0x00;                /* Byte 0 */
+    out[5] = 0x04;                /* Byte 1 */
+
+    uint8_t b2 = 0x04;          /* Base active flag */
+    if (state->door_front_left)  b2 |= 0x80;
+    if (state->door_front_right) b2 |= 0x40;
+    if (state->door_rear_left)   b2 |= 0x20;
+    if (state->door_rear_right)  b2 |= 0x10;
+    if (state->trunk_open)       b2 |= 0x08;
+    if (state->hood_open)        b2 |= 0x04;
+    out[6] = b2;
+
+    out[7]  = 0x00;
+    out[8]  = 0x00;
+    out[9]  = 0x00;
+    out[10] = 0x00;
+    out[11] = 0x00;
+    out[12] = 0x00;
+    out[13] = 0x03;               /* Byte 9: Sub-type */
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 13; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[14] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 15;
+}
+
+void psa_doors_init(psa_doors_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
+    if (!ctx) return;
+    memset(ctx, 0, sizeof(psa_doors_ctx_t));
+    ctx->uart_tx = uart_tx;
+}
+
+void psa_doors_send_hiworld(psa_doors_ctx_t *ctx) {
+    if (!ctx || !ctx->uart_tx) return;
+
+    uint8_t p[16];
+    size_t len = build_hiworld_doors_state(&ctx->state, p, sizeof(p));
+    if (len > 0) {
+        ctx->uart_tx(p, len);
+    }
+}
+
+void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 1) return;
+
+    uint8_t b0 = data[0];
+    ctx->state.door_front_left   = (b0 & 0x80) ? true : false;
+    ctx->state.door_front_right  = (b0 & 0x40) ? true : false;
+    ctx->state.door_rear_left    = (b0 & 0x20) ? true : false;
+    ctx->state.door_rear_right   = (b0 & 0x10) ? true : false;
+    ctx->state.trunk_open        = (b0 & 0x08) ? true : false;
+    ctx->state.hood_open         = (b0 & 0x04) ? true : false;
+    ctx->state.rear_window_open  = (b0 & 0x02) ? true : false;
+    ctx->state.fuel_flap_open    = (b0 & 0x01) ? true : false;
+
+    if (dlc >= 2) {
+        ctx->state.auto_rear_wiper_active = (data[1] & 0x80) ? true : false;
+        ctx->state.auto_locking_active    = (data[1] & 0x10) ? true : false;
+        ctx->state.parking_radar_enabled  = (data[1] & 0x08) ? true : false;
+        ctx->state.handbrake_pulled       = (data[1] & 0x01) ? true : false;
+    }
+
+    psa_doors_send_hiworld(ctx);
 }
 
 /* --------------------------------------------------------------------------

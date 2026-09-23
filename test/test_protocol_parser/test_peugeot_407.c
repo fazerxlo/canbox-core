@@ -313,6 +313,18 @@ void test_peugeot_407_reverse_state(void) {
 /* --------------------------------------------------------------------------
  * 1.5 Doors & Body Status Tests
  * -------------------------------------------------------------------------- */
+static uint8_t s_doors_uart_buf[32];
+static size_t  s_doors_uart_len = 0;
+static int     s_doors_uart_tx_calls = 0;
+
+static void test_doors_uart_tx(const uint8_t *buf, size_t len) {
+    if (buf && len <= sizeof(s_doors_uart_buf)) {
+        memcpy(s_doors_uart_buf, buf, len);
+        s_doors_uart_len = len;
+        s_doors_uart_tx_calls++;
+    }
+}
+
 void test_peugeot_407_verification_vector_4_doors(void) {
     // Vector 4: cansend vcan0 221#8000000000000000 (Driver door open)
     const uint8_t can_221[] = { 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -351,6 +363,219 @@ void test_peugeot_407_doors_all_open_with_handbrake(void) {
     TEST_ASSERT_EQUAL_UINT32(12, len);
     TEST_ASSERT_EQUAL_HEX8(0xFC, out[3]);
     TEST_ASSERT_EQUAL_HEX8(0x01, out[4]);
+}
+
+void test_peugeot_407_doors_hiworld_vector_1_driver_front(void) {
+    // Vector 1 from SPEC_HIWORLD_407_07_DOORS_BODY_STATUS.md:
+    // CAN ID 0x220 data: 80 00 -> Expected UART Hiworld 0x12 (10-byte): 5A A5 0A 12 00 04 84 00 00 00 00 00 00 03 A6
+    const uint8_t can_220[] = { 0x80, 0x00 };
+    psa_doors_body_t doors;
+    psa_decode_doors_0x220(can_220, sizeof(can_220), &doors);
+
+    TEST_ASSERT_TRUE(doors.driver_door);
+    TEST_ASSERT_FALSE(doors.pass_door);
+    TEST_ASSERT_FALSE(doors.rear_left_door);
+    TEST_ASSERT_FALSE(doors.rear_right_door);
+    TEST_ASSERT_FALSE(doors.trunk);
+    TEST_ASSERT_FALSE(doors.hood);
+
+    uint8_t out[20];
+    size_t len = build_hiworld_doors(&doors, out, sizeof(out));
+
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xA6
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
+}
+
+void test_peugeot_407_doors_hiworld_all_open(void) {
+    const uint8_t can_220[] = { 0xFC, 0x01 };
+    psa_doors_body_t doors;
+    psa_decode_doors_0x220(can_220, sizeof(can_220), &doors);
+
+    TEST_ASSERT_TRUE(doors.driver_door);
+    TEST_ASSERT_TRUE(doors.pass_door);
+    TEST_ASSERT_TRUE(doors.rear_left_door);
+    TEST_ASSERT_TRUE(doors.rear_right_door);
+    TEST_ASSERT_TRUE(doors.trunk);
+    TEST_ASSERT_TRUE(doors.hood);
+    TEST_ASSERT_TRUE(doors.handbrake);
+
+    uint8_t out[20];
+    size_t len = build_hiworld_doors(&doors, out, sizeof(out));
+
+    // b2 = 0xFC | 0x04 = 0xFC
+    // Checksum = (0x0A + 0x12 + 0x00 + 0x04 + 0xFC + 0x03 - 1) & 0xFF = 0x1E
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0xFC, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x1E
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
+}
+
+void test_peugeot_407_doors_hiworld_discrete_bits(void) {
+    psa_doors_body_t doors;
+    uint8_t out[20];
+
+    // FR door only (0x40) -> b2 = 0x44 -> CS = (0x0A + 0x12 + 0x04 + 0x44 + 0x03 - 1) = 0x66
+    const uint8_t can_fr[] = { 0x40, 0x00 };
+    psa_decode_doors_0x220(can_fr, sizeof(can_fr), &doors);
+    TEST_ASSERT_TRUE(doors.pass_door);
+    size_t len = build_hiworld_doors(&doors, out, sizeof(out));
+    const uint8_t exp_fr[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x66
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_fr, out, 15);
+
+    // RL door only (0x20) -> b2 = 0x24 -> CS = (0x0A + 0x12 + 0x04 + 0x24 + 0x03 - 1) = 0x46
+    const uint8_t can_rl[] = { 0x20, 0x00 };
+    psa_decode_doors_0x220(can_rl, sizeof(can_rl), &doors);
+    TEST_ASSERT_TRUE(doors.rear_left_door);
+    len = build_hiworld_doors(&doors, out, sizeof(out));
+    const uint8_t exp_rl[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x46
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_rl, out, 15);
+
+    // RR door only (0x10) -> b2 = 0x14 -> CS = (0x0A + 0x12 + 0x04 + 0x14 + 0x03 - 1) = 0x36
+    const uint8_t can_rr[] = { 0x10, 0x00 };
+    psa_decode_doors_0x220(can_rr, sizeof(can_rr), &doors);
+    TEST_ASSERT_TRUE(doors.rear_right_door);
+    len = build_hiworld_doors(&doors, out, sizeof(out));
+    const uint8_t exp_rr[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x36
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_rr, out, 15);
+
+    // Trunk only (0x08) -> b2 = 0x0C -> CS = (0x0A + 0x12 + 0x04 + 0x0C + 0x03 - 1) = 0x2E
+    const uint8_t can_trunk[] = { 0x08, 0x00 };
+    psa_decode_doors_0x220(can_trunk, sizeof(can_trunk), &doors);
+    TEST_ASSERT_TRUE(doors.trunk);
+    len = build_hiworld_doors(&doors, out, sizeof(out));
+    const uint8_t exp_trunk[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x2E
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_trunk, out, 15);
+
+    // All closed (0x00) -> b2 = 0x04 -> CS = (0x0A + 0x12 + 0x04 + 0x04 + 0x03 - 1) = 0x26
+    const uint8_t can_none[] = { 0x00, 0x00 };
+    psa_decode_doors_0x220(can_none, sizeof(can_none), &doors);
+    len = build_hiworld_doors(&doors, out, sizeof(out));
+    const uint8_t exp_none[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x26
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_none, out, 15);
+}
+
+void test_peugeot_407_doors_decode_extended_signals(void) {
+    // Byte 0: Rear window (0x02), Fuel flap (0x01)
+    // Byte 1: Wiper reverse (0x80), Auto lock (0x10), Radar enabled (0x08), Handbrake (0x01)
+    const uint8_t can_220[] = { 0x03, 0x99 };
+    psa_doors_body_t doors;
+    psa_decode_doors_0x220(can_220, sizeof(can_220), &doors);
+
+    TEST_ASSERT_FALSE(doors.driver_door);
+    TEST_ASSERT_FALSE(doors.pass_door);
+    TEST_ASSERT_FALSE(doors.rear_left_door);
+    TEST_ASSERT_FALSE(doors.rear_right_door);
+    TEST_ASSERT_FALSE(doors.trunk);
+    TEST_ASSERT_FALSE(doors.hood);
+
+    TEST_ASSERT_TRUE(doors.rear_window);
+    TEST_ASSERT_TRUE(doors.fuel_flap);
+    TEST_ASSERT_TRUE(doors.auto_rear_wiper);
+    TEST_ASSERT_TRUE(doors.auto_locking);
+    TEST_ASSERT_TRUE(doors.parking_radar_enabled);
+    TEST_ASSERT_TRUE(doors.handbrake);
+}
+
+void test_peugeot_407_psa_doors_ctx_pipeline(void) {
+    psa_doors_ctx_t ctx;
+    s_doors_uart_len = 0;
+    s_doors_uart_tx_calls = 0;
+
+    psa_doors_init(&ctx, test_doors_uart_tx);
+    TEST_ASSERT_FALSE(ctx.state.door_front_left);
+    TEST_ASSERT_EQUAL_INT(0, s_doors_uart_tx_calls);
+
+    // Process CAN 0x220: FL door open (0x80), handbrake active (0x01)
+    const uint8_t can_open[] = { 0x80, 0x01 };
+    psa_doors_process_can_0x220(&ctx, can_open, sizeof(can_open));
+
+    TEST_ASSERT_TRUE(ctx.state.door_front_left);
+    TEST_ASSERT_TRUE(ctx.state.handbrake_pulled);
+    TEST_ASSERT_EQUAL_INT(1, s_doors_uart_tx_calls);
+
+    const uint8_t expected_open[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xA6
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, s_doors_uart_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_open, s_doors_uart_buf, 15);
+
+    // Process CAN 0x220: All closed
+    const uint8_t can_closed[] = { 0x00, 0x00 };
+    psa_doors_process_can_0x220(&ctx, can_closed, sizeof(can_closed));
+
+    TEST_ASSERT_FALSE(ctx.state.door_front_left);
+    TEST_ASSERT_FALSE(ctx.state.handbrake_pulled);
+    TEST_ASSERT_EQUAL_INT(2, s_doors_uart_tx_calls);
+
+    const uint8_t expected_closed[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x26
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, s_doors_uart_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_closed, s_doors_uart_buf, 15);
+
+    // Test send_hiworld without uart_tx function (should not crash)
+    ctx.uart_tx = NULL;
+    psa_doors_send_hiworld(&ctx);
+}
+
+void test_peugeot_407_hiworld_doors_boundary_checks(void) {
+    psa_doors_body_t doors;
+    memset(&doors, 0, sizeof(doors));
+    doors.driver_door = true;
+
+    uint8_t out[20];
+    // NULL out buffer
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors(&doors, NULL, sizeof(out)));
+    // NULL doors pointer
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors(NULL, out, sizeof(out)));
+    // Buffer too small (< 15 bytes)
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors(&doors, out, 14));
+
+    // build_hiworld_doors_state boundary tests
+    psa_doors_state_t state;
+    memset(&state, 0, sizeof(state));
+    state.door_front_left = true;
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(&state, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(NULL, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(&state, out, 14));
+
+    size_t len = build_hiworld_doors_state(&state, out, sizeof(out));
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xA6
+    };
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 15);
+
+    // psa_decode_doors_0x220 robustness
+    psa_decode_doors_0x220(NULL, 2, &doors);
+    psa_decode_doors_0x220(out, 0, &doors);
+    psa_decode_doors_0x220(out, 2, NULL);
+
+    // psa_doors_process_can_0x220 robustness
+    psa_doors_ctx_t ctx;
+    psa_doors_init(&ctx, test_doors_uart_tx);
+    psa_doors_process_can_0x220(NULL, out, 2);
+    psa_doors_process_can_0x220(&ctx, NULL, 2);
+    psa_doors_process_can_0x220(&ctx, out, 0);
 }
 
 /* --------------------------------------------------------------------------

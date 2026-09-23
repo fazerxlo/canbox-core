@@ -5,7 +5,7 @@
 **Vehicle Network:** Peugeot 407 (PSA Comfort CAN Bus @ 125 kbps, 11-bit Standard ID)  
 **Primary Driver Protocol:** Hiworld (`0x5A 0xA5` sync header, additive sum checksum)  
 **Cross-Compatible Protocols:** Raise (RZC `0x2E`), Bagoo (`0xD5`/`0xFD`), Simple Soft (XP `0x2E`)  
-**Cross-Referenced Ground Truth:** `https://github.com/fazerxlo/canbox/tree/main/doc/CAN2004_doors.md`, `CAN_messages.md`
+**Cross-Referenced Ground Truth:** Real Hiworld PSA Canbox serial captures & `https://github.com/fazerxlo/canbox`
 
 ---
 
@@ -13,7 +13,11 @@
 
 The Peugeot 407 BSI broadcasts body opening events and physical microswitch contacts over the Comfort CAN bus using two primary mechanisms:
 - **`0x220` (Door & Body Openings, Event-Driven):** The authoritative 2-byte frame carrying individual microswitch contact states for all 4 doors, boot/tailgate, bonnet/hood, estate tailgate rear window, and fuel flap.
-- **`0x221` (Generic CAN Box Alias):** Many commercial CAN box firmware models listen for `0x220` and re-map to internal `0x221` representations.
+- **`0x221` (Generic CAN Box Alias):** Commercial CAN box firmware models listen for `0x220` and re-map to internal `0x221` representations.
+
+> [!IMPORTANT]
+> **Distinction from CAN ID `0x036`:**
+> Frame `0x036` on Peugeot 407 / PSA CAN2004 carries **Ignition Status** (Byte 4), **Dashboard Illumination** (Byte 3), and **Reverse Gear / Handbrake** flags (Byte 1). Byte 0 of `0x036` carries internal BSI power state bits (e.g. `0x15` or `0x0E`) and **must not** be decoded as door switches. Door status is exclusively decoded from `0x220` and `0x221`.
 
 The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cmd 0x12`) / Raise (`Cmd 0x38`) door status packets to the Android headunit, which renders an animated 3D vehicle opening popup overlay.
 
@@ -27,9 +31,10 @@ The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cm
                                           ▼
 +------------------------------------------------------------------------------------+
 |                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Filters & extracts discrete door opening bitmasks from CAN ID 0x220           |
+|   1. Filters & extracts discrete door opening bitmasks from CAN ID 0x220 / 0x221   |
 |   2. Decodes rear window (SW estate) and fuel filler flap states                   |
-|   3. Serializes Hiworld 0x12 Door Status Packets                                   |
+|   3. Serializes Hiworld 0x12 (10-byte) Door Status Packets                         |
+|   4. Refreshes door state periodically (every 500 ms) while open to avoid timeout  |
 +------------------------------------------------------------------------------------+
                                           │
                     [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
@@ -44,8 +49,8 @@ The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cm
 
 # 2. PSA CAN Bus Bitfield Specification
 
-### 2.1 Authoritative PSA CAN2004 Door Opening Frame (`0x220`)
-- **CAN ID:** `0x220` (Standard 11-bit Identifier)
+### 2.1 Authoritative PSA CAN2004 Door Opening Frame (`0x220` / `0x221`)
+- **CAN ID:** `0x220` / `0x221` (Standard 11-bit Identifier)
 - **DLC:** 2 bytes
 - **Transmission Cycle:** Event-driven on state transition
 
@@ -73,21 +78,30 @@ The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cm
 
 # 3. Headunit Serial Protocol Mappings
 
-### 3.1 Hiworld Door & Window Frame (`Cmd 0x12` / `Handle.DoorWindowState`)
+### 3.1 Hiworld PSA Door & Window Frame (`Cmd 0x12` / `Handle.DoorWindowState`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length ($L$):** `0x03` (3 payload bytes)
+- **Length ($L$):** `0x0A` (10 payload bytes)
 - **Command ID:** `0x12` (`18` decimal / `Handle.DoorWindowState`)
-- **Payload Layout (3 Bytes):**
-  - `Byte 0..1`: Reserved (`0x00 0x00`)
+- **Payload Layout (10 Bytes):**
+  - `Byte 0`: Fixed `0x00`
+  - `Byte 1`: Fixed `0x04`
   - `Byte 2`:
-    - `Bit 7`: Driver Front Door ($1 = \text{Open}$)
-    - `Bit 6`: Passenger Front Door ($1 = \text{Open}$)
-    - `Bit 5`: Rear Left Door ($1 = \text{Open}$)
-    - `Bit 4`: Rear Right Door ($1 = \text{Open}$)
-    - `Bit 3`: Trunk / Boot ($1 = \text{Open}$)
-    - `Bit 2`: Engine Hood / Bonnet ($1 = \text{Open}$)
+    - `Bit 7`: Driver Front Door (FL) ($1 = \text{Open}$) (`0x80`)
+    - `Bit 6`: Passenger Front Door (FR) ($1 = \text{Open}$) (`0x40`)
+    - `Bit 5`: Rear Left Door (RL) ($1 = \text{Open}$) (`0x20`)
+    - `Bit 4`: Rear Right Door (RR) ($1 = \text{Open}$) (`0x10`)
+    - `Bit 3`: Trunk / Boot ($1 = \text{Open}$) (`0x08`)
+    - `Bit 2`: Hood / Base Active Flag ($1 = \text{Active}$) (`0x04`)
+  - `Byte 3..8`: Reserved padding `0x00 0x00 0x00 0x00 0x00 0x00`
+  - `Byte 9`: Fixed `0x03` (PSA Model / Protocol Sub-Byte)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
-- **Total Frame Wire Length:** 8 bytes (`5A A5 03 12 [3 Bytes] Checksum`)
+- **Total Frame Wire Length:** 15 bytes (`5A A5 0A 12 00 04 [Byte 2] 00 00 00 00 00 00 03 [Checksum]`)
+
+### 3.2 Periodic Refresh Timing
+Android Head Units implement an internal inactivity timeout (~1.5s) on the door overlay popup. When any door, trunk, or hood is open:
+- The initial frame is sent immediately upon transition.
+- Refresh frames are periodically re-broadcast (every 500 ms) while any door remains open.
+- When all doors close, an all-closed frame (`Byte 2 = 0x04`) is transmitted immediately.
 
 ---
 
@@ -128,39 +142,47 @@ static inline void psa_doors_init(psa_doors_ctx_t *ctx, canbox_uart_tx_fn uart_t
     ctx->uart_tx = uart_tx;
 }
 
-/* Transmit Hiworld Door State Frame (Cmd 0x12) */
+/* Transmit Hiworld Door State Frame (Cmd 0x12, 10-byte payload) */
 static inline void psa_doors_send_hiworld(psa_doors_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[8];
-    p[0] = HIWORLD_SOF1;
-    p[1] = HIWORLD_SOF2;
-    p[2] = 0x03;             /* Length: 3 Payload bytes */
-    p[3] = HIWORLD_CMD_DOOR; /* Cmd 0x12 */
-    p[4] = 0x00;
-    p[5] = 0x00;
+    uint8_t p[15];
+    p[0] = HIWORLD_SOF1;        /* 0x5A */
+    p[1] = HIWORLD_SOF2;        /* 0xA5 */
+    p[2] = 0x0A;                /* Length: 10 Payload bytes */
+    p[3] = HIWORLD_CMD_DOOR;    /* Cmd 0x12 */
+    p[4] = 0x00;                /* Byte 0 */
+    p[5] = 0x04;                /* Byte 1 */
 
-    uint8_t b2 = 0;
+    uint8_t b2 = 0x04;          /* Base active flag */
     if (ctx->state.door_front_left)  b2 |= 0x80;
     if (ctx->state.door_front_right) b2 |= 0x40;
     if (ctx->state.door_rear_left)   b2 |= 0x20;
     if (ctx->state.door_rear_right)  b2 |= 0x10;
     if (ctx->state.trunk_open)       b2 |= 0x08;
     if (ctx->state.hood_open)        b2 |= 0x04;
-    p[6] = b2;
+    p[6] = b2;                  /* Byte 2 */
+
+    p[7]  = 0x00;               /* Byte 3 */
+    p[8]  = 0x00;               /* Byte 4 */
+    p[9]  = 0x00;               /* Byte 5 */
+    p[10] = 0x00;               /* Byte 6 */
+    p[11] = 0x00;               /* Byte 7 */
+    p[12] = 0x00;               /* Byte 8 */
+    p[13] = 0x03;               /* Byte 9: Sub-type */
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 6; i++) {
-        sum += p[i];
+    for (size_t i = 2; i <= 13; i++) {
+        sum = (uint8_t)(sum + p[i]);
     }
-    p[7] = (uint8_t)((sum - 1) & 0xFF);
+    p[14] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 8);
+    ctx->uart_tx(p, 15);
 }
 
-/* Process PSA CAN 0x220 Frame */
+/* Process PSA CAN 0x220 / 0x221 Frame */
 static inline void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (dlc < 1) return;
+    if (!ctx || !data || dlc < 1) return;
 
     uint8_t b0 = data[0];
     ctx->state.door_front_left  = (b0 & 0x80) ? true : false;
@@ -189,6 +211,30 @@ static inline void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8
   ```bash
   cansend vcan0 220#8000
   ```
+- **Expected UART Output (Hiworld `0x12`, 10-byte payload):**
+  - Frame: `5A A5 0A 12 00 04 84 00 00 00 00 00 00 03 A6`
+  - Checksum Calculation: `(0x0A + 0x12 + 0x00 + 0x04 + 0x84 + 0x00 + 0x00 + 0x00 + 0x00 + 0x00 + 0x00 + 0x03 - 1) & 0xFF = 0xA6`
+
+### Vector 2: Front Left + Rear Left Doors Open
+- **CAN ID `0x220` Injection:**
+  ```bash
+  cansend vcan0 220#A000
+  ```
 - **Expected UART Output (Hiworld `0x12`):**
-  - Frame: `5A A5 03 12 00 00 80 94`
-  - Checksum Calculation: `(0x03 + 0x12 + 0x00 + 0x00 + 0x80 - 1) & 0xFF = 0x94`
+  - Frame: `5A A5 0A 12 00 04 A4 00 00 00 00 00 00 03 C6`
+
+### Vector 3: Rear Left Door Open
+- **CAN ID `0x220` Injection:**
+  ```bash
+  cansend vcan0 220#2000
+  ```
+- **Expected UART Output (Hiworld `0x12`):**
+  - Frame: `5A A5 0A 12 00 04 24 00 00 00 00 00 00 03 46`
+
+### Vector 4: All Doors Closed
+- **CAN ID `0x220` Injection:**
+  ```bash
+  cansend vcan0 220#0000
+  ```
+- **Expected UART Output (Hiworld `0x12`):**
+  - Frame: `5A A5 0A 12 00 04 04 00 00 00 00 00 00 03 26`

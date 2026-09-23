@@ -38,9 +38,9 @@ void test_scenario_ignition_off_after_power_on(void) {
     // Verify 0x036 decoding
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ACC, state->ignition_state);
     TEST_ASSERT_FALSE(state->doors.door_driver);
-    TEST_ASSERT_TRUE(state->doors.door_passenger);
-    TEST_ASSERT_TRUE(state->doors.door_rear_left);
-    TEST_ASSERT_TRUE(state->doors.door_rear_right);
+    TEST_ASSERT_FALSE(state->doors.door_passenger);
+    TEST_ASSERT_FALSE(state->doors.door_rear_left);
+    TEST_ASSERT_FALSE(state->doors.door_rear_right);
     TEST_ASSERT_FALSE(state->doors.trunk);
     TEST_ASSERT_FALSE(state->doors.hood);
     TEST_ASSERT_FALSE(state->reverse_gear);

@@ -79,18 +79,23 @@ static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
 }
 
 static void hiworld_send_doors(const vehicle_doors_t *doors) {
-    /* Hiworld Door Status (Cmd 0x12) */
-    /* Payload byte 0: bit0: Dvr, bit1: Pas, bit2: RL, bit3: RR, bit4: Trunk, bit5: Hood */
-    uint8_t d_byte = 0;
-    if (doors->door_driver)     d_byte |= (1 << 0);
-    if (doors->door_passenger)  d_byte |= (1 << 1);
-    if (doors->door_rear_left)  d_byte |= (1 << 2);
-    if (doors->door_rear_right) d_byte |= (1 << 3);
-    if (doors->trunk)           d_byte |= (1 << 4);
-    if (doors->hood)            d_byte |= (1 << 5);
+    /* Hiworld Door Status (Cmd 0x12): 10 payload bytes as captured from real PSA Hiworld Canbox
+     * Byte 0: 0x00
+     * Byte 1: 0x04
+     * Byte 2: bit7: Driver (0x80), bit6: Pass (0x40), bit5: RL (0x20), bit4: RR (0x10), bit3: Trunk (0x08), bit2: Hood/Active (0x04)
+     * Byte 3..8: 0x00
+     * Byte 9: 0x03
+     */
+    uint8_t b2 = 0x04;
+    if (doors->door_driver)     b2 |= 0x80;
+    if (doors->door_passenger)  b2 |= 0x40;
+    if (doors->door_rear_left)  b2 |= 0x20;
+    if (doors->door_rear_right) b2 |= 0x10;
+    if (doors->trunk)           b2 |= 0x08;
+    if (doors->hood)            b2 |= 0x04;
 
-    uint8_t payload[1] = { d_byte };
-    uint8_t tx_buf[16];
+    uint8_t payload[10] = { 0x00, 0x04, b2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03 };
+    uint8_t tx_buf[20];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_DOOR_WINDOW_STATE, payload, sizeof(payload), 
                                          tx_buf, sizeof(tx_buf));
     if (len > 0) {

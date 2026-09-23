@@ -19,6 +19,7 @@ extern "C" {
 #define PSA_CAN_ID_TRIP1            0x1A5
 #define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
+#define PSA_CAN_ID_DOORS_BODY_220   0x220
 #define PSA_CAN_ID_DOORS_BODY       0x221
 #define PSA_CAN_ID_REAR_RADAR_AAS   0x260
 #define PSA_CAN_ID_FRONT_RADAR_AAS  0x270
@@ -126,6 +127,10 @@ size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_l
 /* --------------------------------------------------------------------------
  * 1.5 Doors & Body Status
  * -------------------------------------------------------------------------- */
+#define HIWORLD_SOF1        0x5A
+#define HIWORLD_SOF2        0xA5
+#define HIWORLD_CMD_DOOR    0x12
+
 typedef struct {
     bool driver_door;
     bool pass_door;
@@ -134,10 +139,44 @@ typedef struct {
     bool trunk;
     bool hood;
     bool handbrake;
+    bool rear_window;
+    bool fuel_flap;
+    bool auto_rear_wiper;
+    bool auto_locking;
+    bool parking_radar_enabled;
 } psa_doors_body_t;
 
+typedef struct {
+    bool door_front_left;
+    bool door_front_right;
+    bool door_rear_left;
+    bool door_rear_right;
+    bool trunk_open;
+    bool hood_open;
+    bool handbrake_pulled;
+    bool rear_window_open;
+    bool fuel_flap_open;
+    bool auto_rear_wiper_active;
+    bool auto_locking_active;
+    bool parking_radar_enabled;
+} psa_doors_state_t;
+
+typedef void (*canbox_uart_tx_fn)(const uint8_t *buf, size_t len);
+
+typedef struct {
+    psa_doors_state_t state;
+    canbox_uart_tx_fn uart_tx;
+} psa_doors_ctx_t;
+
+void psa_doors_init(psa_doors_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
+void psa_doors_send_hiworld(psa_doors_ctx_t *ctx);
+void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+
+void psa_decode_doors_0x220(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors);
 void psa_decode_doors_0x221(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors);
 size_t build_raise_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len);
+size_t build_hiworld_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len);
+size_t build_hiworld_doors_state(const psa_doors_state_t *state, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.6 Steering Wheel Angle & Dynamic Trajectory

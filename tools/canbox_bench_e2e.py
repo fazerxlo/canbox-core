@@ -112,22 +112,22 @@ def teardown_slcan(iface: str = "can0"):
 
 
 def ensure_app_built() -> bool:
-    """Ensures the native desktop binary is compiled."""
-    if os.path.isfile(NATIVE_BINARY_PATH) and os.access(NATIVE_BINARY_PATH, os.X_OK):
-        return True
-
-    print("[*] OpenCanbox Core native binary not found. Compiling 'native_test' target...")
+    """Ensures the native desktop binary is compiled and up to date."""
     pio_path = os.path.expanduser("~/.platformio/penv/bin/pio")
     pio_cmd = pio_path if os.path.isfile(pio_path) else "pio"
 
+    print("[*] Checking / compiling OpenCanbox Core 'native_test' binary...")
     try:
         subprocess.check_call(
             [pio_cmd, "run", "-e", "native_test"],
             cwd=PROJECT_ROOT,
         )
-        print("[OK] Native binary compiled successfully.")
+        print("[OK] Native binary up to date.")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        if os.path.isfile(NATIVE_BINARY_PATH) and os.access(NATIVE_BINARY_PATH, os.X_OK):
+            print(f"[WARN] Compilation check failed ({e}), using existing binary.")
+            return True
         print(f"[ERROR] Failed to compile native binary: {e}")
         return False
 
@@ -330,25 +330,18 @@ class BenchStateDecoder:
                     self.front_fog  = bool(flags & (1 << 4))
                     self.rear_fog   = bool(flags & (1 << 3))
 
-        # 0x036: Doors, Ignition, Reverse Gear & Handbrake (PSA)
-        elif can_id == 0x036 and dlc >= 3:
-            d0 = data[0]
+        # 0x036: Ignition, Reverse Gear & Handbrake (PSA)
+        elif can_id == 0x036 and dlc >= 2:
             d1 = data[1]
             with self.lock:
                 prev_rev = self.reverse_gear
-                self.driver_door     = bool(d0 & (1 << 0))
-                self.passenger_door  = bool(d0 & (1 << 1))
-                self.rear_left_door  = bool(d0 & (1 << 2))
-                self.rear_right_door = bool(d0 & (1 << 3))
-                self.trunk           = bool(d0 & (1 << 4))
-                self.hood            = bool(d0 & (1 << 5))
                 self.reverse_gear    = bool(d1 & (1 << 7))
                 self.handbrake       = bool(d1 & (1 << 0))
                 if self.reverse_gear != prev_rev:
                     self.log_event(f"Reverse Gear: {'ENGAGED (R)' if self.reverse_gear else 'DISENGAGED'}")
 
-        # 0x221: Extended Body & Doors status (PSA)
-        elif can_id == 0x221 and dlc >= 1:
+        # 0x220: Extended Body & Doors status (PSA)
+        elif can_id == 0x220 and dlc >= 1:
             d0 = data[0]
             with self.lock:
                 self.driver_door     = bool(d0 & 0x80)

@@ -36,22 +36,48 @@ void test_integration_hiworld_steering_wheel_volume_up_pipeline(void) {
 void test_integration_hiworld_door_status_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
 
-    can_frame_t frame = {
-        .id = 0x036,
-        .dlc = 4,
-        .data = { 0x11, 0x00, 0x00, 0x00 } // Driver door (bit 0) + Trunk (bit 4)
+    // 1. Test PSA 0x220 authoritative frame: Front Left (0x80)
+    can_frame_t frame_220 = {
+        .id = 0x220,
+        .dlc = 2,
+        .data = { 0x80, 0x00 }
     };
-    can_router_process_can(&frame);
+    can_router_process_can(&frame_220);
 
     uint8_t rx_buf[32];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // Expected real Hiworld 0x12 frame (10-byte payload): 5A A5 0A 12 00 04 84 00 00 00 00 00 00 03 A6
+    const uint8_t expected_220[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xA6
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_220), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_220, rx_buf, sizeof(expected_220));
 
-    // Hiworld Door Status Cmd 0x12:
-    // Payload byte 0: driver door (bit 0 = 0x01) | trunk (bit 4 = 0x10) -> 0x11
-    // Len = 1 (1 byte payload), CS = (0x01 + 0x12 + 0x11 - 1) = 0x23
-    const uint8_t expected[] = { 0x5A, 0xA5, 0x01, 0x12, 0x11, 0x23 };
-    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), rx_len);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, sizeof(expected));
+    // 2. Test PSA 0x220 frame: RL (0x20) + RR (0x10)
+    can_frame_t frame_220_rl_rr = {
+        .id = 0x220,
+        .dlc = 2,
+        .data = { 0x30, 0x00 }
+    };
+    can_router_process_can(&frame_220_rl_rr);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // Checksum = (0x0A + 0x12 + 0x00 + 0x04 + 0x34 + 0x03 - 1) & 0xFF = 0x56
+    const uint8_t expected_220_rl_rr[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x56
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_220_rl_rr), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_220_rl_rr, rx_buf, sizeof(expected_220_rl_rr));
+
+    // 3. Verify that receiving non-door CAN ID 0x221 (BSI status) does NOT overwrite door state
+    can_frame_t bsi_frame_221 = {
+        .id = 0x221,
+        .dlc = 7,
+        .data = { 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }
+    };
+    can_router_process_can(&bsi_frame_221);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len); // No bogus door status frame emitted
 }
 
 void test_integration_hiworld_telemetry_periodic_pipeline(void) {

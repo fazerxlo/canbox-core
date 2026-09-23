@@ -78,15 +78,8 @@ static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_
     }
 }
 
-static void psa_decode_doors_0x036(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 3) return;
-
-    state->doors.door_driver     = (frame->data[0] & (1 << 0)) != 0;
-    state->doors.door_passenger  = (frame->data[0] & (1 << 1)) != 0;
-    state->doors.door_rear_left  = (frame->data[0] & (1 << 2)) != 0;
-    state->doors.door_rear_right = (frame->data[0] & (1 << 3)) != 0;
-    state->doors.trunk           = (frame->data[0] & (1 << 4)) != 0;
-    state->doors.hood            = (frame->data[0] & (1 << 5)) != 0;
+static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 2) return;
 
     state->reverse_gear          = (frame->data[1] & (1 << 7)) != 0;
     state->handbrake             = (frame->data[1] & (1 << 0)) != 0;
@@ -96,9 +89,9 @@ static void psa_decode_doors_0x036(const can_frame_t *frame, vehicle_state_t *st
     }
 }
 
-static void psa_decode_doors_0x221_profile(const can_frame_t *frame, vehicle_state_t *state) {
+static void psa_decode_doors_0x220_profile(const can_frame_t *frame, vehicle_state_t *state) {
     psa_doors_body_t doors;
-    psa_decode_doors_0x221(frame->data, frame->dlc, &doors);
+    psa_decode_doors_0x220(frame->data, frame->dlc, &doors);
     state->doors.door_driver     = doors.driver_door;
     state->doors.door_passenger  = doors.pass_door;
     state->doors.door_rear_left  = doors.rear_left_door;
@@ -154,7 +147,7 @@ static void psa_decode_alerts_0x168_profile(const can_frame_t *frame, vehicle_st
 }
 
 static const profile_can_rule_t s_psa_rules[] = {
-    { PSA_CAN_ID_REVERSE_IGNITION,  psa_decode_doors_0x036 },
+    { PSA_CAN_ID_REVERSE_IGNITION,  psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_STEERING_ANGLE,    psa_decode_steering_angle_0x0e6_profile },
     { PSA_CAN_ID_STALK_BUTTONS,     psa_decode_stalk_0x0f6 },
     { 0x128,                        psa_decode_wheel_keys_0x128 },
@@ -163,7 +156,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { 0x0B6,                        psa_decode_engine_speed_0x0b6 },
     { 0x0E8,                        psa_decode_steering_angle_0x0e8 },
     { PSA_CAN_ID_CLIMATE_HVAC,      psa_decode_hvac_0x1d0_profile },
-    { PSA_CAN_ID_DOORS_BODY,        psa_decode_doors_0x221_profile },
+    { PSA_CAN_ID_DOORS_BODY_220,    psa_decode_doors_0x220_profile },
 };
 
 static void psa_init(void) {

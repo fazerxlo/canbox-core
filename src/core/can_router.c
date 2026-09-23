@@ -52,6 +52,19 @@ void can_router_periodic_100ms(void) {
         s_last_sent_state.steering_angle_deg = s_current_state.steering_angle_deg;
     }
 
+    // Continuously repeat door status frame while ANY door/trunk/hood is open.
+    // Stops repeating as soon as all doors are closed.
+    bool any_door_open = s_current_state.doors.door_driver ||
+                         s_current_state.doors.door_passenger ||
+                         s_current_state.doors.door_rear_left ||
+                         s_current_state.doors.door_rear_right ||
+                         s_current_state.doors.trunk ||
+                         s_current_state.doors.hood;
+
+    if (any_door_open) {
+        hu_protocol_send_doors(&s_current_state.doors);
+    }
+
     // Send keep-alive packet to keep Android HU comms link alive
     hu_protocol_send_heartbeat();
 }
