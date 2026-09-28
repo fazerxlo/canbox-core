@@ -5,16 +5,17 @@
 **Vehicle Network:** Peugeot 407 (PSA Comfort CAN Bus @ 125 kbps, 11-bit Standard ID)  
 **Primary Driver Protocol:** Hiworld (`0x5A 0xA5` sync header, additive sum checksum)  
 **Cross-Compatible Protocols:** Raise (RZC `0x2E`), Bagoo (`0xD5`/`0xFD`), Simple Soft (XP `0x2E`)  
-**Cross-Referenced Ground Truth:** `https://github.com/fazerxlo/canbox/tree/main/doc/CAN2004_clima.md`, `CAN_messages.md`
+**Ground Truth (Primary):** `RT4_CAN_2004.md` (reverse-engineered from Magneti Marelli RT4 firmware SW 8.31) + bench-verified `signal-db/clim.yaml`  
+**Cross-Referenced:** `https://github.com/fazerxlo/canbox/tree/main/doc/CAN2004_clima.md`, `CAN_messages.md`
 
 ---
 
 # 1. Functional Domain & Architecture Overview
 
 The Peugeot 407 automatic climate control system drives three CAN frames on the PSA Comfort CAN bus:
-- **`0x1D0` (Climate Panel State, 500 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost, and zone temperature indices.
-- **`0x1E3` (Climate EMF / Display State, 200 ms):** Carries A/C compressor state, dual mode, front demist, cabin air recycling popup notification triggers (`intake_notify`), and display indices.
-- **`0x12D` (Climate Command / Compressor Capability, 500 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
+- **`0x1D0` (Climate Panel State, 100 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost, and zone temperature indices.
+- **`0x1E3` (Climate EMF / Display State, 100 ms):** Carries A/C compressor state, dual mode, front demist, cabin air recycling popup notification triggers (`intake_notify`), and display indices.
+- **`0x12D` (Climate Compressor State, 100 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
 
 The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x8A`) to inject corresponding control frames back to the vehicle.
 
@@ -46,7 +47,9 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 # 2. PSA CAN Bus Bitfield Specification
 
 ### 2.1 PSA Climate Panel State Frame (`0x1D0`)
-- **CAN ID:** `0x1D0` (DLC: 8, Period: 500 ms)
+- **CAN ID:** `0x1D0` (DLC: 8 bytes, Period: 100 ms)
+- **Direction:** Climate Panel (Façade Climatisation) → BSI / CAN adapter (uplink / status broadcast)
+- **Note on DLC:** The RT4 re-emits `0x1D0` toward the Climate ECU as a 7-byte *demand* frame. The 8-byte format described here is the *panel broadcast* direction verified on the bench.
 - **Standby Frame (Ignition ON, Fan=0):** `A8 00 0F 00 00 <TempLeft> <TempRight> 00`
 - **Active Byte Layout:**
 
@@ -55,14 +58,20 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 | Byte   | Bit    | Function / Signal Name             | Value / Encoding Definition |
 +--------+--------+------------------------------------+-----------------------------+
 | Byte 0 | 7..0   | Climate Mode Flags                 | 0x08 = AUTO mode            |
-|        |        |                                    | 0x28 = Manual mode          |
+|        |        |                                    | 0x28 = Manual mode (0x08|0x20)|
 |        |        |                                    | 0x19 = Front Demist active  |
+|        |        |                                    |   (bench-verified panel     |
+|        |        |                                    |    broadcast encoding;      |
+|        |        |                                    |    RT4 demand uses 0x80)    |
 |        |        |                                    | 0xA8 = Standby (System Off) |
 +--------+--------+------------------------------------+-----------------------------+
 | Byte 1 | 7..0   | Constant Padding                   | 0x00                        |
 +--------+--------+------------------------------------+-----------------------------+
 | Byte 2 | 3..0   | Fan Speed Raw Nibble               | 0x0F = Off / Standby        |
-|        |        |                                    | 0x00..0x07 = Fan Level 1..8 |
+|        |        |                                    | 0x00..0x07 = Fan Levels 1..8|
+|        |        |                                    |   (bench-verified 8-speed;  |
+|        |        |                                    |    RT4 demand: 7 speeds +   |
+|        |        |                                    |    0xF = Max)               |
 +--------+--------+------------------------------------+-----------------------------+
 | Byte 3 | 7..4   | Left Zone Air Distribution Code    | See Air Distribution Table  |
 |        | 3..0   | Right Zone Air Distribution Code   | See Air Distribution Table  |
@@ -95,16 +104,90 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 | `10` | **20.5 °C** | $41 = \text{0x29}$ | `22` | **MAX / HI** | `0xFF` (-1 / HI) |
 | `11` | **21.0 °C** | $42 = \text{0x2A}$ | | | |
 
-### 2.3 Air Distribution Codes (`0x1D0` Byte 3)
+> **Note:** `0x1D0` uses this raw 0..22 index directly. `0x1E3` uses a **separate** display encoding: raw `0x00` = LO, `0x01..0x15` (1..21) = 14.5 °C .. 27.0 °C via formula `14.0 + raw × 0.5`, `0x16` = HI. See Section 2.4.
+
+### 2.3 Air Distribution Codes (`0x1D0` Byte 3 & `0x1E3` Bytes 4–5)
+
+> **Source:** RT4 firmware reverse-engineering (`RT4_CAN_2004.md` §4.3). The previous table was wrong (codes were shifted by 1). Both `0x1D0` (panel broadcast nibble) and `0x1E3` (EMF display upper nibble) use the same code set.
+
 | Nibble Code | Vent Target | Hiworld Code | Android Distribution Flags |
 |:---:|:---|:---:|:---|
-| `0x00` / `0x01` | **AUTO** | `0` | Auto distribution |
-| `0x02` | **Down** (Floor / Footwell) | `3` | Floor vent |
-| `0x03` | **Up** (Windshield defrost) | `11` | Windshield defrost vent |
-| `0x04` | **Face** (Dashboard center) | `6` | Face / Center vent |
-| `0x05` | **Up + Down** (Defrost + Floor) | `12` | Up + Down |
-| `0x06` | **Face + Down** (Face + Floor) | `5` | Face + Down |
-| `0x07` | **All** (Face + Floor + Defrost) | `14` | Face + Floor + Up |
+| `0x00` | **AUTO** | `0` | Auto distribution |
+| `0x01` | **Windshield / Screen** (defrost vent) | `11` | Windshield defrost vent |
+| `0x02` | **Face** (Dashboard center vents) | `6` | Face / Center vent |
+| `0x03` | **Feet / Floor** (Footwell) | `3` | Floor vent |
+| `0x04` | **Bi-level** (Screen + Feet) | `12` | Windshield + Floor |
+| `0x05` | **Face + Feet** (Vents + Footwell) | `5` | Face + Floor |
+
+
+---
+
+### 2.4 PSA Climate EMF / Display State Frame (`0x1E3`)
+- **CAN ID:** `0x1E3` (DLC: 7 bytes, Period: 100 ms per RT4 firmware)
+- **Direction:** Climate ECU → RT4 / Multifunction Display (EMF)
+- **Standby Frame (Ignition ON, Climate Off):** `1C 40 0B 0B 00 00 0F 00`
+
+**Active Byte Layout:**
+
+```
++--------+--------+------------------------------------+------------------------------+
+| Byte   | Bit    | Signal Name                        | Value / Encoding             |
++--------+--------+------------------------------------+------------------------------+
+| Byte 0 | Bit 7  | RECIRC_STATUS (Recirculation)      | 1 = Cabin recirc active      |
+|        | Bit 4  | AC_COMPRESSOR                      | 1 = A/C compressor ON        |
+|        |        |                                    |   (bench-verified; RT4 reads |
+|        |        |                                    |    bit 6 as AC_OFF in demand |
+|        |        |                                    |    direction)                |
+|        | Bit 3  | AUTO_BLOWER (both bits 3+2 = AUTO) | 0x0C = AUTO mode active      |
+|        | Bit 2  | INTAKE_EXPLICIT                    | 1 = explicit Fresh/Recirc    |
+|        | Bit 1  | INTAKE_NOTIFY (one-shot)           | 1 = MFD popup trigger        |
+|        | Bit 0  | DUAL_ACTIVE                        | 1 = Dual-zone independent    |
++--------+--------+------------------------------------+------------------------------+
+| Byte 1 | Bit 7  | UNFROST_FRONT                      | 1 = Front demist active      |
+|        | Bits 5..4 | Baseline flags                  | Always 0x30 (0x20 | 0x10)   |
++--------+--------+------------------------------------+------------------------------+
+| Byte 2 | 4..0   | DISPLAY_TEMP_L (Driver)            | 0x00=LO, 0x01..0x15=14.5°C  |
+|        |        |                                    |   ..27°C (14.0+raw×0.5),    |
+|        |        |                                    |   0x16=HI                   |
+|        | 7..5   | STATUS_BITS (clim.bits)            | Upper-nibble diagnostic flags|
++--------+--------+------------------------------------+------------------------------+
+| Byte 3 | 7..0   | DISPLAY_TEMP_R (Passenger)         | Same encoding as Byte 2      |
++--------+--------+------------------------------------+------------------------------+
+| Byte 4 | 7..4   | AIR_FLOW_L (Driver distribution)   | See Air Distribution Table   |
++--------+--------+------------------------------------+------------------------------+
+| Byte 5 | 7..4   | AIR_FLOW_R (Passenger distribution)| See Air Distribution Table   |
++--------+--------+------------------------------------+------------------------------+
+| Byte 6 | 3..0   | DISPLAY_FAN_BARS                   | 0x0F = Off, 0x00..0x07 =    |
+|        |        |                                    |   Fan Levels 1..8            |
++--------+--------+------------------------------------+------------------------------+
+```
+
+**Byte 0 mode bit combinations (bench-verified):**
+
+| Byte 0 value | Meaning |
+|:---:|:---|
+| `0x1C` | AUTO + A/C ON + Mono (bits 3+2+4) |
+| `0x1D` | AUTO + A/C ON + Dual |
+| `0x11` | Manual implicit fresh + Mono |
+| `0x05` | Explicit fresh + A/C OFF + Mono |
+| `0x85` | Explicit recirc + A/C OFF + Mono |
+| `0x87` | Explicit recirc + intake notify (one-shot popup) |
+| `0x07` | Explicit fresh + intake notify (one-shot popup) |
+
+---
+
+### 2.5 Climate Compressor State Frame (`0x12D`)
+- **CAN ID:** `0x12D` (DLC: 8 bytes, Period: 100 ms per RT4 firmware)
+- **Direction:** BSI / Engine ECU → Climate ECU / CAN adapter
+
+| Byte | Signal | Encoding |
+|---|---|---|
+| 0 | `COMPRESSOR_STATUS` | `0x80` = clutch engaged; `0x00` = compressor off |
+| 1 | `EVAPORATOR_TEMP` | raw − 40 °C; `0x32` = 10 °C (default bench value) |
+| 2 | `BLOWER_VOLTAGE` | raw × 0.1 V; `0x32` = 5.0 V (default bench value) |
+| 3–4 | `REFRIGERANT_PRESS` | raw × 0.1 bar |
+| 5–6 | Reserved | `0x00 0x00` |
+| 7 | `FLAGS` | `0x80` = climate loop authorized |
 
 ---
 

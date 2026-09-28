@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "core/can_router.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,7 +84,15 @@ typedef struct {
     bool    pass_wind_down;
 } hvac_state_t;
 
+typedef void (*canbox_uart_tx_fn)(const uint8_t *buf, size_t len);
+
+#define HIWORLD_CMD_CAR_AC_STATE 0x31
+
 void psa_decode_hvac_0x1d0(const uint8_t *data, uint8_t dlc, hvac_state_t *st);
+
+void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
+void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
+void psa_hvac_process_can_0x12d(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
 size_t build_raise_hvac_packet(const hvac_state_t *st, uint8_t *out_buf, size_t max_len);
 
 /* --------------------------------------------------------------------------
@@ -160,8 +169,6 @@ typedef struct {
     bool auto_locking_active;
     bool parking_radar_enabled;
 } psa_doors_state_t;
-
-typedef void (*canbox_uart_tx_fn)(const uint8_t *buf, size_t len);
 
 typedef struct {
     psa_doors_state_t state;

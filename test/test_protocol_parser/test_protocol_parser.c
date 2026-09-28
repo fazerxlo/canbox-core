@@ -66,6 +66,7 @@ void test_psa_extended_cruise_memory(void);
 void test_psa_extended_decode_cruise_0x1a8(void);
 void test_psa_extended_adas(void);
 void test_psa_extended_decode_alerts_0x168(void);
+void test_peugeot_407_hvac_hiworld(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -152,6 +153,7 @@ int main(void) {
     RUN_TEST(test_psa_extended_decode_cruise_0x1a8);
     RUN_TEST(test_psa_extended_adas);
     RUN_TEST(test_psa_extended_decode_alerts_0x168);
+    RUN_TEST(test_peugeot_407_hvac_hiworld);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

@@ -169,6 +169,78 @@ size_t build_raise_hvac_packet(const hvac_state_t *st, uint8_t *out_buf, size_t 
     return 11;
 }
 
+static const uint8_t peugeot_temp_map[23] = {
+    0xFE, 28, 30, 32, 34, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50, 52, 54, 56, 0xFF
+};
+
+
+
+static const uint8_t psa_wind_to_hiworld[16] = {
+    [0] = 0,   // Auto
+    [1] = 11,  // Windshield / Screen (0x0B)
+    [2] = 3,   // Floor / Feet (0x03)
+    [3] = 6,   // Face / Center (0x06)
+    [4] = 11,  // Windshield / Screen (0x0B)
+    [5] = 5,   // Face + Floor (0x05)
+    [6] = 12,  // Windshield + Floor (0x0C)
+    [7] = 13,  // Windshield + Face (0x0D)
+    [8] = 14,  // Floor / Down (0x0E)
+};
+
+void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
+    if (!climate || !data || dlc < 7) return;
+
+    climate->power_on = (data[0] != 0xA8);
+
+    uint8_t fan = data[2] & 0x0F;
+    if (fan == 0x0F) {
+        climate->fan_speed = 0;
+    } else if (fan <= 8) {
+        climate->fan_speed = fan + 1;
+    }
+
+    /* Air distribution: Byte 3 upper nibble is Left (Driver), lower nibble is Right (Passenger) */
+    uint8_t left_code = (data[3] >> 4) & 0x0F;
+    uint8_t right_code = data[3] & 0x0F;
+
+    climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
+    climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
+
+    climate->aqs_auto = (data[0] & 0x10) != 0;
+    climate->recirculate = (data[4] & 0x10) != 0;
+    climate->rear_defrost = (data[4] & 0x01) != 0;
+
+    uint8_t l_temp = data[5];
+    uint8_t r_temp = data[6];
+    if (l_temp < 23) climate->temp_driver = peugeot_temp_map[l_temp];
+    if (r_temp < 23) climate->temp_passenger = peugeot_temp_map[r_temp];
+}
+
+void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
+    if (!climate || !data || dlc < 2) return;
+
+    climate->ac_on = (data[0] & 0x10) != 0;
+    climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
+    climate->dual_mode = (data[0] & 0x01) != 0;
+
+    climate->front_max_defrost = (data[1] & 0x80) != 0;
+
+    if (dlc >= 6) {
+        /* Air distribution: Byte 4 upper nibble is Left (Driver), Byte 5 upper nibble is Right (Passenger) */
+        uint8_t left_code = (data[4] >> 4) & 0x0F;
+        uint8_t right_code = (data[5] >> 4) & 0x0F;
+
+        climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
+        climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
+    }
+}
+
+void psa_hvac_process_can_0x12d(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
+    if (!climate || !data || dlc < 1) return;
+    
+    climate->ac_on = (data[0] & 0x80) != 0;
+}
+
 /* --------------------------------------------------------------------------
  * 1.3 Ultrasonic Parking Sensors (Front & Rear AAS)
  * -------------------------------------------------------------------------- */

@@ -907,3 +907,60 @@ void test_psa_extended_decode_alerts_0x168(void) {
     TEST_ASSERT_FALSE(esp_fault);
 }
 
+// Test the raw state machine
+void test_peugeot_407_hvac_hiworld(void) {
+    vehicle_climate_t climate;
+    memset(&climate, 0, sizeof(climate));
+
+    // Vector 1: Auto AC 21.0°C Dual Mode, Fan Speed 3 (CAN=2)
+    // Wait, the test uses CAN `03` which is Fan Speed 4!
+    const uint8_t can_1d0[] = { 0x08, 0x00, 0x03, 0x00, 0x00, 0x0B, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0, 8);
+    
+    TEST_ASSERT_TRUE(climate.power_on);
+    TEST_ASSERT_EQUAL_UINT8(4, climate.fan_speed);  // 03 + 1 = 4
+    TEST_ASSERT_EQUAL_HEX8(42, climate.temp_driver);
+    TEST_ASSERT_EQUAL_HEX8(42, climate.temp_passenger);
+    
+    // can_1d0 byte 3 is 0x00 -> Auto
+    TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
+
+    const uint8_t can_1e3[] = { 0x1D, 0x00 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3, 2);
+    
+    TEST_ASSERT_TRUE(climate.ac_on);
+    TEST_ASSERT_TRUE(climate.auto_mode);
+    TEST_ASSERT_TRUE(climate.dual_mode);
+
+    // Vector 2: Dual Zone air distribution - Left=4 (Windshield 11), Right=2 (Floor 3)
+    const uint8_t can_1d0_v2[] = { 0x28, 0x00, 0x00, 0x42, 0x00, 0x0E, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_v2, 8);
+    TEST_ASSERT_EQUAL_UINT8(11, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(3, climate.pass_wind_mode);
+
+    // Vector 3: Left=2 (Floor 3), Right=4 (Windshield 11)
+    const uint8_t can_1d0_v3[] = { 0x28, 0x00, 0x00, 0x24, 0x00, 0x0E, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_v3, 8);
+    TEST_ASSERT_EQUAL_UINT8(3, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(11, climate.pass_wind_mode);
+
+    // Vector 4: Left=3 (Face 6), Right=7 (Windshield+Face 13)
+    const uint8_t can_1d0_v4[] = { 0x28, 0x00, 0x00, 0x37, 0x00, 0x0E, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_v4, 8);
+    TEST_ASSERT_EQUAL_UINT8(6, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(13, climate.pass_wind_mode);
+
+    // Vector 5: 0x1E3 EMF Frame Airflow Decoding - Left=4 (Windshield 11), Right=2 (Floor 3)
+    const uint8_t can_1e3_v5[] = { 0x11, 0x30, 0x12, 0x12, 0x40, 0x20, 0x03, 0x00 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v5, 8);
+    TEST_ASSERT_EQUAL_UINT8(11, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(3, climate.pass_wind_mode);
+
+    // Vector 6: 0x1E3 EMF Frame Auto Airflow Decoding - Left=0 (Auto 0), Right=0 (Auto 0)
+    const uint8_t can_1e3_v6[] = { 0x1C, 0x30, 0x12, 0x12, 0x00, 0x00, 0x03, 0x00 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v6, 8);
+    TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
+}
+

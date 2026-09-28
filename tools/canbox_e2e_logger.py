@@ -99,17 +99,17 @@ class Logger:
             self.file.write(f"{ts:.3f} [{source}] {message}\n")
             self.file.flush()
 
-    def dump_last_30s(self):
+    def dump_last_ns(self, ns = 5):
         with self.lock:
             self.file.flush()
         
         import datetime
         dt_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         out_filename = f"dump_{dt_str}.log"
-        print(f"\n[*] Dumping last 30 seconds of logs to {out_filename}...\r")
+        print(f"\n[*] Dumping last {ns} seconds of logs to {out_filename}...\r")
         
         current_time = time.time()
-        cutoff = current_time - 30.0
+        cutoff = current_time - float(ns)
         
         try:
             with open(self.temp_path, "r") as f_in, open(out_filename, "w") as f_out:
@@ -284,7 +284,7 @@ def main():
     t_app = threading.Thread(target=read_stream, args=(app_proc.stdout, logger, "APP", stats), daemon=True)
     t_app.start()
     
-    print("[*] App started. Press 'L' to dump last 30s of logs. Press 'q' or Esc to quit.\r")
+    print("[*] App started. Press 'L' to dump last 5s of logs. Press 'S' to dump last 30s of logs. Press 'q' or Esc to quit.\r")
     
     # Terminal setup to read single characters
     fd = sys.stdin.fileno()
@@ -315,7 +315,9 @@ def main():
             if select.select([sys.stdin], [], [], 0.1)[0]:
                 ch = sys.stdin.read(1)
                 if ch.lower() == 'l':
-                    logger.dump_last_30s()
+                    logger.dump_last_ns(5)
+                elif ch.lower() == 's':
+                    logger.dump_last_ns(30)
                 elif ch.lower() == 'q' or ch == '\x1b':
                     break
                 else:

@@ -77,13 +77,25 @@ void hiworld_conn_send_version(hiworld_connection_ctx_t *ctx) {
 void hiworld_conn_send_feature_enables(hiworld_connection_ctx_t *ctx) {
     if (!ctx) return;
 
-    /* Feature Enable 1 (Cmd 0x71): Lighting, Locks, Wipers, Radar available */
-    uint8_t feat1[2] = { 0xFF, 0xFF };
+    /* Feature Enable 1 (Cmd 0x71): 2 bytes (0x60, 0x12) - matches OEM Canbox */
+    uint8_t feat1[2] = { 0x60, 0x12 };
     send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE1, feat1, 2);
 
-    /* Feature Enable 2 (Cmd 0x72): TPMS Reset, Mirror Fold, ADAS available */
-    uint8_t feat2[2] = { 0xFB, 0xFF };
-    send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE2, feat2, 2);
+    /* Feature Enable 2 (Cmd 0x72): 8 bytes - matches OEM Canbox */
+    uint8_t feat2[8] = { 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE2, feat2, 8);
+
+    /* Central State 1 (Cmd 0x76): 2 bytes */
+    uint8_t state1[2] = { 0x00, 0x00 };
+    send_hiworld_frame(ctx, HIWORLD_CMD_CENTRAL_STATE1, state1, 2);
+
+    /* Central State 2 (Cmd 0x79): 8 bytes (Byte 6: 0x00 = Dual Zone Independent) */
+    uint8_t state2[8] = { 0x00, 0x06, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    send_hiworld_frame(ctx, HIWORLD_CMD_CENTRAL_STATE2, state2, 8);
+
+    /* Unit Info (Cmd 0xC1): 3 bytes (0x28, 0x20, 0x00) - distance/temp/fuel units */
+    uint8_t units[3] = { 0x28, 0x20, 0x00 };
+    send_hiworld_frame(ctx, HIWORLD_CMD_UNIT_INFO, units, 3);
 }
 
 static void handle_parsed_command(hiworld_connection_ctx_t *ctx, uint8_t cmd_id, const uint8_t *payload, uint8_t len) {

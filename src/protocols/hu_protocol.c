@@ -70,6 +70,12 @@ void hu_protocol_send_doors(const vehicle_doors_t *doors) {
     }
 }
 
+void hu_protocol_send_climate(const vehicle_climate_t *climate) {
+    if (s_active_driver && s_active_driver->send_climate) {
+        s_active_driver->send_climate(climate);
+    }
+}
+
 void hu_protocol_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) {
     if (s_active_driver && s_active_driver->send_telemetry) {
         s_active_driver->send_telemetry(speed, rpm, angle);

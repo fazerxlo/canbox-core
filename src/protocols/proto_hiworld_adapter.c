@@ -32,14 +32,14 @@ static void uart_tx_adapter(const uint8_t *buf, size_t len) {
 static void ensure_hiworld_initialized(void) {
     if (!s_hiworld_initialized) {
         proto_hiworld_init(on_hiworld_packet_received);
-        hiworld_conn_init(&s_hw_conn_ctx, "HW_PSA_V2.04.01", uart_tx_adapter, on_can_config_callback);
+        hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
         s_hiworld_initialized = true;
     }
 }
 
 static void hiworld_init(void) {
     proto_hiworld_init(on_hiworld_packet_received);
-    hiworld_conn_init(&s_hw_conn_ctx, "HW_PSA_V2.04.01", uart_tx_adapter, on_can_config_callback);
+    hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
     s_hiworld_initialized = true;
 }
 
@@ -129,6 +129,41 @@ static void hiworld_send_heartbeat(void) {
     }
 }
 
+static void hiworld_send_climate(const vehicle_climate_t *climate) {
+    uint8_t payload[12] = {0};
+    
+    if (climate->power_on)         payload[0] |= 0x40;
+    if (climate->ac_max)           payload[0] |= 0x20;
+    if (climate->dual_mode)        payload[0] |= 0x04; // Hiworld Dual mode is Bit 2 (0x04)
+    if (climate->auto_mode)        payload[0] |= 0x08;
+    if (climate->ac_on)            payload[0] |= 0x01;
+
+    payload[1] = 0x08; // Baseline AQS auto as observed from real Canbox
+    if (climate->recirculate)      payload[1] |= 0x10;
+    if (climate->aqs_auto)         payload[1] |= 0x08;
+
+    if (climate->rear_defrost)      payload[2] |= 0x20;
+    if (climate->front_max_defrost) payload[2] |= 0x10;
+
+    payload[3] = 0x03; // Auto blower intensity level (matches OEM Canbox)
+    payload[4] = (uint8_t)(((climate->pass_wind_mode & 0x0F) << 4) | (climate->driver_wind_mode & 0x0F));
+    payload[5] = climate->fan_speed;
+    payload[6] = climate->temp_driver;
+    payload[7] = climate->temp_passenger;
+
+    payload[8] = 0x00;
+    payload[9] = 0x00;
+    payload[10] = 0x00;
+    payload[11] = (climate->outdoor_temp_raw != 0) ? climate->outdoor_temp_raw : 0x78;
+
+    uint8_t tx_buf[20];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_AC_STATE, payload, sizeof(payload), 
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -136,6 +171,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .feed_byte = hiworld_feed_byte,
     .send_wheel_key = hiworld_send_wheel_key,
     .send_doors = hiworld_send_doors,
+    .send_climate = hiworld_send_climate,
     .send_telemetry = hiworld_send_telemetry,
     .send_heartbeat = hiworld_send_heartbeat,
 };

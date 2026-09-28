@@ -47,11 +47,19 @@ typedef vehicle_doors_t door_state_t;
 typedef struct {
     bool    power_on;
     bool    ac_on;
+    bool    ac_max;
     bool    auto_mode;
+    bool    dual_mode;
     bool    recirculate;
-    uint8_t fan_speed;       // 0 - 7
-    uint8_t temp_driver;     // Raw scale: (val * 0.5) deg C
-    uint8_t temp_passenger;  // Raw scale: (val * 0.5) deg C
+    bool    aqs_auto;
+    bool    front_max_defrost;
+    bool    rear_defrost;
+    uint8_t fan_speed;       // 0 - 7 (or up to 15)
+    uint8_t driver_wind_mode;
+    uint8_t pass_wind_mode;
+    uint8_t temp_driver;     // Raw scale for Android
+    uint8_t temp_passenger;  // Raw scale for Android
+    uint8_t outdoor_temp_raw;
 } vehicle_climate_t;
 
 typedef struct {

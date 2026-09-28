@@ -24,6 +24,7 @@ typedef struct {
     void           (*feed_byte)(uint8_t byte);
     void           (*send_wheel_key)(const vehicle_wheel_t *wheel);
     void           (*send_doors)(const vehicle_doors_t *doors);
+    void           (*send_climate)(const vehicle_climate_t *climate);
     void           (*send_telemetry)(uint16_t speed, uint16_t rpm, int16_t angle);
     void           (*send_heartbeat)(void);
 } hu_protocol_driver_t;

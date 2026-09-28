@@ -31,6 +31,12 @@ void can_router_process_can(const can_frame_t *frame) {
         hu_protocol_send_doors(&s_current_state.doors);
         s_last_sent_state.doors = s_current_state.doors;
     }
+
+    // Immediately push climate updates on change
+    if (memcmp(&s_current_state.climate, &s_last_sent_state.climate, sizeof(vehicle_climate_t)) != 0) {
+        hu_protocol_send_climate(&s_current_state.climate);
+        s_last_sent_state.climate = s_current_state.climate;
+    }
 }
 
 void can_router_process_uart_byte(uint8_t byte) {
