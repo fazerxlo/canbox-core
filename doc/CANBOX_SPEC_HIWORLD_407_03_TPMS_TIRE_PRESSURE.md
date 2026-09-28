@@ -29,7 +29,7 @@ The Peugeot 407 features active TPMS wheel transmitters in all four road wheels 
 |                         CAN Box Microcontroller (C99 Engine)                       |
 |   1. Extracts 4-wheel numeric pressures (0.1 Bar / 0.05 Bar) from 0x361 / 0x3A1    |
 |   2. Classifies discrete alarm states (Under-inflation, Puncture, Battery Low)     |
-|   3. Dispatches Hiworld 0x18 (Discrete) & 0x66 / 0x68 (Numeric TPMS)               |
+|   3. Dispatches Hiworld 0x18 (Discrete) & 0x66 (Numeric TPMS, verified in PeugeotDataParser) │
 +------------------------------------------------------------------------------------+
                                           │
                     [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
@@ -218,15 +218,23 @@ static inline void psa_tpms_process_can_0x361(psa_tpms_ctx_t *ctx, const uint8_t
 
     if (ctx->state.fl_state != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
         ctx->state.fl_press_bar_deci = (uint8_t)(fl_raw & 0x3FFF);
+    } else {
+        ctx->state.fl_press_bar_deci = 0;
     }
     if (ctx->state.fr_state != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
         ctx->state.fr_press_bar_deci = (uint8_t)(fr_raw & 0x3FFF);
+    } else {
+        ctx->state.fr_press_bar_deci = 0;
     }
     if (ctx->state.rr_state != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
         ctx->state.rr_press_bar_deci = (uint8_t)(rr_raw & 0x3FFF);
+    } else {
+        ctx->state.rr_press_bar_deci = 0;
     }
     if (ctx->state.rl_state != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
         ctx->state.rl_press_bar_deci = (uint8_t)(rl_raw & 0x3FFF);
+    } else {
+        ctx->state.rl_press_bar_deci = 0;
     }
 
     psa_tpms_send_numeric(ctx);
@@ -245,6 +253,27 @@ static inline void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t
     psa_tpms_send_numeric(ctx);
 }
 
+/* Process PSA CAN 0x1E1 Frame (Wheel Status Enum) */
+static inline void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (dlc < 4) return;
+
+    /* PSA 0x1E1 bits 5..3 carry RT4 tyre state enum:
+       0=OK, 1=LOW, 2=FLAT, 3=NO_DATA, 4=BATTERY_LOW */
+    uint8_t fl_st = (data[0] >> 3) & 0x07;
+    uint8_t fr_st = (data[1] >> 3) & 0x07;
+    uint8_t rr_st = (data[2] >> 3) & 0x07;
+    uint8_t rl_st = (data[3] >> 3) & 0x07;
+
+    /* Map PSA enum to Hiworld discrete alarm:
+       0=Normal, 1=Low, 2=Puncture, 3=Fault/Offline */
+    ctx->state.fl_state = (fl_st >= 3) ? 3 : fl_st;
+    ctx->state.fr_state = (fr_st >= 3) ? 3 : fr_st;
+    ctx->state.rr_state = (rr_st >= 3) ? 3 : rr_st;
+    ctx->state.rl_state = (rl_st >= 3) ? 3 : rl_st;
+
+    psa_tpms_send_discrete(ctx);
+}
+
 #endif /* CANBOX_TPMS_H */
 ```
 
@@ -257,5 +286,33 @@ static inline void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t
   ```bash
   cansend vcan0 361#0018001800160016
   ```
-- **Expected UART Output (Hiworld `0x66`):**
-  - Frame: `5A A5 06 66 01 18 18 16 16 00 D2`
+- **Expected UART Output:**
+  - **Numeric (`Cmd 0x66`):** `5A A5 06 66 01 18 18 16 16 00 C8`
+  - **Discrete (`Cmd 0x18`):** `5A A5 04 18 00 00 00 00 1B`
+
+### Vector 2: Asymmetric Pressures with Rear-Left Low Warning (FL=2.4, FR=2.3, RL=1.2, RR=2.1 Bar)
+- **CAN ID `0x361` Injection:**
+  - FL: 2.4 Bar (State 0 OK) -> `0x0018`
+  - FR: 2.3 Bar (State 0 OK) -> `0x0017`
+  - RR: 2.1 Bar (State 0 OK) -> `0x0015`
+  - RL: 1.2 Bar (State 1 UNDER_INFLATED = `0x4000`) -> `0x400C`
+  ```bash
+  cansend vcan0 361#001800170015400C
+  ```
+- **Expected UART Output:**
+  - **Numeric (`Cmd 0x66`):** `5A A5 06 66 01 18 17 0C 15 00 BC`
+  - **Discrete (`Cmd 0x18`):** `5A A5 04 18 00 00 01 00 1C` (RL alarm = `0x01` LOW)
+
+### Vector 3: Front-Right Puncture / Flat Tyre (FL=2.4, FR=0.4, RL=2.4, RR=2.4 Bar)
+- **CAN ID `0x361` Injection:**
+  - FL: 2.4 Bar (State 0 OK) -> `0x0018`
+  - FR: 0.4 Bar (State 2 PUNCTURE = `0x8000`) -> `0x8004`
+  - RR: 2.4 Bar (State 0 OK) -> `0x0018`
+  - RL: 2.4 Bar (State 0 OK) -> `0x0018`
+  ```bash
+  cansend vcan0 361#0018800400180018
+  ```
+- **Expected UART Output:**
+  - **Numeric (`Cmd 0x66`):** `5A A5 06 66 01 18 04 18 18 00 B8`
+  - **Discrete (`Cmd 0x18`):** `5A A5 04 18 00 02 00 00 1D` (FR alarm = `0x02` PUNCTURE)
+

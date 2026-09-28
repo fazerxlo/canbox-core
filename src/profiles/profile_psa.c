@@ -142,18 +142,83 @@ static void psa_decode_alerts_0x168_profile(const can_frame_t *frame, vehicle_st
     psa_decode_alerts_0x168(frame->data, frame->dlc, &tpms_fault, &tpms_under, &tpms_punc, &esp_fault);
 }
 
+static void psa_decode_tpms_0x361_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 8) return;
+
+    uint16_t fl_raw = read_be16_local(&frame->data[0]);
+    uint16_t fr_raw = read_be16_local(&frame->data[2]);
+    uint16_t rr_raw = read_be16_local(&frame->data[4]);
+    uint16_t rl_raw = read_be16_local(&frame->data[6]);
+
+    state->tpms.alarm_state[0] = (uint8_t)((fl_raw >> 14) & 0x03);
+    state->tpms.alarm_state[1] = (uint8_t)((fr_raw >> 14) & 0x03);
+    state->tpms.alarm_state[2] = (uint8_t)((rl_raw >> 14) & 0x03);
+    state->tpms.alarm_state[3] = (uint8_t)((rr_raw >> 14) & 0x03);
+
+    if (state->tpms.alarm_state[0] != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
+        state->tpms.pressure_bar_deci[0] = (uint8_t)(fl_raw & 0x3FFF);
+    } else {
+        state->tpms.pressure_bar_deci[0] = 0;
+    }
+    if (state->tpms.alarm_state[1] != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
+        state->tpms.pressure_bar_deci[1] = (uint8_t)(fr_raw & 0x3FFF);
+    } else {
+        state->tpms.pressure_bar_deci[1] = 0;
+    }
+    if (state->tpms.alarm_state[2] != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
+        state->tpms.pressure_bar_deci[2] = (uint8_t)(rl_raw & 0x3FFF);
+    } else {
+        state->tpms.pressure_bar_deci[2] = 0;
+    }
+    if (state->tpms.alarm_state[3] != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
+        state->tpms.pressure_bar_deci[3] = (uint8_t)(rr_raw & 0x3FFF);
+    } else {
+        state->tpms.pressure_bar_deci[3] = 0;
+    }
+
+    state->tpms.valid = true;
+}
+
+static void psa_decode_tpms_0x3a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 4) return;
+
+    state->tpms.pressure_bar_deci[0] = (uint8_t)((frame->data[0] * 5 + 5) / 10);
+    state->tpms.pressure_bar_deci[1] = (uint8_t)((frame->data[1] * 5 + 5) / 10);
+    state->tpms.pressure_bar_deci[2] = (uint8_t)((frame->data[3] * 5 + 5) / 10); /* RL */
+    state->tpms.pressure_bar_deci[3] = (uint8_t)((frame->data[2] * 5 + 5) / 10); /* RR */
+    state->tpms.valid = true;
+}
+
+static void psa_decode_tpms_0x1e1_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 4) return;
+
+    uint8_t fl_st = (uint8_t)((frame->data[0] >> 3) & 0x07);
+    uint8_t fr_st = (uint8_t)((frame->data[1] >> 3) & 0x07);
+    uint8_t rr_st = (uint8_t)((frame->data[2] >> 3) & 0x07);
+    uint8_t rl_st = (uint8_t)((frame->data[3] >> 3) & 0x07);
+
+    state->tpms.alarm_state[0] = (fl_st >= 3) ? 3 : fl_st;
+    state->tpms.alarm_state[1] = (fr_st >= 3) ? 3 : fr_st;
+    state->tpms.alarm_state[2] = (rl_st >= 3) ? 3 : rl_st;
+    state->tpms.alarm_state[3] = (rr_st >= 3) ? 3 : rr_st;
+    state->tpms.valid = true;
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
-    { PSA_CAN_ID_REVERSE_IGNITION,  psa_decode_ignition_reverse_0x036 },
-    { PSA_CAN_ID_STEERING_ANGLE,    psa_decode_steering_angle_0x0e6_profile },
-    { PSA_CAN_ID_STALK_BUTTONS,     psa_decode_stalk_0x0f6 },
-    { 0x128,                        psa_decode_wheel_keys_0x128 },
-    { PSA_CAN_ID_ALERTS_INDICATORS, psa_decode_alerts_0x168_profile },
-    { PSA_CAN_ID_CRUISE_CONTROL,    psa_decode_cruise_0x1a8_profile },
-    { 0x0B6,                        psa_decode_engine_speed_0x0b6 },
-    { 0x0E8,                        psa_decode_steering_angle_0x0e8 },
-    { PSA_CAN_ID_CLIMATE_HVAC,      psa_decode_hvac_0x1d0_profile },
-    { 0x1E3,                        psa_decode_hvac_0x1e3_profile },
-    { PSA_CAN_ID_DOORS_BODY_220,    psa_decode_doors_0x220_profile },
+    { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
+    { PSA_CAN_ID_STEERING_ANGLE,     psa_decode_steering_angle_0x0e6_profile },
+    { PSA_CAN_ID_STALK_BUTTONS,      psa_decode_stalk_0x0f6 },
+    { 0x128,                         psa_decode_wheel_keys_0x128 },
+    { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
+    { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
+    { 0x0B6,                         psa_decode_engine_speed_0x0b6 },
+    { 0x0E8,                         psa_decode_steering_angle_0x0e8 },
+    { PSA_CAN_ID_CLIMATE_HVAC,       psa_decode_hvac_0x1d0_profile },
+    { 0x1E3,                         psa_decode_hvac_0x1e3_profile },
+    { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
+    { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
+    { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
+    { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
 };
 
 static void psa_init(void) {

@@ -167,6 +167,49 @@ static void hiworld_send_climate(const vehicle_climate_t *climate) {
     }
 }
 
+static void hiworld_send_tpms_numeric(const vehicle_tpms_t *tpms) {
+    if (!tpms || !tpms->valid) return;
+
+    /* Hiworld Numeric TPMS (Cmd 0x66): Mode(0x01), FL, FR, RL, RR, Unit(0x00=Bar) */
+    uint8_t num_payload[6];
+    num_payload[0] = 0x01; /* Live mode */
+    num_payload[1] = tpms->pressure_bar_deci[0]; /* FL */
+    num_payload[2] = tpms->pressure_bar_deci[1]; /* FR */
+    num_payload[3] = tpms->pressure_bar_deci[2]; /* RL */
+    num_payload[4] = tpms->pressure_bar_deci[3]; /* RR */
+    num_payload[5] = 0x00; /* Bar */
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_TPMS_NUMERIC, num_payload, sizeof(num_payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_tpms_discrete(const vehicle_tpms_t *tpms) {
+    if (!tpms || !tpms->valid) return;
+
+    /* Hiworld Discrete TPMS Alarm (Cmd 0x18): FL, FR, RL, RR alarm states */
+    uint8_t disc_payload[4];
+    disc_payload[0] = tpms->alarm_state[0]; /* FL */
+    disc_payload[1] = tpms->alarm_state[1]; /* FR */
+    disc_payload[2] = tpms->alarm_state[2]; /* RL */
+    disc_payload[3] = tpms->alarm_state[3]; /* RR */
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_TPMS_DISCRETE, disc_payload, sizeof(disc_payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_tpms(const vehicle_tpms_t *tpms) {
+    hiworld_send_tpms_numeric(tpms);
+    hiworld_send_tpms_discrete(tpms);
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -176,5 +219,8 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_doors = hiworld_send_doors,
     .send_climate = hiworld_send_climate,
     .send_telemetry = hiworld_send_telemetry,
+    .send_tpms = hiworld_send_tpms,
+    .send_tpms_numeric = hiworld_send_tpms_numeric,
+    .send_tpms_discrete = hiworld_send_tpms_discrete,
     .send_heartbeat = hiworld_send_heartbeat,
 };

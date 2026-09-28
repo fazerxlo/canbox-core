@@ -80,10 +80,19 @@ typedef enum {
 } vehicle_ignition_state_t;
 
 typedef struct {
+    uint8_t pressure_bar_deci[4]; /* 0.1 Bar: FL, FR, RL, RR */
+    uint8_t alarm_state[4];       /* 0=OK, 1=Low, 2=Puncture, 3=Fault: FL, FR, RL, RR */
+    bool    valid;
+} vehicle_tpms_t;
+
+typedef vehicle_tpms_t tpms_state_t;
+
+typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
     vehicle_climate_t        climate;
     vehicle_lights_t         lights;
+    vehicle_tpms_t           tpms;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;

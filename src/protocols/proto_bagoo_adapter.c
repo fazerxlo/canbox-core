@@ -127,7 +127,11 @@ const hu_protocol_driver_t g_hu_protocol_bagoo = {
     .feed_byte = bagoo_feed_byte,
     .send_wheel_key = bagoo_send_wheel_key,
     .send_doors = bagoo_send_doors,
+    .send_climate = NULL,
     .send_telemetry = bagoo_send_telemetry,
+    .send_tpms = NULL,
+    .send_tpms_numeric = NULL,
+    .send_tpms_discrete = NULL,
     .send_heartbeat = bagoo_send_heartbeat,
 };
 

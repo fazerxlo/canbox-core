@@ -25,6 +25,9 @@ extern "C" {
 #define PSA_CAN_ID_REAR_RADAR_AAS   0x260
 #define PSA_CAN_ID_FRONT_RADAR_AAS  0x270
 #define PSA_CAN_ID_TRIP2            0x2A5
+#define PSA_CAN_ID_TPMS_STATUS_1E1  0x1E1
+#define PSA_CAN_ID_TPMS_DIRECT_361  0x361
+#define PSA_CAN_ID_TPMS_PRESSURES_3A1 0x3A1
 #define PSA_CAN_ID_RDS_NAME         0x396
 #define PSA_CAN_ID_CD_CHANGER       0x3A6
 
@@ -229,6 +232,35 @@ size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len);
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */
+#define HIWORLD_CMD_TPMS_NUMERIC  0x66
+#define HIWORLD_CMD_TPMS_DISCRETE 0x18
+
+typedef struct {
+    uint8_t fl_press_bar_deci; /* 0.1 Bar: 24 = 2.4 Bar */
+    uint8_t fr_press_bar_deci;
+    uint8_t rl_press_bar_deci;
+    uint8_t rr_press_bar_deci;
+    uint8_t fl_state;          /* 0=OK, 1=LOW, 2=PUNCTURE, 3=FAULT */
+    uint8_t fr_state;
+    uint8_t rl_state;
+    uint8_t rr_state;
+} psa_tpms_state_t;
+
+typedef struct {
+    psa_tpms_state_t  state;
+    canbox_uart_tx_fn uart_tx;
+} psa_tpms_ctx_t;
+
+void psa_tpms_init(psa_tpms_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
+void psa_tpms_send_numeric(psa_tpms_ctx_t *ctx);
+void psa_tpms_send_discrete(psa_tpms_ctx_t *ctx);
+void psa_tpms_process_can_0x361(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+
+size_t build_hiworld_tpms_numeric(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len);
+size_t build_hiworld_tpms_discrete(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len);
+
 typedef struct {
     uint16_t pressure_dbar[4]; /* FL, FR, RL, RR in 0.1 Bar */
     int16_t  temperature_c[4]; /* FL, FR, RL, RR in deg C (-40..+215) */

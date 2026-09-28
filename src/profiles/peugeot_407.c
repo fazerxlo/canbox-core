@@ -731,6 +731,149 @@ size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len) {
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */
+void psa_tpms_init(psa_tpms_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
+    if (!ctx) return;
+    memset(ctx, 0, sizeof(psa_tpms_ctx_t));
+    ctx->state.fl_press_bar_deci = 24; /* 2.4 Bar default */
+    ctx->state.fr_press_bar_deci = 24;
+    ctx->state.rr_press_bar_deci = 22; /* 2.2 Bar default */
+    ctx->state.rl_press_bar_deci = 22;
+    ctx->uart_tx = uart_tx;
+}
+
+size_t build_hiworld_tpms_numeric(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len) {
+    if (!tpms || !out || max_len < 11) {
+        return 0;
+    }
+    out[0] = HIWORLD_SOF1;
+    out[1] = HIWORLD_SOF2;
+    out[2] = 0x06;                     /* Length: 6 Payload bytes */
+    out[3] = HIWORLD_CMD_TPMS_NUMERIC; /* Cmd 0x66 */
+    out[4] = 0x01;                     /* Mode: Live */
+    out[5] = tpms->fl_press_bar_deci;
+    out[6] = tpms->fr_press_bar_deci;
+    out[7] = tpms->rl_press_bar_deci;
+    out[8] = tpms->rr_press_bar_deci;
+    out[9] = 0x00;                     /* Unit: Bar */
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 9; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[10] = (uint8_t)((sum - 1) & 0xFF);
+    return 11;
+}
+
+size_t build_hiworld_tpms_discrete(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len) {
+    if (!tpms || !out || max_len < 9) {
+        return 0;
+    }
+    out[0] = HIWORLD_SOF1;
+    out[1] = HIWORLD_SOF2;
+    out[2] = 0x04;                      /* Length: 4 Payload bytes */
+    out[3] = HIWORLD_CMD_TPMS_DISCRETE; /* Cmd 0x18 */
+    out[4] = tpms->fl_state;
+    out[5] = tpms->fr_state;
+    out[6] = tpms->rl_state;
+    out[7] = tpms->rr_state;
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 7; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[8] = (uint8_t)((sum - 1) & 0xFF);
+    return 9;
+}
+
+void psa_tpms_send_numeric(psa_tpms_ctx_t *ctx) {
+    if (!ctx || !ctx->uart_tx) return;
+
+    uint8_t p[11];
+    size_t len = build_hiworld_tpms_numeric(&ctx->state, p, sizeof(p));
+    if (len > 0) {
+        ctx->uart_tx(p, len);
+    }
+}
+
+void psa_tpms_send_discrete(psa_tpms_ctx_t *ctx) {
+    if (!ctx || !ctx->uart_tx) return;
+
+    uint8_t p[9];
+    size_t len = build_hiworld_tpms_discrete(&ctx->state, p, sizeof(p));
+    if (len > 0) {
+        ctx->uart_tx(p, len);
+    }
+}
+
+void psa_tpms_process_can_0x361(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 8) return;
+
+    uint16_t fl_raw = read_be16(&data[0]);
+    uint16_t fr_raw = read_be16(&data[2]);
+    uint16_t rr_raw = read_be16(&data[4]);
+    uint16_t rl_raw = read_be16(&data[6]);
+
+    ctx->state.fl_state = (uint8_t)((fl_raw >> 14) & 0x03);
+    ctx->state.fr_state = (uint8_t)((fr_raw >> 14) & 0x03);
+    ctx->state.rr_state = (uint8_t)((rr_raw >> 14) & 0x03);
+    ctx->state.rl_state = (uint8_t)((rl_raw >> 14) & 0x03);
+
+    if (ctx->state.fl_state != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.fl_press_bar_deci = (uint8_t)(fl_raw & 0x3FFF);
+    } else {
+        ctx->state.fl_press_bar_deci = 0;
+    }
+    if (ctx->state.fr_state != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.fr_press_bar_deci = (uint8_t)(fr_raw & 0x3FFF);
+    } else {
+        ctx->state.fr_press_bar_deci = 0;
+    }
+    if (ctx->state.rr_state != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.rr_press_bar_deci = (uint8_t)(rr_raw & 0x3FFF);
+    } else {
+        ctx->state.rr_press_bar_deci = 0;
+    }
+    if (ctx->state.rl_state != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
+        ctx->state.rl_press_bar_deci = (uint8_t)(rl_raw & 0x3FFF);
+    } else {
+        ctx->state.rl_press_bar_deci = 0;
+    }
+
+    psa_tpms_send_numeric(ctx);
+    psa_tpms_send_discrete(ctx);
+}
+
+void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 4) return;
+
+    ctx->state.fl_press_bar_deci = (uint8_t)((data[0] * 5 + 5) / 10);
+    ctx->state.fr_press_bar_deci = (uint8_t)((data[1] * 5 + 5) / 10);
+    ctx->state.rr_press_bar_deci = (uint8_t)((data[2] * 5 + 5) / 10);
+    ctx->state.rl_press_bar_deci = (uint8_t)((data[3] * 5 + 5) / 10);
+
+    psa_tpms_send_numeric(ctx);
+}
+
+void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 4) return;
+
+    /* PSA 0x1E1 bits 5..3 carry RT4 tyre state enum:
+       0=OK, 1=LOW, 2=FLAT, 3=NO_DATA, 4=BATTERY_LOW */
+    uint8_t fl_st = (uint8_t)((data[0] >> 3) & 0x07);
+    uint8_t fr_st = (uint8_t)((data[1] >> 3) & 0x07);
+    uint8_t rr_st = (uint8_t)((data[2] >> 3) & 0x07);
+    uint8_t rl_st = (uint8_t)((data[3] >> 3) & 0x07);
+
+    /* Map PSA enum to Hiworld discrete alarm:
+       0=Normal, 1=Low, 2=Puncture, 3=Fault/Offline */
+    ctx->state.fl_state = (fl_st >= 3) ? 3 : fl_st;
+    ctx->state.fr_state = (fr_st >= 3) ? 3 : fr_st;
+    ctx->state.rr_state = (rr_st >= 3) ? 3 : rr_st;
+    ctx->state.rl_state = (rl_st >= 3) ? 3 : rl_st;
+
+    psa_tpms_send_discrete(ctx);
+}
+
 size_t build_raise_tpms_numeric(const canbox_tpms_state_t *tpms, uint8_t *out) {
     if (!tpms || !out) {
         return 0;

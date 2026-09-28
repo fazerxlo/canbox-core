@@ -14,11 +14,13 @@ extern "C" {
 #define HIWORLD_MAX_PAYLOAD_LEN  64
 
 /* Common Hiworld Command IDs */
-#define HIWORLD_CMD_WHEEL_KEY    0x11
-#define HIWORLD_CMD_DOORS        0x12
-#define HIWORLD_CMD_AIR_CON      0x31
-#define HIWORLD_CMD_RADAR        0x41
-#define HIWORLD_CMD_HEARTBEAT    0xFF
+#define HIWORLD_CMD_WHEEL_KEY     0x11
+#define HIWORLD_CMD_DOORS         0x12
+#define HIWORLD_CMD_TPMS_DISCRETE 0x18
+#define HIWORLD_CMD_AIR_CON       0x31
+#define HIWORLD_CMD_RADAR         0x41
+#define HIWORLD_CMD_TPMS_NUMERIC  0x66
+#define HIWORLD_CMD_HEARTBEAT     0xFF
 
 typedef struct {
     uint8_t cmd;

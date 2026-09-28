@@ -133,6 +133,10 @@ const hu_protocol_driver_t g_hu_protocol_raise = {
     .feed_byte = raise_feed_byte,
     .send_wheel_key = raise_send_wheel_key,
     .send_doors = raise_send_doors,
+    .send_climate = NULL,
     .send_telemetry = raise_send_telemetry,
+    .send_tpms = NULL,
+    .send_tpms_numeric = NULL,
+    .send_tpms_discrete = NULL,
     .send_heartbeat = raise_send_heartbeat,
 };

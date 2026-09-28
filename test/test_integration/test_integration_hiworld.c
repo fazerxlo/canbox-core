@@ -1,4 +1,5 @@
 #include "test_integration_common.h"
+#include "core/vehicle_profile.h"
 #include "protocols/proto_hiworld.h"
 #include "protocols/hiworld_connection.h"
 
@@ -128,4 +129,76 @@ void test_integration_hiworld_runtime_car_selection_and_handshake(void) {
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF1, rx_buf[0]);
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, rx_buf[1]);
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, rx_buf[3]);
+}
+
+void test_integration_hiworld_tpms_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+
+    // Drain any leftover UART bytes
+    uint8_t drain[128];
+    while (read_uart_output(drain, sizeof(drain)) > 0);
+
+    // Inject CAN ID 0x361 from real vehicle log dump_2026-09-28_16-32-16.log:
+    // DATA: 80 00 40 0F 00 1E 00 16
+    // FL: 0.0 Bar, puncture (state 2)
+    // FR: 1.5 Bar, low (state 1)
+    // RR: 3.0 Bar, ok (state 0)
+    // RL: 2.2 Bar, ok (state 0)
+    can_frame_t frame_361 = {
+        .id = 0x361,
+        .dlc = 8,
+        .data = { 0x80, 0x00, 0x40, 0x0F, 0x00, 0x1E, 0x00, 0x16 }
+    };
+    can_router_process_can(&frame_361);
+
+    uint8_t rx_buf[64];
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // Expected UART Output:
+    // 1. Numeric TPMS (Cmd 0x66): Mode(0x01), FL(0=0x00), FR(15=0x0F), RL(22=0x16), RR(30=0x1E), Unit(0x00), CS(0xAF)
+    //    Wire: 5A A5 06 66 01 00 0F 16 1E 00 AF
+    // 2. Discrete TPMS (Cmd 0x18): FL(2), FR(1), RL(0), RR(0), CS(0x1E)
+    //    Wire: 5A A5 04 18 02 01 00 00 1E
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x06, 0x66, 0x01, 0x00, 0x0F, 0x16, 0x1E, 0x00, 0xAF,
+        0x5A, 0xA5, 0x04, 0x18, 0x02, 0x01, 0x00, 0x00, 0x1E
+    };
+
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, sizeof(expected));
+
+    // 1. Re-inject identical frame -> No UART TPMS frames should be sent
+    can_router_process_can(&frame_361);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    // 2. Inject frame with pressure change ONLY (alarms unchanged):
+    // Change RL pressure from 2.2 Bar (0x16) to 2.4 Bar (0x18). Alarms remain identical.
+    frame_361.data[7] = 0x18;
+    can_router_process_can(&frame_361);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // Only Numeric TPMS (Cmd 0x66) should be emitted! Discrete 0x18 must NOT be emitted.
+    // CS = (6 + 0x66 + 1 + 0 + 0x0F + 0x18 + 0x1E + 0 - 1) = 0xB1
+    const uint8_t expected_numeric_only[] = {
+        0x5A, 0xA5, 0x06, 0x66, 0x01, 0x00, 0x0F, 0x18, 0x1E, 0x00, 0xB1
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_numeric_only), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_numeric_only, rx_buf, sizeof(expected_numeric_only));
+
+    // 3. Periodic refresh: 299 ticks do NOT emit TPMS
+    for (int t = 0; t < 299; t++) {
+        can_router_periodic_100ms();
+        // Drain heartbeats (Cmd 0xFF)
+        read_uart_output(rx_buf, sizeof(rx_buf));
+    }
+
+    // Tick 300 (30 seconds) MUST emit both Numeric (0x66) and Discrete (0x18)
+    can_router_periodic_100ms();
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // Expect: Numeric (0x66, 11 bytes) + Discrete (0x18, 9 bytes) + Heartbeat (0xFF, 6 bytes) = 26 bytes
+    TEST_ASSERT_EQUAL_UINT32(26, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_TPMS_NUMERIC, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_TPMS_DISCRETE, rx_buf[14]);
 }

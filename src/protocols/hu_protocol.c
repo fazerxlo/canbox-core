@@ -82,6 +82,24 @@ void hu_protocol_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) {
     }
 }
 
+void hu_protocol_send_tpms(const vehicle_tpms_t *tpms) {
+    if (s_active_driver && s_active_driver->send_tpms) {
+        s_active_driver->send_tpms(tpms);
+    }
+}
+
+void hu_protocol_send_tpms_numeric(const vehicle_tpms_t *tpms) {
+    if (s_active_driver && s_active_driver->send_tpms_numeric) {
+        s_active_driver->send_tpms_numeric(tpms);
+    }
+}
+
+void hu_protocol_send_tpms_discrete(const vehicle_tpms_t *tpms) {
+    if (s_active_driver && s_active_driver->send_tpms_discrete) {
+        s_active_driver->send_tpms_discrete(tpms);
+    }
+}
+
 void hu_protocol_send_heartbeat(void) {
     if (s_active_driver && s_active_driver->send_heartbeat) {
         s_active_driver->send_heartbeat();

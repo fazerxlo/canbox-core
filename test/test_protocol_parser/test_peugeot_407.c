@@ -13,11 +13,27 @@ static void test_stalk_key_callback(uint8_t key_id, uint8_t state) {
     s_stalk_cb_count++;
 }
 
+#define MAX_TPMS_TX_PACKETS 4
+static uint8_t s_tpms_uart_buf[MAX_TPMS_TX_PACKETS][32];
+static size_t  s_tpms_uart_len[MAX_TPMS_TX_PACKETS];
+static int     s_tpms_uart_tx_calls = 0;
+
+static void test_tpms_uart_tx(const uint8_t *buf, size_t len) {
+    if (buf && s_tpms_uart_tx_calls < MAX_TPMS_TX_PACKETS && len <= sizeof(s_tpms_uart_buf[0])) {
+        memcpy(s_tpms_uart_buf[s_tpms_uart_tx_calls], buf, len);
+        s_tpms_uart_len[s_tpms_uart_tx_calls] = len;
+        s_tpms_uart_tx_calls++;
+    }
+}
+
 void setUp_peugeot_407(void) {
     psa_stalk_init(&s_stalk_state);
     s_last_stalk_key_id = 0;
     s_last_stalk_key_state = 0;
     s_stalk_cb_count = 0;
+    s_tpms_uart_tx_calls = 0;
+    memset(s_tpms_uart_len, 0, sizeof(s_tpms_uart_len));
+    memset(s_tpms_uart_buf, 0, sizeof(s_tpms_uart_buf));
 }
 
 /* --------------------------------------------------------------------------
@@ -775,6 +791,213 @@ void test_psa_extended_tpms_discrete_alarms(void) {
 
     uint8_t expected_cs = (uint8_t)((0x18 + 0x04 + 0x01 + 0x00 + 0x00 + 0x01) ^ 0xFF);
     TEST_ASSERT_EQUAL_HEX8(expected_cs, out[7]);
+}
+
+/* --------------------------------------------------------------------------
+ * Hiworld Peugeot 407 TPMS Unit Tests & Verification Vectors
+ * Based on CANBOX_SPEC_HIWORLD_407_03_TPMS_TIRE_PRESSURE.md
+ * -------------------------------------------------------------------------- */
+void test_peugeot_407_tpms_hiworld_vector_1_nominal(void) {
+    psa_tpms_ctx_t ctx;
+    psa_tpms_init(&ctx, test_tpms_uart_tx);
+    s_tpms_uart_tx_calls = 0;
+
+    // Vector 1: CAN 0x361 FL=2.4, FR=2.4, RR=2.2, RL=2.2 Bar (0018001800160016)
+    const uint8_t can_361_v1[] = { 0x00, 0x18, 0x00, 0x18, 0x00, 0x16, 0x00, 0x16 };
+    psa_tpms_process_can_0x361(&ctx, can_361_v1, sizeof(can_361_v1));
+
+    TEST_ASSERT_EQUAL_INT(2, s_tpms_uart_tx_calls);
+
+    // Numeric (Cmd 0x66): 5A A5 06 66 01 18 18 16 16 00 C8
+    const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 0x18, 0x18, 0x16, 0x16, 0x00, 0xC8 };
+    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, s_tpms_uart_buf[0], 11);
+
+    // Discrete (Cmd 0x18): 5A A5 04 18 00 00 00 00 1B
+    const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x00, 0x00, 0x00, 0x1B };
+    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[1]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, s_tpms_uart_buf[1], 9);
+
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+}
+
+void test_peugeot_407_tpms_hiworld_vector_2_asymmetric_low(void) {
+    psa_tpms_ctx_t ctx;
+    psa_tpms_init(&ctx, test_tpms_uart_tx);
+    s_tpms_uart_tx_calls = 0;
+
+    // Vector 2: FL=2.4, FR=2.3, RR=2.1, RL=1.2 (Underinflated 0x4000) -> 001800170015400C
+    const uint8_t can_361_v2[] = { 0x00, 0x18, 0x00, 0x17, 0x00, 0x15, 0x40, 0x0C };
+    psa_tpms_process_can_0x361(&ctx, can_361_v2, sizeof(can_361_v2));
+
+    TEST_ASSERT_EQUAL_INT(2, s_tpms_uart_tx_calls);
+
+    // Numeric (Cmd 0x66): 5A A5 06 66 01 18 17 0C 15 00 BC
+    const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 0x18, 0x17, 0x0C, 0x15, 0x00, 0xBC };
+    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, s_tpms_uart_buf[0], 11);
+
+    // Discrete (Cmd 0x18): 5A A5 04 18 00 00 01 00 1C (RL alarm = 0x01 LOW)
+    const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x00, 0x01, 0x00, 0x1C };
+    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[1]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, s_tpms_uart_buf[1], 9);
+
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(23, ctx.state.fr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(12, ctx.state.rl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(21, ctx.state.rr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_state);
+    TEST_ASSERT_EQUAL_UINT8(1, ctx.state.rl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+}
+
+void test_peugeot_407_tpms_hiworld_vector_3_puncture(void) {
+    psa_tpms_ctx_t ctx;
+    psa_tpms_init(&ctx, test_tpms_uart_tx);
+    s_tpms_uart_tx_calls = 0;
+
+    // Vector 3: FL=2.4, FR=0.4 (Puncture 0x8000), RR=2.4, RL=2.4 -> 0018800400180018
+    const uint8_t can_361_v3[] = { 0x00, 0x18, 0x80, 0x04, 0x00, 0x18, 0x00, 0x18 };
+    psa_tpms_process_can_0x361(&ctx, can_361_v3, sizeof(can_361_v3));
+
+    TEST_ASSERT_EQUAL_INT(2, s_tpms_uart_tx_calls);
+
+    // Numeric (Cmd 0x66): 5A A5 06 66 01 18 04 18 18 00 B8
+    const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 0x18, 0x04, 0x18, 0x18, 0x00, 0xB8 };
+    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, s_tpms_uart_buf[0], 11);
+
+    // Discrete (Cmd 0x18): 5A A5 04 18 00 02 00 00 1D (FR alarm = 0x02 PUNCTURE)
+    const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x02, 0x00, 0x00, 0x1D };
+    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[1]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, s_tpms_uart_buf[1], 9);
+
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(4, ctx.state.fr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.rl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.rr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
+    TEST_ASSERT_EQUAL_UINT8(2, ctx.state.fr_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+}
+
+void test_peugeot_407_tpms_hiworld_0x3a1_pressures(void) {
+    psa_tpms_ctx_t ctx;
+    psa_tpms_init(&ctx, test_tpms_uart_tx);
+    s_tpms_uart_tx_calls = 0;
+
+    // CAN 0x3A1: 0.05 Bar resolution
+    // FL: 48 (2.4 Bar), FR: 46 (2.3 Bar), RR: 42 (2.1 Bar), RL: 24 (1.2 Bar)
+    const uint8_t can_3a1[] = { 48, 46, 42, 24 };
+    psa_tpms_process_can_0x3a1(&ctx, can_3a1, sizeof(can_3a1));
+
+    TEST_ASSERT_EQUAL_INT(1, s_tpms_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(23, ctx.state.fr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(21, ctx.state.rr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(12, ctx.state.rl_press_bar_deci);
+
+    const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 24, 23, 12, 21, 0x00, 0xBC };
+    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, s_tpms_uart_buf[0], 11);
+}
+
+void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void) {
+    psa_tpms_ctx_t ctx;
+    psa_tpms_init(&ctx, test_tpms_uart_tx);
+    s_tpms_uart_tx_calls = 0;
+
+    // CAN 0x1E1:
+    // Byte 0 (FL): 0 (OK) -> (0 << 3) = 0x00
+    // Byte 1 (FR): 1 (LOW) -> (1 << 3) = 0x08
+    // Byte 2 (RR): 2 (FLAT) -> (2 << 3) = 0x10
+    // Byte 3 (RL): 4 (BATTERY_LOW -> >=3 => 3 FAULT) -> (4 << 3) = 0x20
+    const uint8_t can_1e1[] = { 0x00, 0x08, 0x10, 0x20 };
+    psa_tpms_process_can_0x1e1(&ctx, can_1e1, sizeof(can_1e1));
+
+    TEST_ASSERT_EQUAL_INT(1, s_tpms_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
+    TEST_ASSERT_EQUAL_UINT8(1, ctx.state.fr_state);
+    TEST_ASSERT_EQUAL_UINT8(2, ctx.state.rr_state);
+    TEST_ASSERT_EQUAL_UINT8(3, ctx.state.rl_state);
+
+    // Discrete packet: Cmd 0x18, Len 0x04, FL=0, FR=1, RL=3, RR=2
+    // Checksum = (0x04 + 0x18 + 0 + 1 + 3 + 2 - 1) = 0x21
+    const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x01, 0x03, 0x02, 0x21 };
+    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, s_tpms_uart_buf[0], 9);
+}
+
+void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void) {
+    psa_tpms_ctx_t ctx;
+    psa_tpms_init(&ctx, test_tpms_uart_tx);
+
+    // Initial defaults check
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
+
+    // Serializer boundary checks
+    uint8_t out[16];
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(NULL, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(&ctx.state, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(&ctx.state, out, 10)); // < 11
+    TEST_ASSERT_EQUAL_UINT32(11, build_hiworld_tpms_numeric(&ctx.state, out, sizeof(out)));
+
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(NULL, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(&ctx.state, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(&ctx.state, out, 8)); // < 9
+    TEST_ASSERT_EQUAL_UINT32(9, build_hiworld_tpms_discrete(&ctx.state, out, sizeof(out)));
+
+    // CAN process boundary checks
+    uint8_t dummy_can[8] = { 0 };
+    psa_tpms_process_can_0x361(NULL, dummy_can, 8);
+    psa_tpms_process_can_0x361(&ctx, NULL, 8);
+    psa_tpms_process_can_0x361(&ctx, dummy_can, 7); // dlc < 8
+
+    psa_tpms_process_can_0x3a1(NULL, dummy_can, 4);
+    psa_tpms_process_can_0x3a1(&ctx, NULL, 4);
+    psa_tpms_process_can_0x3a1(&ctx, dummy_can, 3); // dlc < 4
+
+    psa_tpms_process_can_0x1e1(NULL, dummy_can, 4);
+    psa_tpms_process_can_0x1e1(&ctx, NULL, 4);
+    psa_tpms_process_can_0x1e1(&ctx, dummy_can, 3); // dlc < 4
+
+    // Missing sensor (0x3FFF) / fault handling in 0x361
+    const uint8_t can_missing[8] = { 0xFF, 0xFF, 0xC0, 0x18, 0x3F, 0xFF, 0x00, 0x18 };
+    // FL: 0xFFFF (state 3, raw 0x3FFF) -> state 3, press 0
+    // FR: 0xC018 (state 3, raw 0x0018) -> state 3, press 0
+    // RR: 0x3FFF (state 0, raw 0x3FFF) -> state 0, press 0 (missing raw)
+    // RL: 0x0018 (state 0, raw 0x0018) -> state 0, press 24
+    psa_tpms_process_can_0x361(&ctx, can_missing, 8);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(3, ctx.state.fl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(3, ctx.state.fr_state);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.rl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
+
+    // Send with NULL uart_tx should not crash
+    ctx.uart_tx = NULL;
+    psa_tpms_send_numeric(&ctx);
+    psa_tpms_send_discrete(&ctx);
+    psa_tpms_init(NULL, NULL);
 }
 
 /* --------------------------------------------------------------------------

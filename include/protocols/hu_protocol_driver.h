@@ -26,6 +26,9 @@ typedef struct {
     void           (*send_doors)(const vehicle_doors_t *doors);
     void           (*send_climate)(const vehicle_climate_t *climate);
     void           (*send_telemetry)(uint16_t speed, uint16_t rpm, int16_t angle);
+    void           (*send_tpms)(const vehicle_tpms_t *tpms);
+    void           (*send_tpms_numeric)(const vehicle_tpms_t *tpms);
+    void           (*send_tpms_discrete)(const vehicle_tpms_t *tpms);
     void           (*send_heartbeat)(void);
 } hu_protocol_driver_t;
 
