@@ -134,6 +134,7 @@ void can_router_process_can(const can_frame_t *frame);
 void can_router_process_uart_byte(uint8_t byte);
 void can_router_periodic_100ms(void);
 const vehicle_state_t *can_router_get_state(void);
+bool can_router_reset_trip(uint8_t trip_index);
 
 #ifdef __cplusplus
 }

@@ -585,6 +585,35 @@ void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_
     ctx->state.reverse_active = (data[7] & 0x80) != 0;
 }
 
+bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame) {
+    if (!out_frame || (trip_index != 1 && trip_index != 2)) {
+        return false;
+    }
+
+    memset(out_frame, 0, sizeof(*out_frame));
+    out_frame->id          = PSA_CAN_ID_TRIP_INSTANT; /* 0x221 (MSG_DEMANDES_EMF) */
+    out_frame->dlc         = 8;
+    out_frame->is_extended = false;
+    out_frame->is_remote   = false;
+
+    if (trip_index == 1) {
+        out_frame->data[0] = 0x80; /* Bit 7: Trip 1 Reset */
+    } else {
+        out_frame->data[0] = 0x40; /* Bit 6: Trip 2 Reset */
+    }
+
+    return true;
+}
+
+hal_status_t psa_trip_send_reset(uint8_t trip_index) {
+    can_frame_t frame;
+    if (!build_psa_trip_reset_frame(trip_index, &frame)) {
+        return HAL_STATUS_ERROR;
+    }
+
+    return hal_can_send(&frame);
+}
+
 /* --------------------------------------------------------------------------
  * 1.5 Doors & Body Status
  * -------------------------------------------------------------------------- */

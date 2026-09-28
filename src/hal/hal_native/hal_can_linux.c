@@ -102,9 +102,30 @@ hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
     return HAL_STATUS_OK;
 }
 
+static can_frame_t s_native_last_sent_frame;
+static bool        s_native_has_sent_frame = false;
+
+bool hal_can_native_get_last_sent_frame(can_frame_t *out_frame) {
+    if (!s_native_has_sent_frame || !out_frame) return false;
+    *out_frame = s_native_last_sent_frame;
+    return true;
+}
+
+void hal_can_native_clear_sent_frame(void) {
+    s_native_has_sent_frame = false;
+    memset(&s_native_last_sent_frame, 0, sizeof(s_native_last_sent_frame));
+}
+
 hal_status_t hal_can_send(const can_frame_t *frame) {
-    if (s_can_fd < 0 || !frame) {
+    if (!frame) {
         return HAL_STATUS_ERROR;
+    }
+
+    s_native_last_sent_frame = *frame;
+    s_native_has_sent_frame = true;
+
+    if (s_can_fd < 0) {
+        return HAL_STATUS_OK;
     }
 
     struct can_frame linux_frame;

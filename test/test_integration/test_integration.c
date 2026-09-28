@@ -51,6 +51,7 @@ void test_integration_raise_door_status_pipeline(void);
 void test_integration_raise_telemetry_periodic_pipeline(void);
 void test_integration_raise_hu_uart_to_canbox_version_query(void);
 void test_integration_raise_runtime_car_selection(void);
+void test_integration_raise_downlink_trip_reset_pipeline(void);
 
 // 2. Hiworld Protocol Integration Tests (test_integration_hiworld.c)
 void test_integration_hiworld_steering_wheel_volume_up_pipeline(void);
@@ -59,6 +60,7 @@ void test_integration_hiworld_telemetry_periodic_pipeline(void);
 void test_integration_hiworld_runtime_car_selection_and_handshake(void);
 void test_integration_hiworld_tpms_pipeline(void);
 void test_integration_hiworld_trip_pipeline(void);
+void test_integration_hiworld_downlink_trip_reset_pipeline(void);
 
 // 3. Bagoo Protocol Integration Tests (test_integration_bagoo.c)
 void test_integration_bagoo_steering_wheel_volume_up_pipeline(void);
@@ -78,6 +80,7 @@ int main(void) {
     RUN_TEST(test_integration_raise_telemetry_periodic_pipeline);
     RUN_TEST(test_integration_raise_hu_uart_to_canbox_version_query);
     RUN_TEST(test_integration_raise_runtime_car_selection);
+    RUN_TEST(test_integration_raise_downlink_trip_reset_pipeline);
 
     // 2. Hiworld Protocol Integration Tests
     RUN_TEST(test_integration_hiworld_steering_wheel_volume_up_pipeline);
@@ -86,6 +89,7 @@ int main(void) {
     RUN_TEST(test_integration_hiworld_runtime_car_selection_and_handshake);
     RUN_TEST(test_integration_hiworld_tpms_pipeline);
     RUN_TEST(test_integration_hiworld_trip_pipeline);
+    RUN_TEST(test_integration_hiworld_downlink_trip_reset_pipeline);
 
     // 3. Bagoo Protocol Integration Tests
     RUN_TEST(test_integration_bagoo_steering_wheel_volume_up_pipeline);

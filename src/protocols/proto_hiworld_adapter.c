@@ -22,7 +22,19 @@ static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
 }
 
 static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
-    (void)packet;
+    if (!packet) return;
+
+    if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
+        /* ForwardEcuSetting: payload[0] = page (1=Trip1, 2=Trip2), payload[1] = action (1=Reset) */
+        if (packet->payload_len >= 2 && packet->payload[1] == 0x01) {
+            uint8_t page = packet->payload[0];
+            if (page == 0x01) {
+                can_router_reset_trip(1);
+            } else if (page == 0x02) {
+                can_router_reset_trip(2);
+            }
+        }
+    }
 }
 
 static void uart_tx_adapter(const uint8_t *buf, size_t len) {

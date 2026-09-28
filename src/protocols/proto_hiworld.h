@@ -20,6 +20,7 @@ extern "C" {
 #define HIWORLD_CMD_ECU_P1        0x14
 #define HIWORLD_CMD_ECU_P2        0x15
 #define HIWORLD_CMD_TPMS_DISCRETE 0x18
+#define HIWORLD_CMD_ECU_SETTING_SET 0x1B
 #define HIWORLD_CMD_AIR_CON       0x31
 #define HIWORLD_CMD_RADAR         0x41
 #define HIWORLD_CMD_TPMS_NUMERIC  0x66

@@ -67,3 +67,10 @@ void vehicle_profile_process_frame(const can_frame_t *frame, vehicle_state_t *st
     }
 }
 
+bool vehicle_profile_reset_trip(uint8_t trip_index) {
+    if (s_active_profile && s_active_profile->reset_trip) {
+        return s_active_profile->reset_trip(trip_index);
+    }
+    return false;
+}
+

@@ -38,6 +38,7 @@ extern "C" {
 #define RAISE_CMD_START_STOP       0x71
 #define RAISE_CMD_CRUISE_MEMORY    0x72
 #define RAISE_CMD_VERSION_REQ      0x7F
+#define RAISE_CMD_TRIP_RESET       0x82
 #define RAISE_CMD_CAR_MODEL_SELECT 0xCA
 
 typedef struct {

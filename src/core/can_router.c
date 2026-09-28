@@ -147,3 +147,7 @@ void can_router_periodic_100ms(void) {
 const vehicle_state_t *can_router_get_state(void) {
     return &s_current_state;
 }
+
+bool can_router_reset_trip(uint8_t trip_index) {
+    return vehicle_profile_reset_trip(trip_index);
+}

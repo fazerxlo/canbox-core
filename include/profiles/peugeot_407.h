@@ -188,6 +188,8 @@ void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_
 void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
 void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
 void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame);
+hal_status_t psa_trip_send_reset(uint8_t trip_index);
 
 /* --------------------------------------------------------------------------
  * 1.5 Doors & Body Status

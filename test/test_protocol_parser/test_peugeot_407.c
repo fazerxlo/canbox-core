@@ -1423,3 +1423,35 @@ void test_peugeot_407_hvac_hiworld(void) {
     TEST_ASSERT_FALSE(climate.aqs_auto);
 }
 
+void test_peugeot_407_trip_reset_frames(void) {
+    can_frame_t frame;
+
+    // 1. Trip 1 Reset (Bit 7 = 0x80)
+    TEST_ASSERT_TRUE(build_psa_trip_reset_frame(1, &frame));
+    TEST_ASSERT_EQUAL_HEX32(0x221, frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x80, frame.data[0]);
+    for (int i = 1; i < 8; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, frame.data[i]);
+    }
+
+    // 2. Trip 2 Reset (Bit 6 = 0x40)
+    TEST_ASSERT_TRUE(build_psa_trip_reset_frame(2, &frame));
+    TEST_ASSERT_EQUAL_HEX32(0x221, frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x40, frame.data[0]);
+    for (int i = 1; i < 8; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, frame.data[i]);
+    }
+
+    // 3. Boundary & Error checks
+    TEST_ASSERT_FALSE(build_psa_trip_reset_frame(0, &frame));
+    TEST_ASSERT_FALSE(build_psa_trip_reset_frame(3, &frame));
+    TEST_ASSERT_FALSE(build_psa_trip_reset_frame(1, NULL));
+
+    // 4. Send reset status check
+    TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(1));
+    TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(2));
+    TEST_ASSERT_EQUAL(HAL_STATUS_ERROR, psa_trip_send_reset(0));
+}
+

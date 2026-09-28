@@ -310,3 +310,40 @@ void test_integration_hiworld_trip_pipeline(void) {
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 }
+
+void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+
+    hal_can_native_clear_sent_frame();
+    can_frame_t sent_frame;
+
+    // 1. Android sends Trip 1 Reset: 5A A5 02 1B 01 01 1E
+    const uint8_t reset_trip1_cmd[] = { 0x5A, 0xA5, 0x02, 0x1B, 0x01, 0x01, 0x1E };
+    for (size_t i = 0; i < sizeof(reset_trip1_cmd); i++) {
+        can_router_process_uart_byte(reset_trip1_cmd[i]);
+    }
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[0]); // Bit 7: Trip 1 Reset
+    for (int i = 1; i < 8; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
+    }
+
+    // 2. Android sends Trip 2 Reset: 5A A5 02 1B 02 01 1F
+    hal_can_native_clear_sent_frame();
+    const uint8_t reset_trip2_cmd[] = { 0x5A, 0xA5, 0x02, 0x1B, 0x02, 0x01, 0x1F };
+    for (size_t i = 0; i < sizeof(reset_trip2_cmd); i++) {
+        can_router_process_uart_byte(reset_trip2_cmd[i]);
+    }
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x40, sent_frame.data[0]); // Bit 6: Trip 2 Reset
+    for (int i = 1; i < 8; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
+    }
+}

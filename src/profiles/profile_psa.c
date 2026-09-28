@@ -267,11 +267,16 @@ static void psa_init(void) {
     psa_stalk_init(NULL);
 }
 
+static bool psa_reset_trip(uint8_t trip_index) {
+    return psa_trip_send_reset(trip_index) == HAL_STATUS_OK;
+}
+
 const vehicle_profile_t g_profile_psa = {
     .id           = VEHICLE_PROFILE_PSA_2004,
     .name         = "PSA CAN2004/CAN2010 (Peugeot 407)",
     .default_baud = CAN_BAUD_125K,
     .rules        = s_psa_rules,
     .rule_count   = sizeof(s_psa_rules) / sizeof(s_psa_rules[0]),
-    .init         = psa_init
+    .init         = psa_init,
+    .reset_trip   = psa_reset_trip
 };

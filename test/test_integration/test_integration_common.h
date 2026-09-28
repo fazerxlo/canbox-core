@@ -13,6 +13,8 @@ extern "C" {
 #endif
 
 size_t read_uart_output(uint8_t *buf, size_t max_len);
+bool hal_can_native_get_last_sent_frame(can_frame_t *out_frame);
+void hal_can_native_clear_sent_frame(void);
 
 #ifdef __cplusplus
 }

@@ -32,6 +32,14 @@ static void on_raise_packet_received(const raise_packet_t *packet) {
                 hal_uart_write(tx_buf, len);
             }
         }
+    } else if (packet->cmd == RAISE_CMD_TRIP_RESET) {
+        if (packet->len >= 1) {
+            if (packet->payload[0] == 0x41) {
+                can_router_reset_trip(1);
+            } else if (packet->payload[0] == 0x22) {
+                can_router_reset_trip(2);
+            }
+        }
     }
 }
 
