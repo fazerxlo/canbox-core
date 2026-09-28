@@ -57,6 +57,39 @@ void test_integration_raise_door_status_pipeline(void) {
 
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, sizeof(expected));
+
+    // Verify 1 Hz periodic repetition:
+    // Ticks 1 to 9 (100ms - 900ms) must NOT emit door frame (only 5-byte heartbeat ping 0x20)
+    for (int tick = 1; tick <= 9; tick++) {
+        can_router_periodic_100ms();
+        rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+        TEST_ASSERT_EQUAL_UINT32(5, rx_len);
+        TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[1]); // Heartbeat ping only
+    }
+
+    // Tick 10 (1000ms / 1s) MUST repeat the door status frame (Cmd 0x24) + Heartbeat (Cmd 0x20)
+    can_router_periodic_100ms();
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected) + 5, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x24, rx_buf[1]); // Door frame
+    TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[sizeof(expected) + 1]); // Heartbeat frame
+
+    // Now close all doors -> immediate closed frame emitted
+    frame.data[0] = 0x00;
+    frame.data[1] = 0x00;
+    can_router_process_can(&frame);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(5, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x24, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[3]); // All doors closed
+
+    // Subsequent ticks with all doors closed must NOT emit door frames (only heartbeat)
+    for (int tick = 1; tick <= 15; tick++) {
+        can_router_periodic_100ms();
+        rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+        TEST_ASSERT_EQUAL_UINT32(5, rx_len);
+        TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[1]); // Heartbeat only
+    }
 }
 
 void test_integration_raise_telemetry_periodic_pipeline(void) {

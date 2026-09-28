@@ -6,11 +6,13 @@
 static vehicle_state_t s_current_state;
 static vehicle_state_t s_last_sent_state;
 static uint16_t        s_tpms_periodic_timer = 0;
+static uint8_t         s_doors_periodic_timer = 0;
 
 void can_router_init(void) {
     memset(&s_current_state, 0, sizeof(s_current_state));
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
     s_tpms_periodic_timer = 0;
+    s_doors_periodic_timer = 0;
     vehicle_profile_init();
     hu_protocol_init();
 }
@@ -88,7 +90,7 @@ void can_router_periodic_100ms(void) {
         s_last_sent_state.steering_angle_deg = s_current_state.steering_angle_deg;
     }
 
-    // Continuously repeat door status frame while ANY door/trunk/hood is open.
+    // Repeat door status frame at 1 Hz (every 1000ms / 10 ticks) while ANY door/trunk/hood is open.
     // Stops repeating as soon as all doors are closed.
     bool any_door_open = s_current_state.doors.door_driver ||
                          s_current_state.doors.door_passenger ||
@@ -98,7 +100,12 @@ void can_router_periodic_100ms(void) {
                          s_current_state.doors.hood;
 
     if (any_door_open) {
-        hu_protocol_send_doors(&s_current_state.doors);
+        if (++s_doors_periodic_timer >= 10) {
+            s_doors_periodic_timer = 0;
+            hu_protocol_send_doors(&s_current_state.doors);
+        }
+    } else {
+        s_doors_periodic_timer = 0;
     }
 
     // Periodically refresh TPMS telemetry every 30 seconds (300 * 100ms ticks)
