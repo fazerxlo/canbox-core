@@ -128,10 +128,6 @@ static void psa_decode_hvac_0x1e3_profile(const can_frame_t *frame, vehicle_stat
     psa_hvac_process_can_0x1e3(&state->climate, frame->data, frame->dlc);
 }
 
-static void psa_decode_hvac_0x12d_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    psa_hvac_process_can_0x12d(&state->climate, frame->data, frame->dlc);
-}
-
 static void psa_decode_cruise_0x1a8_profile(const can_frame_t *frame, vehicle_state_t *state) {
     (void)state;
     bool active = false;
@@ -157,7 +153,6 @@ static const profile_can_rule_t s_psa_rules[] = {
     { 0x0E8,                        psa_decode_steering_angle_0x0e8 },
     { PSA_CAN_ID_CLIMATE_HVAC,      psa_decode_hvac_0x1d0_profile },
     { 0x1E3,                        psa_decode_hvac_0x1e3_profile },
-    { 0x12D,                        psa_decode_hvac_0x12d_profile },
     { PSA_CAN_ID_DOORS_BODY_220,    psa_decode_doors_0x220_profile },
 };
 

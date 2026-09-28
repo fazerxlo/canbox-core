@@ -206,8 +206,19 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
     climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
     climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
 
-    climate->aqs_auto = (data[0] & 0x10) != 0;
-    climate->recirculate = (data[4] & 0x10) != 0;
+    if ((data[4] & 0x10) != 0) {
+        climate->recirculate = true;
+        climate->aqs_auto = false;
+    } else if ((data[4] & 0x20) != 0) {
+        climate->recirculate = false;
+        climate->aqs_auto = false;
+    } else if (data[0] == 0x08 || climate->auto_mode) {
+        climate->recirculate = false;
+        climate->aqs_auto = true;
+    } else {
+        climate->recirculate = false;
+        climate->aqs_auto = false;
+    }
     climate->rear_defrost = (data[4] & 0x01) != 0;
 
     uint8_t l_temp = data[5];
@@ -223,6 +234,17 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
 
+    if ((data[0] & 0x80) != 0) {
+        climate->recirculate = true;
+        climate->aqs_auto = false;
+    } else if (climate->auto_mode) {
+        climate->recirculate = false;
+        climate->aqs_auto = true;
+    } else {
+        climate->recirculate = false;
+        climate->aqs_auto = false;
+    }
+
     climate->front_max_defrost = (data[1] & 0x80) != 0;
 
     if (dlc >= 6) {
@@ -236,9 +258,9 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
 }
 
 void psa_hvac_process_can_0x12d(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
-    if (!climate || !data || dlc < 1) return;
-    
-    climate->ac_on = (data[0] & 0x80) != 0;
+    (void)climate;
+    (void)data;
+    (void)dlc;
 }
 
 /* --------------------------------------------------------------------------

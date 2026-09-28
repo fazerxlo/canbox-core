@@ -138,9 +138,12 @@ static void hiworld_send_climate(const vehicle_climate_t *climate) {
     if (climate->auto_mode)        payload[0] |= 0x08;
     if (climate->ac_on)            payload[0] |= 0x01;
 
-    payload[1] = 0x08; // Baseline AQS auto as observed from real Canbox
-    if (climate->recirculate)      payload[1] |= 0x10;
-    if (climate->aqs_auto)         payload[1] |= 0x08;
+    payload[1] = 0x00;
+    if (climate->recirculate) {
+        payload[1] |= 0x10;
+    } else if (climate->aqs_auto) {
+        payload[1] |= 0x08;
+    }
 
     if (climate->rear_defrost)      payload[2] |= 0x20;
     if (climate->front_max_defrost) payload[2] |= 0x10;

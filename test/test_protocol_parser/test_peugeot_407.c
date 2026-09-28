@@ -932,6 +932,8 @@ void test_peugeot_407_hvac_hiworld(void) {
     TEST_ASSERT_TRUE(climate.ac_on);
     TEST_ASSERT_TRUE(climate.auto_mode);
     TEST_ASSERT_TRUE(climate.dual_mode);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
 
     // Vector 2: Dual Zone air distribution - Left=4 (Windshield 11), Right=2 (Floor 3)
     const uint8_t can_1d0_v2[] = { 0x28, 0x00, 0x00, 0x42, 0x00, 0x0E, 0x0B, 0x00 };
@@ -962,5 +964,18 @@ void test_peugeot_407_hvac_hiworld(void) {
     psa_hvac_process_can_0x1e3(&climate, can_1e3_v6, 8);
     TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
     TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
+
+    // Vector 7: 0x1E3 Recirculation ON, AC OFF (0x85)
+    const uint8_t can_1e3_v7[] = { 0x85, 0x30, 0x0D, 0x08, 0x00, 0x00, 0x01, 0x00 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v7, 8);
+    TEST_ASSERT_TRUE(climate.recirculate);
+    TEST_ASSERT_FALSE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.ac_on);
+
+    // Vector 8: 0x1E3 Fresh Air (0x05)
+    const uint8_t can_1e3_v8[] = { 0x05, 0x30, 0x0D, 0x08, 0x00, 0x00, 0x01, 0x00 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v8, 8);
+    TEST_ASSERT_FALSE(climate.recirculate);
+    TEST_ASSERT_FALSE(climate.aqs_auto);
 }
 
