@@ -210,6 +210,77 @@ static void hiworld_send_tpms(const vehicle_tpms_t *tpms) {
     hiworld_send_tpms_discrete(tpms);
 }
 
+static void hiworld_send_trip_instant(const vehicle_trip_t *trip) {
+    if (!trip || !trip->instant_valid) return;
+
+    /* Hiworld Instantaneous Telemetry (Cmd 0x13): 4 payload bytes
+     * Byte 0..1: Instantaneous Fuel Consumption (0.1 L/100km, Big-Endian)
+     * Byte 2..3: Range / DTE (km, Big-Endian)
+     */
+    uint8_t payload[4];
+    payload[0] = (uint8_t)(trip->instant_fuel_deci >> 8);
+    payload[1] = (uint8_t)(trip->instant_fuel_deci & 0xFF);
+    payload[2] = (uint8_t)(trip->range_km >> 8);
+    payload[3] = (uint8_t)(trip->range_km & 0xFF);
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P0, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_trip1(const vehicle_trip_t *trip) {
+    if (!trip || !trip->trip1_valid) return;
+
+    /* Hiworld Trip 1 Telemetry (Cmd 0x14): 6 payload bytes
+     * Byte 0..1: Average Fuel Consumption (0.1 L/100km, Big-Endian)
+     * Byte 2: Reserved (0x00)
+     * Byte 3: Average Speed (km/h)
+     * Byte 4..5: Distance Traveled (km, Big-Endian)
+     */
+    uint8_t payload[6];
+    payload[0] = (uint8_t)(trip->trip1_avg_fuel >> 8);
+    payload[1] = (uint8_t)(trip->trip1_avg_fuel & 0xFF);
+    payload[2] = 0x00;
+    payload[3] = trip->trip1_avg_speed;
+    payload[4] = (uint8_t)(trip->trip1_distance_km >> 8);
+    payload[5] = (uint8_t)(trip->trip1_distance_km & 0xFF);
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P1, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_trip2(const vehicle_trip_t *trip) {
+    if (!trip || !trip->trip2_valid) return;
+
+    /* Hiworld Trip 2 Telemetry (Cmd 0x15): 6 payload bytes
+     * Byte 0..1: Average Fuel Consumption (0.1 L/100km, Big-Endian)
+     * Byte 2: Reserved (0x00)
+     * Byte 3: Average Speed (km/h)
+     * Byte 4..5: Distance Traveled (km, Big-Endian)
+     */
+    uint8_t payload[6];
+    payload[0] = (uint8_t)(trip->trip2_avg_fuel >> 8);
+    payload[1] = (uint8_t)(trip->trip2_avg_fuel & 0xFF);
+    payload[2] = 0x00;
+    payload[3] = trip->trip2_avg_speed;
+    payload[4] = (uint8_t)(trip->trip2_distance_km >> 8);
+    payload[5] = (uint8_t)(trip->trip2_distance_km & 0xFF);
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P2, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -222,5 +293,8 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_tpms = hiworld_send_tpms,
     .send_tpms_numeric = hiworld_send_tpms_numeric,
     .send_tpms_discrete = hiworld_send_tpms_discrete,
+    .send_trip_instant = hiworld_send_trip_instant,
+    .send_trip1 = hiworld_send_trip1,
+    .send_trip2 = hiworld_send_trip2,
     .send_heartbeat = hiworld_send_heartbeat,
 };

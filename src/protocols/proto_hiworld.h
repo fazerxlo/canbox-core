@@ -16,6 +16,9 @@ extern "C" {
 /* Common Hiworld Command IDs */
 #define HIWORLD_CMD_WHEEL_KEY     0x11
 #define HIWORLD_CMD_DOORS         0x12
+#define HIWORLD_CMD_ECU_P0        0x13
+#define HIWORLD_CMD_ECU_P1        0x14
+#define HIWORLD_CMD_ECU_P2        0x15
 #define HIWORLD_CMD_TPMS_DISCRETE 0x18
 #define HIWORLD_CMD_AIR_CON       0x31
 #define HIWORLD_CMD_RADAR         0x41

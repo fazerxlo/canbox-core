@@ -434,6 +434,157 @@ size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_l
     return 5;
 }
 
+size_t build_hiworld_trip_instant(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
+    if (!trip || !out || max_len < 9) {
+        return 0;
+    }
+    out[0] = HIWORLD_SOF1;
+    out[1] = HIWORLD_SOF2;
+    out[2] = 0x04;               /* Length: 4 Payload bytes */
+    out[3] = HIWORLD_CMD_ECU_P0; /* Cmd 0x13 */
+    out[4] = (uint8_t)(trip->instant_fuel_deci >> 8);
+    out[5] = (uint8_t)(trip->instant_fuel_deci & 0xFF);
+    out[6] = (uint8_t)(trip->range_km >> 8);
+    out[7] = (uint8_t)(trip->range_km & 0xFF);
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 7; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[8] = (uint8_t)((sum - 1) & 0xFF);
+    return 9;
+}
+
+size_t build_hiworld_trip1(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
+    if (!trip || !out || max_len < 11) {
+        return 0;
+    }
+    out[0] = HIWORLD_SOF1;
+    out[1] = HIWORLD_SOF2;
+    out[2] = 0x06;               /* Length: 6 Payload bytes */
+    out[3] = HIWORLD_CMD_ECU_P1; /* Cmd 0x14 */
+    out[4] = (uint8_t)(trip->trip1_avg_fuel >> 8);
+    out[5] = (uint8_t)(trip->trip1_avg_fuel & 0xFF);
+    out[6] = 0x00;               /* Reserved */
+    out[7] = trip->trip1_avg_speed;
+    out[8] = (uint8_t)(trip->trip1_distance_km >> 8);
+    out[9] = (uint8_t)(trip->trip1_distance_km & 0xFF);
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 9; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[10] = (uint8_t)((sum - 1) & 0xFF);
+    return 11;
+}
+
+size_t build_hiworld_trip2(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
+    if (!trip || !out || max_len < 11) {
+        return 0;
+    }
+    out[0] = HIWORLD_SOF1;
+    out[1] = HIWORLD_SOF2;
+    out[2] = 0x06;               /* Length: 6 Payload bytes */
+    out[3] = HIWORLD_CMD_ECU_P2; /* Cmd 0x15 */
+    out[4] = (uint8_t)(trip->trip2_avg_fuel >> 8);
+    out[5] = (uint8_t)(trip->trip2_avg_fuel & 0xFF);
+    out[6] = 0x00;               /* Reserved */
+    out[7] = trip->trip2_avg_speed;
+    out[8] = (uint8_t)(trip->trip2_distance_km >> 8);
+    out[9] = (uint8_t)(trip->trip2_distance_km & 0xFF);
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 9; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[10] = (uint8_t)((sum - 1) & 0xFF);
+    return 11;
+}
+
+void psa_trip_init(psa_trip_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
+    if (!ctx) return;
+    memset(ctx, 0, sizeof(psa_trip_ctx_t));
+    ctx->uart_tx = uart_tx;
+}
+
+void psa_trip_send_instant(psa_trip_ctx_t *ctx) {
+    if (!ctx || !ctx->uart_tx) return;
+
+    uint8_t p[9];
+    size_t len = build_hiworld_trip_instant(&ctx->state, p, sizeof(p));
+    if (len > 0) {
+        ctx->uart_tx(p, len);
+    }
+}
+
+void psa_trip_send_trip1(psa_trip_ctx_t *ctx) {
+    if (!ctx || !ctx->uart_tx) return;
+
+    uint8_t p[11];
+    size_t len = build_hiworld_trip1(&ctx->state, p, sizeof(p));
+    if (len > 0) {
+        ctx->uart_tx(p, len);
+    }
+}
+
+void psa_trip_send_trip2(psa_trip_ctx_t *ctx) {
+    if (!ctx || !ctx->uart_tx) return;
+
+    uint8_t p[11];
+    size_t len = build_hiworld_trip2(&ctx->state, p, sizeof(p));
+    if (len > 0) {
+        ctx->uart_tx(p, len);
+    }
+}
+
+void psa_trip_process_can_0x0b6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 4) return;
+    uint16_t raw_rpm = read_be16(&data[0]);
+    uint16_t raw_spd = read_be16(&data[2]);
+
+    ctx->state.rpm = (raw_rpm == 0xFFFF) ? 0 : (raw_rpm >> 3);
+    ctx->state.speed_kmh = (raw_spd == 0xFFFF) ? 0 : (raw_spd / 100);
+}
+
+void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 7) return;
+
+    ctx->state.instant_fuel_deci = read_be16(&data[1]);
+    ctx->state.range_km          = read_be16(&data[3]);
+
+    psa_trip_send_instant(ctx);
+}
+
+void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 5) return;
+
+    ctx->state.trip1_distance_km = read_be16(&data[1]);
+    ctx->state.trip1_avg_fuel    = read_be16(&data[3]);
+    ctx->state.trip1_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
+
+    psa_trip_send_trip1(ctx);
+}
+
+void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 5) return;
+
+    ctx->state.trip2_distance_km = read_be16(&data[1]);
+    ctx->state.trip2_avg_fuel    = read_be16(&data[3]);
+    ctx->state.trip2_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
+
+    psa_trip_send_trip2(ctx);
+}
+
+void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 8) return;
+
+    ctx->state.coolant_c = (int8_t)((int16_t)data[1] - 40);
+    if (data[5] != 0xFF) {
+        ctx->state.ambient_c = (int8_t)(((int16_t)data[5] * 5 - 400) / 10);
+    }
+    ctx->state.reverse_active = (data[7] & 0x80) != 0;
+}
+
 /* --------------------------------------------------------------------------
  * 1.5 Doors & Body Status
  * -------------------------------------------------------------------------- */

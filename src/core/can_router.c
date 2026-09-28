@@ -69,6 +69,30 @@ void can_router_process_can(const can_frame_t *frame) {
             s_last_sent_state.tpms.valid = true;
         }
     }
+
+    // Immediately push trip computer updates on new valid trip frames
+    if (s_current_state.trip.updated_page != 0) {
+        uint8_t page = s_current_state.trip.updated_page;
+        s_current_state.trip.updated_page = 0;
+        if (page == 1 && s_current_state.trip.instant_valid) {
+            hu_protocol_send_trip_instant(&s_current_state.trip);
+            s_last_sent_state.trip.instant_fuel_deci = s_current_state.trip.instant_fuel_deci;
+            s_last_sent_state.trip.range_km = s_current_state.trip.range_km;
+            s_last_sent_state.trip.instant_valid = true;
+        } else if (page == 2 && s_current_state.trip.trip1_valid) {
+            hu_protocol_send_trip1(&s_current_state.trip);
+            s_last_sent_state.trip.trip1_avg_fuel = s_current_state.trip.trip1_avg_fuel;
+            s_last_sent_state.trip.trip1_avg_speed = s_current_state.trip.trip1_avg_speed;
+            s_last_sent_state.trip.trip1_distance_km = s_current_state.trip.trip1_distance_km;
+            s_last_sent_state.trip.trip1_valid = true;
+        } else if (page == 3 && s_current_state.trip.trip2_valid) {
+            hu_protocol_send_trip2(&s_current_state.trip);
+            s_last_sent_state.trip.trip2_avg_fuel = s_current_state.trip.trip2_avg_fuel;
+            s_last_sent_state.trip.trip2_avg_speed = s_current_state.trip.trip2_avg_speed;
+            s_last_sent_state.trip.trip2_distance_km = s_current_state.trip.trip2_distance_km;
+            s_last_sent_state.trip.trip2_valid = true;
+        }
+    }
 }
 
 void can_router_process_uart_byte(uint8_t byte) {

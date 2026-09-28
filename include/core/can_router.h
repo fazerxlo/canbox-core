@@ -88,11 +88,32 @@ typedef struct {
 typedef vehicle_tpms_t tpms_state_t;
 
 typedef struct {
+    uint16_t instant_fuel_deci; /* 0.1 L/100km */
+    uint16_t range_km;          /* Distance to Empty */
+    
+    uint16_t trip1_avg_fuel;    /* 0.1 L/100km */
+    uint8_t  trip1_avg_speed;   /* km/h */
+    uint16_t trip1_distance_km; /* km */
+
+    uint16_t trip2_avg_fuel;    /* 0.1 L/100km */
+    uint8_t  trip2_avg_speed;   /* km/h */
+    uint16_t trip2_distance_km; /* km */
+
+    uint8_t  updated_page;      /* 0: none, 1: instant (0x13), 2: trip1 (0x14), 3: trip2 (0x15) */
+    bool     instant_valid;
+    bool     trip1_valid;
+    bool     trip2_valid;
+} vehicle_trip_t;
+
+typedef vehicle_trip_t trip_state_t;
+
+typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
     vehicle_climate_t        climate;
     vehicle_lights_t         lights;
     vehicle_tpms_t           tpms;
+    vehicle_trip_t           trip;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;

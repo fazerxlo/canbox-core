@@ -140,27 +140,57 @@ flowchart TD
     E --> F["UART Hardware Tx<br>(hal/hal_uart.h)"]
 ```
 
+> [!CAUTION]
+> **The "Silent UART / No Data After Implementation" Anti-Pattern:**
+> Writing a CAN parser or byte builder in `src/profiles/` (e.g. `peugeot_407.c`) along with passing isolated unit tests **DOES NOT** deliver a feature. If the CAN ID is omitted from `profile_*.c:s_*_rules[]`, or omitted from `can_router.c` state routing, or omitted from `proto_*_adapter.c`, the firmware will silently drop the incoming CAN frames and transmit **zero UART bytes** on the vehicle bench. All 5 layers are strictly mandatory before marking any feature done.
+
+### Mandatory 5-Layer Implementation Checklist
+
+Before declaring any feature complete, verify that every layer in the chain has been implemented:
+
+- [ ] **Layer 1 & 2: Vehicle Profile Registration & Parsing (`src/profiles/`)**
+  - CAN arbitration IDs registered in the profile's rule table `s_<profile>_rules[]` in `src/profiles/profile_<car>.c`.
+  - Boundary and DLC validated: `if (frame->dlc < EXPECTED_LEN) return;`.
+  - Data unpacked using endian helpers (`read_be16`, `read_le16`).
+  - Output written directly to `state->your_feature`.
+- [ ] **Layer 3: Canonical State Modeling & Delta Routing (`include/core/can_router.h` & `src/core/can_router.c`)**
+  - Canonical feature struct `vehicle_<feature>_t` defined in `can_router.h` and embedded in `vehicle_state_t`.
+  - Change-detection / delta gating implemented in `can_router_process_can()` (event-driven Class A) or `can_router_periodic_100ms()` (throttled/periodic Class B/C/D).
+  - Router calls `hu_protocol_send_<feature>()` and updates `s_last_sent_state`.
+- [ ] **Layer 4: Protocol Driver Abstraction (`include/protocols/hu_protocol_driver.h` & `hu_protocol.h`)**
+  - Function pointer `void (*send_<feature>)(...)` added to `hu_protocol_driver_t`.
+  - Public dispatcher `hu_protocol_send_<feature>()` declared in `hu_protocol.h` and implemented in `src/protocols/hu_protocol.c`.
+  - All existing protocol drivers (`proto_raise_adapter.c`, `proto_hiworld_adapter.c`, `proto_bagoo_adapter.c`) updated (set to `NULL` if unsupported).
+- [ ] **Layer 5: Head Unit Protocol Serialization & UART Tx (`src/protocols/proto_*_adapter.c`)**
+  - Target adapter translates canonical struct into wire payload and invokes `proto_<protocol>_serialize()`.
+  - Serialized packet transmitted via `hal_uart_write(tx_buf, len)`.
+- [ ] **End-to-End Integration Verification (`test/test_integration/`)**
+  - An integration test in `test/test_integration/` feeds a raw `can_frame_t` through `can_router_process_can()` and asserts the exact expected UART byte sequence on `read_uart_output()`.
+
+---
+
 ### Step 1: Model Domain Data in Canonical State (`include/core/can_router.h`)
-- Create or update the normalized, hardware-independent C structure representing the feature (e.g. `vehicle_doors_t`, `vehicle_climate_t`, `vehicle_tpms_t`, `vehicle_gear_t`).
-- Embed this struct into the master vehicle state structure [`vehicle_state_t`](file:///home/Fazer/git/canbox-core/include/core/can_router.h#L90-L102).
-- Use canonical engineering units (e.g. 0.1 Bar for TPMS, degrees for steering angle, km/h for speed, bool for discrete states).
+- Create or update the normalized, hardware-independent C structure representing the feature (e.g. `vehicle_doors_t`, `vehicle_climate_t`, `vehicle_tpms_t`, `vehicle_trip_t`, `vehicle_gear_t`).
+- Embed this struct into the master vehicle state structure [`vehicle_state_t`](file:///home/Fazer/git/canbox-core/include/core/can_router.h#L90-L125).
+- Use canonical engineering units (e.g. 0.1 Bar for TPMS, 0.1 L/100km for fuel, degrees for steering angle, km/h for speed, bool for discrete states).
 
 ### Step 2: Implement Vehicle Profile Decoder (`src/profiles/`)
 - In the vehicle profile (e.g. `profile_psa.c`), register the CAN arbitration ID in the profile's rule table `can_router_rule_t`.
 - Unpack CAN frame payload into canonical values:
   - **Always check boundary:** `if (frame->dlc < EXPECTED_LEN) return;`
   - **Always use endian helpers:** `read_be16()`, `read_le16()`, `read_be32()`. Never cast `(uint16_t *)&frame->data[x]`.
+  - **Filter uninitialized / masking flags:** Guard against invalid/masked signals (e.g. BSI masking bits or `0xFFFF` values) before writing to state.
 - Update `state->your_feature`.
 - **Zero protocol knowledge:** The profile must have NO knowledge of Raise, Hiworld, or Bagoo UART protocol commands.
 
 ### Step 3: Implement Delta Routing & Frequency Throttling (`src/core/can_router.c`)
 - Add change detection comparing `s_current_state.your_feature` with `s_last_sent_state.your_feature`.
 - Decide dispatch class:
-  - **Class A (Event):** Place check inside [`can_router_process_can()`](file:///home/Fazer/git/canbox-core/src/core/can_router.c#L18). If changed, call `hu_protocol_send_your_feature(&s_current_state.your_feature)` and update `s_last_sent_state.your_feature`.
-  - **Class B/C/D (Throttled/Periodic):** Place check inside [`can_router_periodic_100ms()`](file:///home/Fazer/git/canbox-core/src/core/can_router.c#L76) with appropriate tick prescaler and deadbands.
+  - **Class A (Event):** Place check inside [`can_router_process_can()`](file:///home/Fazer/git/canbox-core/src/core/can_router.c#L20). If changed, call `hu_protocol_send_your_feature(&s_current_state.your_feature)` and update `s_last_sent_state.your_feature`.
+  - **Class B/C/D (Throttled/Periodic):** Place check inside [`can_router_periodic_100ms()`](file:///home/Fazer/git/canbox-core/src/core/can_router.c#L78) with appropriate tick prescaler and deadbands.
 
 ### Step 4: Declare Driver Interface & Implement Protocol Adapters
-1. Add function pointer to [`hu_protocol_driver_t`](file:///home/Fazer/git/canbox-core/include/protocols/hu_protocol_driver.h#L20-L33):
+1. Add function pointer to [`hu_protocol_driver_t`](file:///home/Fazer/git/canbox-core/include/protocols/hu_protocol_driver.h#L20-L36):
    ```c
    void (*send_your_feature)(const vehicle_your_feature_t *data);
    ```
@@ -175,12 +205,13 @@ flowchart TD
 3. Implement translation in active protocol adapters (`proto_raise_adapter.c`, `proto_hiworld_adapter.c`, `proto_bagoo_adapter.c`):
    - Translate canonical struct into protocol CMD wire bytes using `proto_<name>_serialize()`.
    - Transmit via `hal_uart_write(tx_buf, len)`.
-   - If a protocol does not support this feature, leave its driver function pointer as `NULL`.
+   - Explicitly initialize unsupported adapters to `NULL`.
 
 ### Step 5: Unit & Integration Verification (`test/`)
 - Add unit test verifying that `proto_<name>_serialize()` builds the exact byte stream expected by the Head Unit.
 - Add integration test in `test/test_integration/` verifying that feeding a raw CAN frame into `can_router_process_can()` emits the correct UART packet.
 - Add delta suppression test: re-feeding identical CAN frame must generate zero UART bytes.
+- When working from a real capture log (`dump_*.log`), verify the fix against the real CAN frames in that log.
 
 ---
 
@@ -262,9 +293,55 @@ An audit of our current implementation against these guidelines reveals the foll
 | **Doors & Latches** | `profile_psa.c`<br>`peugeot_407.c` | Immediate delta via `memcmp` + 1 Hz periodic repeat while open | `send_doors` | Raise: ✅<br>Hiworld: ✅<br>Bagoo: ✅ | **Fully Compliant** (Class A immediate on delta + Class C 1 Hz safety refresh while open). |
 | **Climate (HVAC)** | `profile_psa.c`<br>`peugeot_407.c` | Immediate delta via `memcmp` in `can_router.c` | `send_climate` | Raise: ❌ (NULL)<br>Hiworld: ✅<br>Bagoo: ❌ (NULL) | **Compliant Timing** (Class A). Raise and Bagoo need adapter implementation for HVAC popups. |
 | **TPMS** | `profile_psa.c`<br>`peugeot_407.c` | Decoupled numeric vs discrete delta + 30s refresh | `send_tpms`<br>`send_tpms_numeric`<br>`send_tpms_discrete` | Raise: ❌ (NULL)<br>Hiworld: ✅<br>Bagoo: ❌ (NULL) | **Fully Compliant** (Class A alarms + Class D numeric). Raise and Bagoo adapters need implementation. |
+| **Trip Computer & Fuel Economy** | `profile_psa.c`<br>`peugeot_407.c` (0x221, 0x2A1, 0x261) | Immediate delta on `updated_page` in `can_router.c` | `send_trip_instant`<br>`send_trip1`<br>`send_trip2` | Raise: ❌ (NULL)<br>Hiworld: ✅ (Cmds 0x13, 0x14, 0x15)<br>Bagoo: ❌ (NULL) | **Fully Compliant** (Class A / immediate on new valid frame). |
 | **Dynamic Telemetry** | `profile_psa.c` (speed, rpm, angle) | 100 ms periodic check on delta in `can_router.c` | `send_telemetry` | Raise: ✅ (speed, rpm, angle)<br>Hiworld: ⚠️ (angle only)<br>Bagoo: ⚠️ (angle only) | **Partially Compliant:** 100 ms steering angle is optimal for dynamic lines. Speed/RPM need deadband threshold to avoid firing every tick during small speed fluctuations. |
 | **Reverse Gear** | `profile_psa.c`<br>`profile_vag.c` | ❌ **Missing** in `can_router.c` | ❌ **Missing** in `hu_protocol_driver.h` | ❌ **Missing** | ⚠️ **Critical Gap:** Reverse flag is parsed into `state->reverse_gear`, but never routed or dispatched to HU. Camera switching cannot function. |
 | **Power / Ignition** | `profile_psa.c` | ❌ **Missing** in `can_router.c` | ❌ **Missing** in `hu_protocol_driver.h` | ❌ **Missing** | ⚠️ **Critical Gap:** Ignition state is parsed into `state->ignition_state`, but never dispatched to HU. |
 | **Handbrake** | `profile_psa.c`<br>`profile_vag.c` | ❌ **Missing** in `can_router.c` | ❌ **Missing** in `hu_protocol_driver.h` | ❌ **Missing** | ⚠️ **Gap:** Handbrake state parsed into `state->handbrake`, but never routed. |
 | **Lights** | `profile_psa.c` | ❌ **Missing** in `can_router.c` | ❌ **Missing** in `hu_protocol_driver.h` | ❌ **Missing** | ⚠️ **Gap:** Headlight/fog state parsed into `state->lights`, but never routed. |
 | **Heartbeat / Keepalive** | Internal | Called unconditionally every 100 ms in `can_router.c` | `send_heartbeat` | Raise: ✅<br>Hiworld: ✅<br>Bagoo: ✅ | ⚠️ **Timing Discrepancy:** Heartbeat is dispatched at **10 Hz (every 100 ms)** instead of the standard **1 Hz (1000 ms)**. Consumes ~10% continuous UART bandwidth. |
+
+---
+
+## 10. Build, Test & Workspace Integrity Protocol (Zero-Defect Standard)
+
+To prevent build breakages and silent runtime regressions, every code modification must pass the following quality gates prior to completion.
+
+### 10.1 Multi-Target Compilation Gate
+Never run only a single environment (e.g. `-e native_test_runner`) and assume all targets compile. A change in a shared header may build under unit tests but break integration tests, desktop simulation, or MCU targets.
+
+**Mandatory Verification Sequence:**
+```bash
+# 1. Run all test environments (unit tests + integration tests)
+~/.platformio/penv/bin/pio test
+
+# 2. Build STM32 bare-metal firmware
+~/.platformio/penv/bin/pio run -e stm32_cbox
+
+# 3. Build ESP32 ESP-IDF firmware
+~/.platformio/penv/bin/pio run -e esp32_cbox
+```
+All commands must exit with code `0`. Any compilation error, warning under `-Werror`, or linker error is an immediate blocker.
+
+### 10.2 Header Dependency & Single-Source-of-Truth Gate
+- **Canonical Model Declaration:** All shared data models (`vehicle_<feature>_t`) MUST be declared in [`include/core/can_router.h`](file:///home/Fazer/git/canbox-core/include/core/can_router.h) and embedded in `vehicle_state_t` before any driver or adapter header references them.
+- **Header Self-Containment:** Every header must be able to compile independently. Avoid forward-declaration assumptions or circular header dependencies.
+- **Synchronized Driver Interfaces:** Whenever adding a callback to [`hu_protocol_driver_t`](file:///home/Fazer/git/canbox-core/include/protocols/hu_protocol_driver.h):
+  1. Add the function pointer to `hu_protocol_driver_t`.
+  2. Add the public wrapper to `include/protocols/hu_protocol.h` and `src/protocols/hu_protocol.c`.
+  3. Update **ALL** protocol driver structs (`g_hu_protocol_raise`, `g_hu_protocol_hiworld`, `g_hu_protocol_bagoo`). Unused/unimplemented drivers must be explicitly assigned `= NULL`.
+
+### 10.3 Working Tree & State Sync Gate (`git status` Check)
+Before concluding any task, perform an inspection of the git working copy:
+```bash
+git status -s
+```
+- Ensure that no modified header (such as `include/core/can_router.h`) was inadvertently reverted, discarded, or omitted from the working tree.
+- Confirm that every modified file compiles cleanly in unison, not relying on cached object files or half-applied patches.
+
+### 10.4 Bench Log & Scenario Verification Gate (No Silent Failures)
+When addressing an issue reported from a real vehicle capture dump (`dump_*.log`):
+1. **Locate Ground Truth:** Identify the exact CAN IDs and raw data payloads in the dump (e.g. using `grep` or `python3 tools/diff_canbox_frames.py`).
+2. **Trace the Pipeline:** Confirm that the active profile rules (`s_<profile>_rules[]`) include every relevant CAN ID.
+3. **Automate the Vector:** Write an automated test in `test/test_integration/` that feeds the exact payload from the log through `can_router_process_can()` and asserts the expected UART output.
+4. **Guard Against Masking:** Verify that invalid or uninitialized frames (e.g. BSI masking bytes or `0xFFFF` uncalibrated readings) do not produce spurious UART traffic.

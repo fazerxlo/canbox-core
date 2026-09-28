@@ -29,6 +29,9 @@ typedef struct {
     void           (*send_tpms)(const vehicle_tpms_t *tpms);
     void           (*send_tpms_numeric)(const vehicle_tpms_t *tpms);
     void           (*send_tpms_discrete)(const vehicle_tpms_t *tpms);
+    void           (*send_trip_instant)(const vehicle_trip_t *trip);
+    void           (*send_trip1)(const vehicle_trip_t *trip);
+    void           (*send_trip2)(const vehicle_trip_t *trip);
     void           (*send_heartbeat)(void);
 } hu_protocol_driver_t;
 

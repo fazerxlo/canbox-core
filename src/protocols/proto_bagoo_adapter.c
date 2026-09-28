@@ -132,6 +132,9 @@ const hu_protocol_driver_t g_hu_protocol_bagoo = {
     .send_tpms = NULL,
     .send_tpms_numeric = NULL,
     .send_tpms_discrete = NULL,
+    .send_trip_instant = NULL,
+    .send_trip1 = NULL,
+    .send_trip2 = NULL,
     .send_heartbeat = bagoo_send_heartbeat,
 };
 

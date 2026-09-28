@@ -26,6 +26,19 @@ static void test_tpms_uart_tx(const uint8_t *buf, size_t len) {
     }
 }
 
+#define MAX_TRIP_TX_PACKETS 4
+static uint8_t s_trip_uart_buf[MAX_TRIP_TX_PACKETS][32];
+static size_t  s_trip_uart_len[MAX_TRIP_TX_PACKETS];
+static int     s_trip_uart_tx_calls = 0;
+
+static void test_trip_uart_tx(const uint8_t *buf, size_t len) {
+    if (buf && s_trip_uart_tx_calls < MAX_TRIP_TX_PACKETS && len <= sizeof(s_trip_uart_buf[0])) {
+        memcpy(s_trip_uart_buf[s_trip_uart_tx_calls], buf, len);
+        s_trip_uart_len[s_trip_uart_tx_calls] = len;
+        s_trip_uart_tx_calls++;
+    }
+}
+
 void setUp_peugeot_407(void) {
     psa_stalk_init(&s_stalk_state);
     s_last_stalk_key_id = 0;
@@ -34,6 +47,9 @@ void setUp_peugeot_407(void) {
     s_tpms_uart_tx_calls = 0;
     memset(s_tpms_uart_len, 0, sizeof(s_tpms_uart_len));
     memset(s_tpms_uart_buf, 0, sizeof(s_tpms_uart_buf));
+    s_trip_uart_tx_calls = 0;
+    memset(s_trip_uart_len, 0, sizeof(s_trip_uart_len));
+    memset(s_trip_uart_buf, 0, sizeof(s_trip_uart_buf));
 }
 
 /* --------------------------------------------------------------------------
@@ -324,6 +340,211 @@ void test_peugeot_407_reverse_state(void) {
     TEST_ASSERT_EQUAL_HEX8(0x01, out[2]);
     TEST_ASSERT_EQUAL_HEX8(0x80, out[3]);
     TEST_ASSERT_EQUAL_HEX8((uint8_t)((0x40 + 0x01 + 0x80) ^ 0xFF), out[4]);
+}
+
+/* --------------------------------------------------------------------------
+ * Hiworld Peugeot 407 Trip Computer & Telemetry Unit Tests & Verification Vectors
+ * Based on CANBOX_SPEC_HIWORLD_407_06_TRIP_COMPUTER_TELEMETRY.md
+ * -------------------------------------------------------------------------- */
+void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void) {
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+    s_trip_uart_tx_calls = 0;
+
+    // Vector 1: Instant Fuel 6.8 L/100km (68 = 0x0044), Range 640 km (0x0280)
+    // CAN ID 0x221 injection: cansend vcan0 221#00004402800000
+    const uint8_t can_221[] = { 0x00, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 };
+    psa_trip_process_can_0x221(&ctx, can_221, sizeof(can_221));
+
+    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
+
+    // Expected UART Output: 5A A5 04 13 00 44 02 80 DC
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x04, 0x13, 0x00, 0x44, 0x02, 0x80, 0xDC };
+    TEST_ASSERT_EQUAL_UINT32(9, s_trip_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_trip_uart_buf[0], 9);
+
+    TEST_ASSERT_EQUAL_UINT16(68, ctx.state.instant_fuel_deci);
+    TEST_ASSERT_EQUAL_UINT16(640, ctx.state.range_km);
+
+    // Verify builder directly
+    uint8_t out[16];
+    size_t len = build_hiworld_trip_instant(&ctx.state, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(9, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 9);
+}
+
+void test_peugeot_407_trip_hiworld_vector_2_trip1_historical(void) {
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+    s_trip_uart_tx_calls = 0;
+
+    // Vector 2: Trip 1 Historical (Distance 569 km, Fuel 7.3 L/100km, Mean Speed 37 km/h)
+    // CAN ID 0x2A1 injection: cansend vcan0 2A1#25023900490025
+    const uint8_t can_2a1[] = { 0x25, 0x02, 0x39, 0x00, 0x49, 0x00, 0x25 };
+    psa_trip_process_can_0x2a1(&ctx, can_2a1, sizeof(can_2a1));
+
+    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
+
+    // Expected UART Output: 5A A5 06 14 00 49 00 25 02 39 C2
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x06, 0x14, 0x00, 0x49, 0x00, 0x25, 0x02, 0x39, 0xC2 };
+    TEST_ASSERT_EQUAL_UINT32(11, s_trip_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_trip_uart_buf[0], 11);
+
+    TEST_ASSERT_EQUAL_UINT16(569, ctx.state.trip1_distance_km);
+    TEST_ASSERT_EQUAL_UINT16(73, ctx.state.trip1_avg_fuel);
+    TEST_ASSERT_EQUAL_UINT8(37, ctx.state.trip1_avg_speed);
+
+    // Verify builder directly
+    uint8_t out[16];
+    size_t len = build_hiworld_trip1(&ctx.state, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 11);
+}
+
+void test_peugeot_407_trip_hiworld_vector_3_trip2_historical(void) {
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+    s_trip_uart_tx_calls = 0;
+
+    // Vector 3: Trip 2 Historical (Distance 921 km, Fuel 7.9 L/100km, Mean Speed 35 km/h)
+    // CAN ID 0x261 injection: cansend vcan0 261#230399004F0023
+    const uint8_t can_261[] = { 0x23, 0x03, 0x99, 0x00, 0x4F, 0x00, 0x23 };
+    psa_trip_process_can_0x261(&ctx, can_261, sizeof(can_261));
+
+    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
+
+    // Expected UART Output: 5A A5 06 15 00 4F 00 23 03 99 28
+    // Note: Spec manual sum typo stated 0x12A - 1 = 0x29, but actual sum is 0x129 - 1 = 0x28.
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x06, 0x15, 0x00, 0x4F, 0x00, 0x23, 0x03, 0x99, 0x28 };
+    TEST_ASSERT_EQUAL_UINT32(11, s_trip_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_trip_uart_buf[0], 11);
+
+    TEST_ASSERT_EQUAL_UINT16(921, ctx.state.trip2_distance_km);
+    TEST_ASSERT_EQUAL_UINT16(79, ctx.state.trip2_avg_fuel);
+    TEST_ASSERT_EQUAL_UINT8(35, ctx.state.trip2_avg_speed);
+
+    // Verify builder directly
+    uint8_t out[16];
+    size_t len = build_hiworld_trip2(&ctx.state, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 11);
+}
+
+void test_peugeot_407_trip_hiworld_vector_4_fast_dynamics_0x0b6(void) {
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+    s_trip_uart_tx_calls = 0;
+
+    // Vector 4: Fast Dynamics RPM & Speed (800 RPM, 10 km/h)
+    // CAN ID 0x0B6 injection: cansend vcan0 0B6#190003E8000000D0
+    const uint8_t can_0b6[] = { 0x19, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x00, 0xD0 };
+    psa_trip_process_can_0x0b6(&ctx, can_0b6, sizeof(can_0b6));
+
+    TEST_ASSERT_EQUAL_INT(0, s_trip_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT16(800, ctx.state.rpm);
+    TEST_ASSERT_EQUAL_UINT16(10, ctx.state.speed_kmh);
+
+    // Test invalid / engine off (0xFFFF)
+    const uint8_t can_0b6_off[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xD0 };
+    psa_trip_process_can_0x0b6(&ctx, can_0b6_off, sizeof(can_0b6_off));
+    TEST_ASSERT_EQUAL_UINT16(0, ctx.state.rpm);
+    TEST_ASSERT_EQUAL_UINT16(0, ctx.state.speed_kmh);
+}
+
+void test_peugeot_407_trip_hiworld_bsi_slow_data_0x0f6(void) {
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+    s_trip_uart_tx_calls = 0;
+
+    // 0x0F6: Coolant Raw 130 (90 C), Ambient Raw 128 (24 C), Reverse Active (Bit 7 of byte 7)
+    const uint8_t can_0f6[] = { 0x88, 130, 0x00, 0x00, 0x00, 128, 128, 0x80 };
+    psa_trip_process_can_0x0f6(&ctx, can_0f6, sizeof(can_0f6));
+
+    TEST_ASSERT_EQUAL_INT8(90, ctx.state.coolant_c);
+    TEST_ASSERT_EQUAL_INT8(24, ctx.state.ambient_c);
+    TEST_ASSERT_TRUE(ctx.state.reverse_active);
+
+    // Forward gear, Ambient 0 C (Raw 80)
+    const uint8_t can_0f6_fwd[] = { 0x88, 125, 0x00, 0x00, 0x00, 80, 80, 0x00 };
+    psa_trip_process_can_0x0f6(&ctx, can_0f6_fwd, sizeof(can_0f6_fwd));
+    TEST_ASSERT_EQUAL_INT8(85, ctx.state.coolant_c);
+    TEST_ASSERT_EQUAL_INT8(0, ctx.state.ambient_c);
+    TEST_ASSERT_FALSE(ctx.state.reverse_active);
+
+    // Raw 0xFF should NOT overwrite existing ambient_c
+    const uint8_t can_0f6_inv[] = { 0x88, 120, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00 };
+    psa_trip_process_can_0x0f6(&ctx, can_0f6_inv, sizeof(can_0f6_inv));
+    TEST_ASSERT_EQUAL_INT8(80, ctx.state.coolant_c);
+    TEST_ASSERT_EQUAL_INT8(0, ctx.state.ambient_c);
+
+    // Sub-zero ambient temperature: Raw 40 -> (40 * 5 - 400)/10 = -20 C
+    const uint8_t can_0f6_neg[] = { 0x88, 120, 0x00, 0x00, 0x00, 40, 40, 0x00 };
+    psa_trip_process_can_0x0f6(&ctx, can_0f6_neg, sizeof(can_0f6_neg));
+    TEST_ASSERT_EQUAL_INT8(-20, ctx.state.ambient_c);
+}
+
+void test_peugeot_407_trip_hiworld_speed_fallback(void) {
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+
+    // DLC = 5 without bytes 5..6 (speed in byte 0 is 45 km/h)
+    const uint8_t can_2a1_short[] = { 45, 0x01, 0x00, 0x00, 0x30 };
+    psa_trip_process_can_0x2a1(&ctx, can_2a1_short, sizeof(can_2a1_short));
+    TEST_ASSERT_EQUAL_UINT8(45, ctx.state.trip1_avg_speed);
+
+    // DLC = 7 but bytes 5..6 are 0 (fallback to byte 0 which is 55 km/h)
+    const uint8_t can_261_zero_speed[] = { 55, 0x01, 0x00, 0x00, 0x30, 0x00, 0x00 };
+    psa_trip_process_can_0x261(&ctx, can_261_zero_speed, sizeof(can_261_zero_speed));
+    TEST_ASSERT_EQUAL_UINT8(55, ctx.state.trip2_avg_speed);
+}
+
+void test_peugeot_407_trip_hiworld_boundary_and_null_safety(void) {
+    // NULL pointer calls must not crash
+    psa_trip_init(NULL, NULL);
+    psa_trip_send_instant(NULL);
+    psa_trip_send_trip1(NULL);
+    psa_trip_send_trip2(NULL);
+    psa_trip_process_can_0x0b6(NULL, NULL, 0);
+    psa_trip_process_can_0x221(NULL, NULL, 0);
+    psa_trip_process_can_0x2a1(NULL, NULL, 0);
+    psa_trip_process_can_0x261(NULL, NULL, 0);
+    psa_trip_process_can_0x0f6(NULL, NULL, 0);
+
+    // Short DLC boundary checks
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+    s_trip_uart_tx_calls = 0;
+
+    uint8_t dummy[8] = { 0 };
+    psa_trip_process_can_0x0b6(&ctx, dummy, 3);
+    psa_trip_process_can_0x221(&ctx, dummy, 6);
+    psa_trip_process_can_0x2a1(&ctx, dummy, 4);
+    psa_trip_process_can_0x261(&ctx, dummy, 4);
+    psa_trip_process_can_0x0f6(&ctx, dummy, 7);
+    TEST_ASSERT_EQUAL_INT(0, s_trip_uart_tx_calls);
+
+    // Send with NULL uart_tx must not crash
+    ctx.uart_tx = NULL;
+    psa_trip_send_instant(&ctx);
+    psa_trip_send_trip1(&ctx);
+    psa_trip_send_trip2(&ctx);
+
+    // Builder buffer size & NULL safety
+    uint8_t out[16];
+    psa_trip_state_t st;
+    memset(&st, 0, sizeof(st));
+
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip_instant(NULL, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip_instant(&st, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip_instant(&st, out, 8));
+
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip1(NULL, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip1(&st, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip1(&st, out, 10));
+
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip2(NULL, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip2(&st, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip2(&st, out, 10));
 }
 
 /* --------------------------------------------------------------------------

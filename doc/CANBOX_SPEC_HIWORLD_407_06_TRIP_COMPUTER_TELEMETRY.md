@@ -284,6 +284,17 @@ static inline void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t
     psa_trip_send_trip2(ctx);
 }
 
+/* Process PSA CAN 0x0F6 (BSI Slow Data: Coolant, Ambient Temp, Reverse) */
+static inline void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (dlc < 8) return;
+
+    ctx->state.coolant_c = (int8_t)((int16_t)data[1] - 40);
+    if (data[5] != 0xFF) {
+        ctx->state.ambient_c = (int8_t)(((int16_t)data[5] * 5 - 400) / 10);
+    }
+    ctx->state.reverse_active = (data[7] & 0x80) != 0;
+}
+
 #endif /* CANBOX_TRIP_H */
 ```
 
@@ -297,5 +308,33 @@ static inline void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t
   cansend vcan0 221#00004402800000
   ```
 - **Expected UART Output (Hiworld `0x13`):**
-  - Frame: `5A A5 04 13 00 44 02 80 DD`
-  - Checksum Calculation: `(0x04 + 0x13 + 0x00 + 0x44 + 0x02 + 0x80 - 1) & 0xFF = 0xDD`
+  - Frame: `5A A5 04 13 00 44 02 80 DC`
+  - Checksum Calculation: `(0x04 + 0x13 + 0x00 + 0x44 + 0x02 + 0x80 - 1) & 0xFF = (0xDD - 1) & 0xFF = 0xDC`
+
+### Vector 2: Trip 1 Historical (Distance 569 km, Fuel 7.3 L/100km, Mean Speed 37 km/h)
+- **CAN ID `0x2A1` Injection:**
+  ```bash
+  cansend vcan0 2A1#25023900490025
+  ```
+- **Expected UART Output (Hiworld `0x14`):**
+  - Frame: `5A A5 06 14 00 49 00 25 02 39 C2`
+  - Checksum Calculation: `(0x06 + 0x14 + 0x00 + 0x49 + 0x00 + 0x25 + 0x02 + 0x39 - 1) & 0xFF = (0xC3 - 1) & 0xFF = 0xC2`
+
+### Vector 3: Trip 2 Historical (Distance 921 km, Fuel 7.9 L/100km, Mean Speed 35 km/h)
+- **CAN ID `0x261` Injection:**
+  ```bash
+  cansend vcan0 261#230399004F0023
+  ```
+- **Expected UART Output (Hiworld `0x15`):**
+  - Frame: `5A A5 06 15 00 4F 00 23 03 99 28`
+  - Checksum Calculation: `(0x06 + 0x15 + 0x00 + 0x4F + 0x00 + 0x23 + 0x03 + 0x99 - 1) & 0xFF = (0x129 - 1) & 0xFF = 0x28`
+
+### Vector 4: Fast Dynamics RPM & Speed (800 RPM, 10 km/h)
+- **CAN ID `0x0B6` Injection:**
+  ```bash
+  cansend vcan0 0B6#190003E8000000D0
+  ```
+- **Decoded Values:**
+  - RPM: `(0x1900 >> 3) = 6400 >> 3 = 800 rpm`
+  - Speed: `0x03E8 / 100 = 1000 / 100 = 10 km/h`
+

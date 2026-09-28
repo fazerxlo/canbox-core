@@ -12,8 +12,11 @@ extern "C" {
 
 /* PSA CAN Identifiers (Comfort CAN @ 125 kbps) */
 #define PSA_CAN_ID_REVERSE_IGNITION 0x036
+#define PSA_CAN_ID_FAST_DYNAMIC     0x0B6
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
+#define PSA_CAN_ID_BSI_SLOW_DATA    0x0F6
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
+#define PSA_CAN_ID_BSI_GAUGES       0x161
 #define PSA_CAN_ID_FUEL_RANGE_TEMP  0x165
 #define PSA_CAN_ID_ALERTS_INDICATORS 0x168
 #define PSA_CAN_ID_JBL_AMPLIFIER    0x1A0
@@ -21,9 +24,12 @@ extern "C" {
 #define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
 #define PSA_CAN_ID_DOORS_BODY_220   0x220
-#define PSA_CAN_ID_DOORS_BODY       0x221
+#define PSA_CAN_ID_DOORS_BODY       0x220
+#define PSA_CAN_ID_TRIP_INSTANT     0x221
 #define PSA_CAN_ID_REAR_RADAR_AAS   0x260
+#define PSA_CAN_ID_TRIP2_ODB        0x261
 #define PSA_CAN_ID_FRONT_RADAR_AAS  0x270
+#define PSA_CAN_ID_TRIP1_ODB        0x2A1
 #define PSA_CAN_ID_TRIP2            0x2A5
 #define PSA_CAN_ID_TPMS_STATUS_1E1  0x1E1
 #define PSA_CAN_ID_TPMS_DIRECT_361  0x361
@@ -136,12 +142,59 @@ size_t build_raise_trip2(uint16_t avg_fuel_dkl, uint16_t avg_spd_kmh,
 size_t build_raise_outside_temp(uint8_t temp_raw, uint8_t *out, size_t max_len);
 size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_len);
 
+#ifndef HIWORLD_SOF1
+#define HIWORLD_SOF1        0x5A
+#define HIWORLD_SOF2        0xA5
+#endif
+#define HIWORLD_CMD_ECU_P0  0x13
+#define HIWORLD_CMD_ECU_P1  0x14
+#define HIWORLD_CMD_ECU_P2  0x15
+
+typedef struct {
+    uint16_t rpm;
+    uint16_t speed_kmh;
+    int8_t   coolant_c;
+    int8_t   ambient_c;
+    bool     reverse_active;
+    
+    uint16_t instant_fuel_deci; /* 0.1 L/100km */
+    uint16_t range_km;          /* Distance to Empty */
+    
+    uint16_t trip1_avg_fuel;    /* 0.1 L/100km */
+    uint8_t  trip1_avg_speed;   /* km/h */
+    uint16_t trip1_distance_km; /* km */
+
+    uint16_t trip2_avg_fuel;    /* 0.1 L/100km */
+    uint8_t  trip2_avg_speed;   /* km/h */
+    uint16_t trip2_distance_km; /* km */
+} psa_trip_state_t;
+
+typedef struct {
+    psa_trip_state_t  state;
+    canbox_uart_tx_fn uart_tx;
+} psa_trip_ctx_t;
+
+void psa_trip_init(psa_trip_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
+void psa_trip_send_instant(psa_trip_ctx_t *ctx);
+void psa_trip_send_trip1(psa_trip_ctx_t *ctx);
+void psa_trip_send_trip2(psa_trip_ctx_t *ctx);
+
+size_t build_hiworld_trip_instant(const psa_trip_state_t *trip, uint8_t *out, size_t max_len);
+size_t build_hiworld_trip1(const psa_trip_state_t *trip, uint8_t *out, size_t max_len);
+size_t build_hiworld_trip2(const psa_trip_state_t *trip, uint8_t *out, size_t max_len);
+
+void psa_trip_process_can_0x0b6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+
 /* --------------------------------------------------------------------------
  * 1.5 Doors & Body Status
  * -------------------------------------------------------------------------- */
-#define HIWORLD_SOF1        0x5A
-#define HIWORLD_SOF2        0xA5
+#ifndef HIWORLD_CMD_DOOR
 #define HIWORLD_CMD_DOOR    0x12
+#endif
 
 typedef struct {
     bool driver_door;

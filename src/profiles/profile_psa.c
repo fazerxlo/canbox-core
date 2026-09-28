@@ -204,6 +204,45 @@ static void psa_decode_tpms_0x1e1_profile(const can_frame_t *frame, vehicle_stat
     state->tpms.valid = true;
 }
 
+static void psa_decode_trip_0x221_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 7) return;
+
+    /* Byte 0 Bit 7: Fuel info hidden/invalid.
+     * Also guard against uninitialized/BSI status frames where all data is 0xFF.
+     */
+    if ((frame->data[0] & 0x80) != 0) return;
+    uint16_t fuel = read_be16_local(&frame->data[1]);
+    uint16_t range = read_be16_local(&frame->data[3]);
+    if (fuel == 0xFFFF && range == 0xFFFF) return;
+
+    state->trip.instant_fuel_deci = fuel;
+    state->trip.range_km = range;
+    state->trip.instant_valid = true;
+    state->trip.updated_page = 1;
+}
+
+static void psa_decode_trip1_0x2a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 5) return;
+
+    state->trip.trip1_distance_km = read_be16_local(&frame->data[1]);
+    state->trip.trip1_avg_fuel    = read_be16_local(&frame->data[3]);
+    state->trip.trip1_avg_speed   = (frame->dlc >= 7 && (frame->data[5] || frame->data[6])) ?
+                                     (uint8_t)read_be16_local(&frame->data[5]) : frame->data[0];
+    state->trip.trip1_valid = true;
+    state->trip.updated_page = 2;
+}
+
+static void psa_decode_trip2_0x261_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 5) return;
+
+    state->trip.trip2_distance_km = read_be16_local(&frame->data[1]);
+    state->trip.trip2_avg_fuel    = read_be16_local(&frame->data[3]);
+    state->trip.trip2_avg_speed   = (frame->dlc >= 7 && (frame->data[5] || frame->data[6])) ?
+                                     (uint8_t)read_be16_local(&frame->data[5]) : frame->data[0];
+    state->trip.trip2_valid = true;
+    state->trip.updated_page = 3;
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_STEERING_ANGLE,     psa_decode_steering_angle_0x0e6_profile },
@@ -216,6 +255,9 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_CLIMATE_HVAC,       psa_decode_hvac_0x1d0_profile },
     { 0x1E3,                         psa_decode_hvac_0x1e3_profile },
     { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
+    { PSA_CAN_ID_TRIP_INSTANT,       psa_decode_trip_0x221_profile },
+    { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
+    { PSA_CAN_ID_TRIP2_ODB,          psa_decode_trip2_0x261_profile },
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
     { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },

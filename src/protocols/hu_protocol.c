@@ -100,6 +100,24 @@ void hu_protocol_send_tpms_discrete(const vehicle_tpms_t *tpms) {
     }
 }
 
+void hu_protocol_send_trip_instant(const vehicle_trip_t *trip) {
+    if (s_active_driver && s_active_driver->send_trip_instant) {
+        s_active_driver->send_trip_instant(trip);
+    }
+}
+
+void hu_protocol_send_trip1(const vehicle_trip_t *trip) {
+    if (s_active_driver && s_active_driver->send_trip1) {
+        s_active_driver->send_trip1(trip);
+    }
+}
+
+void hu_protocol_send_trip2(const vehicle_trip_t *trip) {
+    if (s_active_driver && s_active_driver->send_trip2) {
+        s_active_driver->send_trip2(trip);
+    }
+}
+
 void hu_protocol_send_heartbeat(void) {
     if (s_active_driver && s_active_driver->send_heartbeat) {
         s_active_driver->send_heartbeat();

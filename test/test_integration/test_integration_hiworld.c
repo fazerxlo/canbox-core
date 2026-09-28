@@ -202,3 +202,111 @@ void test_integration_hiworld_tpms_pipeline(void) {
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_TPMS_NUMERIC, rx_buf[3]);
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_TPMS_DISCRETE, rx_buf[14]);
 }
+
+void test_integration_hiworld_trip_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    size_t rx_len = 0;
+
+    // 1. Vector 1: PSA CAN 0x221 (Instantaneous Trip)
+    // Instant fuel: 6.8 L/100km (68 = 0x0044), Range: 640 km (0x0280)
+    can_frame_t frame_221 = {
+        .id = 0x221,
+        .dlc = 7,
+        .data = { 0x00, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_221);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_221[] = { 0x5A, 0xA5, 0x04, 0x13, 0x00, 0x44, 0x02, 0x80, 0xDC };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_221), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_221, rx_buf, sizeof(expected_221));
+
+    // 2. Vector 2: PSA CAN 0x2A1 (Trip 1 Historical)
+    // Distance: 569 km (0x0239), Fuel: 7.3 L/100km (73 = 0x0049), Mean Speed: 37 km/h (0x25)
+    can_frame_t frame_2a1 = {
+        .id = 0x2A1,
+        .dlc = 7,
+        .data = { 0x25, 0x02, 0x39, 0x00, 0x49, 0x00, 0x25 }
+    };
+    can_router_process_can(&frame_2a1);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_2a1[] = { 0x5A, 0xA5, 0x06, 0x14, 0x00, 0x49, 0x00, 0x25, 0x02, 0x39, 0xC2 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_2a1), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_2a1, rx_buf, sizeof(expected_2a1));
+
+    // 3. Vector 3: PSA CAN 0x261 (Trip 2 Historical)
+    // Distance: 921 km (0x0399), Fuel: 7.9 L/100km (79 = 0x004F), Mean Speed: 35 km/h (0x23)
+    can_frame_t frame_261 = {
+        .id = 0x261,
+        .dlc = 7,
+        .data = { 0x23, 0x03, 0x99, 0x00, 0x4F, 0x00, 0x23 }
+    };
+    can_router_process_can(&frame_261);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_261[] = { 0x5A, 0xA5, 0x06, 0x15, 0x00, 0x4F, 0x00, 0x23, 0x03, 0x99, 0x28 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_261), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_261, rx_buf, sizeof(expected_261));
+
+    // 4. Test frames from dump_2026-09-28_20-24-29.log:
+    // CAN 0x221: DATA: 00 00 47 02 18 04 b0 -> Instant fuel: 7.1 L/100km (0x0047), Range: 536 km (0x0218)
+    can_frame_t dump_221 = {
+        .id = 0x221,
+        .dlc = 7,
+        .data = { 0x00, 0x00, 0x47, 0x02, 0x18, 0x04, 0xB0 }
+    };
+    can_router_process_can(&dump_221);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_dump_221[] = { 0x5A, 0xA5, 0x04, 0x13, 0x00, 0x47, 0x02, 0x18, 0x77 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_dump_221), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_221, rx_buf, sizeof(expected_dump_221));
+
+    // CAN 0x2A1: DATA: 47 02 39 00 49 00 47 -> Dist: 569 km (0x0239), Fuel: 7.3 (0x0049), Speed: 71 km/h (0x47)
+    can_frame_t dump_2a1 = {
+        .id = 0x2A1,
+        .dlc = 7,
+        .data = { 0x47, 0x02, 0x39, 0x00, 0x49, 0x00, 0x47 }
+    };
+    can_router_process_can(&dump_2a1);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_dump_2a1[] = { 0x5A, 0xA5, 0x06, 0x14, 0x00, 0x49, 0x00, 0x47, 0x02, 0x39, 0xE4 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_dump_2a1), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_2a1, rx_buf, sizeof(expected_dump_2a1));
+
+    // CAN 0x261: DATA: 23 03 99 00 4f 00 23 -> Dist: 921 km (0x0399), Fuel: 7.9 (0x004F), Speed: 35 km/h (0x23)
+    can_frame_t dump_261 = {
+        .id = 0x261,
+        .dlc = 7,
+        .data = { 0x23, 0x03, 0x99, 0x00, 0x4F, 0x00, 0x23 }
+    };
+    can_router_process_can(&dump_261);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_dump_261[] = { 0x5A, 0xA5, 0x06, 0x15, 0x00, 0x4F, 0x00, 0x23, 0x03, 0x99, 0x28 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_dump_261), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_261, rx_buf, sizeof(expected_dump_261));
+
+    // 5. Verify masked / uninitialized frames produce no output
+    can_frame_t masked_221 = {
+        .id = 0x221,
+        .dlc = 7,
+        .data = { 0x80, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 }
+    };
+    can_router_process_can(&masked_221);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    can_frame_t uninit_221 = {
+        .id = 0x221,
+        .dlc = 7,
+        .data = { 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00 }
+    };
+    can_router_process_can(&uninit_221);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+}
