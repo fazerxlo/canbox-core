@@ -1,4 +1,5 @@
 #include "profiles/peugeot_407.h"
+#include "hal/hal_gpio.h"
 #include <string.h>
 
 static inline uint16_t read_be16(const uint8_t *d) {
@@ -322,6 +323,134 @@ size_t build_raise_front_radar(uint8_t fl, uint8_t fc, uint8_t fr,
     return 8;
 }
 
+size_t build_hiworld_radar(const psa_radar_state_t *radar, uint8_t *out, size_t max_len) {
+    if (!radar || !out || max_len < 17) {
+        return 0;
+    }
+
+    out[0] = HIWORLD_SOF1;             /* 0x5A */
+    out[1] = HIWORLD_SOF2;             /* 0xA5 */
+    out[2] = 0x0C;                     /* Length: 12 Payload bytes */
+    out[3] = HIWORLD_CMD_RADAR_STATE;  /* Cmd: 0x41 */
+
+    out[4] = radar->rear_left_outer;
+    out[5] = radar->rear_left_center;
+    out[6] = radar->rear_right_center;
+    out[7] = radar->rear_right_outer;
+
+    out[8]  = radar->front_left_outer;
+    out[9]  = radar->front_left_center;
+    out[10] = radar->front_right_center;
+    out[11] = radar->front_right_outer;
+
+    out[12] = 0x01;                    /* Radar active / enabled flag */
+    out[13] = 0x00;                    /* Reserved */
+    out[14] = 0x3F;                    /* 6-sensor configuration mask */
+    out[15] = 0x05;                    /* Distance scale / max zone steps */
+
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 15; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[16] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 17;
+}
+
+void psa_radar_init(psa_radar_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
+    if (!ctx) return;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->state.rear_left_outer    = PSA_RADAR_DIST_INACTIVE;
+    ctx->state.rear_left_center   = PSA_RADAR_DIST_INACTIVE;
+    ctx->state.rear_right_center  = PSA_RADAR_DIST_INACTIVE;
+    ctx->state.rear_right_outer   = PSA_RADAR_DIST_INACTIVE;
+    ctx->state.front_left_outer   = PSA_RADAR_DIST_INACTIVE;
+    ctx->state.front_left_center  = PSA_RADAR_DIST_INACTIVE;
+    ctx->state.front_right_center = PSA_RADAR_DIST_INACTIVE;
+    ctx->state.front_right_outer  = PSA_RADAR_DIST_INACTIVE;
+    ctx->uart_tx = uart_tx;
+}
+
+void psa_radar_send_hiworld(psa_radar_ctx_t *ctx) {
+    if (!ctx || !ctx->uart_tx) return;
+
+    uint8_t p[17];
+    size_t len = build_hiworld_radar(&ctx->state, p, sizeof(p));
+    if (len > 0) {
+        ctx->uart_tx(p, len);
+    }
+}
+
+uint8_t psa_radar_map_zone(uint8_t raw3bit) {
+    if (raw3bit >= 7) return PSA_RADAR_DIST_INACTIVE;
+    return raw3bit;
+}
+
+void psa_radar_process_can_0x0e1(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 6) return;
+
+    ctx->state.rear_active    = (data[1] >> 6) & 1;
+    ctx->state.front_active   = (data[1] >> 4) & 1;
+    ctx->state.display_active = (data[5] & 0x02) ? true : false;
+
+    if (!ctx->state.display_active && !ctx->state.rear_active && !ctx->state.front_active) {
+        ctx->state.rear_left_outer    = PSA_RADAR_DIST_INACTIVE;
+        ctx->state.rear_left_center   = PSA_RADAR_DIST_INACTIVE;
+        ctx->state.rear_right_center  = PSA_RADAR_DIST_INACTIVE;
+        ctx->state.rear_right_outer   = PSA_RADAR_DIST_INACTIVE;
+        ctx->state.front_left_outer   = PSA_RADAR_DIST_INACTIVE;
+        ctx->state.front_left_center  = PSA_RADAR_DIST_INACTIVE;
+        ctx->state.front_right_center = PSA_RADAR_DIST_INACTIVE;
+        ctx->state.front_right_outer  = PSA_RADAR_DIST_INACTIVE;
+    } else {
+        uint8_t rl = (data[3] >> 5) & 0x07;
+        uint8_t rc = (data[3] >> 2) & 0x07;
+        uint8_t rr = (data[4] >> 5) & 0x07;
+        uint8_t fl = (data[4] >> 2) & 0x07;
+        uint8_t fc = (data[5] >> 5) & 0x07;
+        uint8_t fr = (data[5] >> 2) & 0x07;
+
+        ctx->state.rear_left_outer    = psa_radar_map_zone(rl);
+        ctx->state.rear_left_center   = psa_radar_map_zone(rc);
+        ctx->state.rear_right_center  = psa_radar_map_zone(rc);
+        ctx->state.rear_right_outer   = psa_radar_map_zone(rr);
+
+        ctx->state.front_left_outer   = psa_radar_map_zone(fl);
+        ctx->state.front_left_center  = psa_radar_map_zone(fc);
+        ctx->state.front_right_center = psa_radar_map_zone(fc);
+        ctx->state.front_right_outer  = psa_radar_map_zone(fr);
+    }
+
+    psa_radar_send_hiworld(ctx);
+}
+
+void psa_radar_process_can_0x260(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 3) return;
+
+    ctx->state.rear_left_outer   = data[0];
+    ctx->state.rear_left_center  = data[1];
+    ctx->state.rear_right_center = data[1];
+    ctx->state.rear_right_outer  = data[2];
+
+    if (dlc >= 4) {
+        ctx->state.rear_active  = (data[3] & 0x80) ? true : false;
+        ctx->state.system_fault = (data[3] & 0x01) ? true : false;
+    }
+
+    psa_radar_send_hiworld(ctx);
+}
+
+void psa_radar_process_can_0x270(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
+    if (!ctx || !data || dlc < 3) return;
+
+    ctx->state.front_left_outer   = data[0];
+    ctx->state.front_left_center  = data[1];
+    ctx->state.front_right_center = data[1];
+    ctx->state.front_right_outer  = data[2];
+
+    psa_radar_send_hiworld(ctx);
+}
+
 /* --------------------------------------------------------------------------
  * 1.4 Trip Computer & Engine Telemetry
  * -------------------------------------------------------------------------- */
@@ -432,6 +561,20 @@ size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_l
     out[3] = reverse_active ? 0x80 : 0x00;
     out[4] = (uint8_t)((out[1] + out[2] + out[3]) ^ 0xFF);
     return 5;
+}
+
+void psa_decode_reverse_0x036(const uint8_t *data, uint8_t dlc, bool *reverse_active) {
+    if (!data || !reverse_active || dlc < 2) return;
+    *reverse_active = (data[1] & 0x80) != 0;
+}
+
+void psa_decode_reverse_0x0f6(const uint8_t *data, uint8_t dlc, bool *reverse_active) {
+    if (!data || !reverse_active || dlc < 8) return;
+    *reverse_active = (data[7] & 0x80) != 0;
+}
+
+void psa_reverse_set_hardware_trigger(bool reverse_active) {
+    hal_gpio_write(GPIO_PIN_REVERSE_OUT, reverse_active);
 }
 
 size_t build_hiworld_trip_instant(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {

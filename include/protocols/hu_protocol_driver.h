@@ -32,6 +32,8 @@ typedef struct {
     void           (*send_trip_instant)(const vehicle_trip_t *trip);
     void           (*send_trip1)(const vehicle_trip_t *trip);
     void           (*send_trip2)(const vehicle_trip_t *trip);
+    void           (*send_radar)(const vehicle_radar_t *radar);
+    void           (*send_reverse)(bool reverse_active);
     void           (*send_heartbeat)(void);
 } hu_protocol_driver_t;
 

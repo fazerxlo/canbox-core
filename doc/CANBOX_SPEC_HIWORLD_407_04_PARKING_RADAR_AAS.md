@@ -109,9 +109,9 @@ The CAN box translates these raw distance zones into serialized headunit radar p
 
 ### 3.1 Hiworld Unified Radar Telemetry (`Cmd 0x41` / `Handle.CarRadarState`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length ($L$):** `0x08` (8 sensor payload bytes)
+- **Length ($L$):** `0x0C` (12 payload bytes: 8 sensor distance bytes + 4 configuration bytes)
 - **Command ID:** `0x41` (`65` decimal / `Handle.CarRadarState`)
-- **Payload Layout (8 Bytes):**
+- **Payload Layout (12 Bytes):**
   - `Byte 0`: Rear Left Outer (RL) ($0 \dots 6$, `0xFF` = clear)
   - `Byte 1`: Rear Left Center (RML) ($0 \dots 6$)
   - `Byte 2`: Rear Right Center (RMR) ($0 \dots 6$)
@@ -120,14 +120,19 @@ The CAN box translates these raw distance zones into serialized headunit radar p
   - `Byte 5`: Front Left Center (FML) ($0 \dots 6$)
   - `Byte 6`: Front Right Center (FMR) ($0 \dots 6$)
   - `Byte 7`: Front Right Outer (FR) ($0 \dots 6$)
+  - `Byte 8`: Radar active / enabled flag (`0x01`)
+  - `Byte 9`: Reserved (`0x00`)
+  - `Byte 10`: 6-sensor configuration mask (`0x3F`)
+  - `Byte 11`: Distance scale / max zone steps (`0x05`)
 - **Value Semantics:**
-  - `0x00..0x06`: Obstacle proximity zone (0 = zone 1 / closest, 6 = zone 7 / farthest)
+  - `0x00`: Zone 0 (closest / critical proximity / touching obstacle)
+  - `0x01..0x06`: Obstacle proximity zones (increasing distance)
   - `0xFF`: Inactive / No obstacle detected (sensor arc hidden)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
-- **Total Frame Wire Length:** 13 bytes (`5A A5 08 41 [8 Bytes] Checksum`)
+- **Total Frame Wire Length:** 17 bytes (`5A A5 0C 41 [8 Bytes] 01 00 3F 05 Checksum`)
 
 > [!NOTE]
-> In the Hiworld protocol dictionary, `Cmd 0x22` is reserved for physical rotary control knobs (`Handle.ControlPanelKnob`), whereas `Cmd 0x41` is dedicated to radar state telemetry (`Handle.CarRadarState`).
+> In the Hiworld protocol dictionary, `Cmd 0x22` is reserved for physical rotary control knobs (`Handle.ControlPanelKnob`), whereas `Cmd 0x41` is dedicated to radar state telemetry (`Handle.CarRadarState`). OEM Hiworld canbox sends 12 payload bytes (`0x0C`) with trailing metadata `01 00 3F 05`.
 
 ### 3.2 Raise Radar Compatibility Format:
 - **Front Radar (`Cmd 0x30`):** `0x2E 0x30 0x06 [FL] [FC] [FR] [RL] [RC] [RR] [Checksum]`
@@ -189,10 +194,10 @@ static inline void psa_radar_init(psa_radar_ctx_t *ctx, canbox_uart_tx_fn uart_t
 static inline void psa_radar_send_hiworld(psa_radar_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[13];
+    uint8_t p[17];
     p[0] = HIWORLD_SOF1;
     p[1] = HIWORLD_SOF2;
-    p[2] = 0x08;                    /* Length: 8 Payload bytes */
+    p[2] = 0x0C;                    /* Length: 12 Payload bytes */
     p[3] = HIWORLD_CMD_RADAR_STATE; /* Cmd ID: 0x41 */
 
     p[4] = ctx->state.rear_left_outer;
@@ -205,20 +210,25 @@ static inline void psa_radar_send_hiworld(psa_radar_ctx_t *ctx) {
     p[10] = ctx->state.front_right_center;
     p[11] = ctx->state.front_right_outer;
 
+    p[12] = 0x01;                   /* Radar active / enabled flag */
+    p[13] = 0x00;                   /* Reserved */
+    p[14] = 0x3F;                   /* 6-sensor configuration mask */
+    p[15] = 0x05;                   /* Distance scale / max zone steps */
+
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 11; i++) {
+    for (size_t i = 2; i <= 15; i++) {
         sum += p[i];
     }
-    p[12] = (uint8_t)((sum - 1) & 0xFF);
+    p[16] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 13);
+    ctx->uart_tx(p, 17);
 }
 
 /* Map 3-bit PSA sensor zone (0..7) to Hiworld distance step (0..6, 0xFF) */
 static inline uint8_t psa_radar_map_zone(uint8_t raw3bit) {
-    if (raw3bit >= 7 || raw3bit == 0) return 0xFF; /* 0xFF = clear / inactive */
-    /* PSA raw: 1 = closest (zone 0 in Hiworld) .. 6 = farthest (zone 5 in Hiworld) */
-    return raw3bit - 1;
+    if (raw3bit >= 7) return 0xFF; /* 0xFF = clear / inactive */
+    /* PSA raw: 0 = closest (zone 0 in Hiworld) .. 6 = farthest (zone 6 in Hiworld) */
+    return raw3bit;
 }
 
 /* Process Native PSA CAN 0x0E1 (Peugeot 407 Parktronic) */
@@ -296,18 +306,18 @@ static inline void psa_radar_process_can_0x270(psa_radar_ctx_t *ctx, const uint8
 
 # 5. Verification Vectors & Simulation Harness
 
-### Vector 1: Native CAN 0x0E1 Obstacle Rear Center
-- **CAN ID `0x0E1` Injection:**
+### Vector 1: Native CAN 0x0E1 Obstacle
+- **CAN ID `0x0E1` Injection (from `dump_2026-09-29_21-00-15.log`):**
   ```bash
-  cansend vcan0 0E1#24403F0C000200
+  cansend vcan0 0E1#24403F04202600
   ```
 - **Expected UART Output (Hiworld `0x41`):**
-  - Frame: `5A A5 08 41 FF 02 02 FF FF FF FF FF 46`
+  - Frame: `5A A5 0C 41 00 01 01 01 00 01 01 01 01 00 3F 05 97`
 
 ### Vector 2: Quiescent / All Clear
-- **CAN ID `0x0E1` Injection:**
+- **CAN ID `0x0E1` Injection (from `dump_2026-09-29_20-44-32.log`):**
   ```bash
   cansend vcan0 0E1#24003FFCFCFC00
   ```
 - **Expected UART Output (Hiworld `0x41`):**
-  - Frame: `5A A5 08 41 FF FF FF FF FF FF FF FF 40`
+  - Frame: `5A A5 0C 41 FF FF FF FF FF FF FF FF 01 00 3F 05 89`

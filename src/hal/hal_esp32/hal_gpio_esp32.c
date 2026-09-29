@@ -2,18 +2,20 @@
 #include "driver/gpio.h"
 
 #define PIN_LED_STATUS   GPIO_NUM_2
+#define PIN_REVERSE_OUT  GPIO_NUM_4
 #define PIN_IGNITION_IN  GPIO_NUM_34 // Input-only pin
 
 hal_status_t hal_gpio_init(void) {
-    // Configure LED
+    // Configure Outputs (LED & Reverse trigger)
     gpio_config_t io_conf_out = {
-        .pin_bit_mask = (1ULL << PIN_LED_STATUS),
+        .pin_bit_mask = (1ULL << PIN_LED_STATUS) | (1ULL << PIN_REVERSE_OUT),
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_conf_out);
+    gpio_set_level(PIN_REVERSE_OUT, 0);
 
     // Configure Ignition Detection (optocoupler / resistor divider)
     gpio_config_t io_conf_in = {
@@ -31,12 +33,16 @@ hal_status_t hal_gpio_init(void) {
 void hal_gpio_write(hal_gpio_pin_t pin, bool state) {
     if (pin == GPIO_PIN_LED_STATUS) {
         gpio_set_level(PIN_LED_STATUS, state ? 1 : 0);
+    } else if (pin == GPIO_PIN_REVERSE_OUT) {
+        gpio_set_level(PIN_REVERSE_OUT, state ? 1 : 0);
     }
 }
 
 bool hal_gpio_read(hal_gpio_pin_t pin) {
     if (pin == GPIO_PIN_IGNITION_IN) {
         return gpio_get_level(PIN_IGNITION_IN) != 0;
+    } else if (pin == GPIO_PIN_REVERSE_OUT) {
+        return gpio_get_level(PIN_REVERSE_OUT) != 0;
     }
     return false;
 }

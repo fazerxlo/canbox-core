@@ -135,6 +135,8 @@ const hu_protocol_driver_t g_hu_protocol_bagoo = {
     .send_trip_instant = NULL,
     .send_trip1 = NULL,
     .send_trip2 = NULL,
+    .send_radar = NULL,
+    .send_reverse = NULL,
     .send_heartbeat = bagoo_send_heartbeat,
 };
 

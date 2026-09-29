@@ -13,6 +13,7 @@ extern "C" {
 /* PSA CAN Identifiers (Comfort CAN @ 125 kbps) */
 #define PSA_CAN_ID_REVERSE_IGNITION 0x036
 #define PSA_CAN_ID_FAST_DYNAMIC     0x0B6
+#define PSA_CAN_ID_RADAR_0E1        0x0E1
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
 #define PSA_CAN_ID_BSI_SLOW_DATA    0x0F6
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
@@ -122,6 +123,38 @@ size_t build_raise_rear_radar(uint8_t rl, uint8_t rc, uint8_t rr,
 size_t build_raise_front_radar(uint8_t fl, uint8_t fc, uint8_t fr,
                                uint8_t *out_buf, size_t max_len);
 
+#ifndef HIWORLD_CMD_RADAR_STATE
+#define HIWORLD_CMD_RADAR_STATE  0x41
+#endif
+
+typedef struct {
+    uint8_t rear_left_outer;
+    uint8_t rear_left_center;
+    uint8_t rear_right_center;
+    uint8_t rear_right_outer;
+    uint8_t front_left_outer;
+    uint8_t front_left_center;
+    uint8_t front_right_center;
+    uint8_t front_right_outer;
+    bool    rear_active;
+    bool    front_active;
+    bool    display_active;
+    bool    system_fault;
+} psa_radar_state_t;
+
+typedef struct {
+    psa_radar_state_t state;
+    canbox_uart_tx_fn uart_tx;
+} psa_radar_ctx_t;
+
+void psa_radar_init(psa_radar_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
+void psa_radar_send_hiworld(psa_radar_ctx_t *ctx);
+uint8_t psa_radar_map_zone(uint8_t raw3bit);
+void psa_radar_process_can_0x0e1(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_radar_process_can_0x260(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_radar_process_can_0x270(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+size_t build_hiworld_radar(const psa_radar_state_t *radar, uint8_t *out, size_t max_len);
+
 /* --------------------------------------------------------------------------
  * 1.4 Trip Computer & Engine Telemetry
  * -------------------------------------------------------------------------- */
@@ -141,6 +174,9 @@ size_t build_raise_trip2(uint16_t avg_fuel_dkl, uint16_t avg_spd_kmh,
                          uint16_t dist_dkm, uint8_t *out);
 size_t build_raise_outside_temp(uint8_t temp_raw, uint8_t *out, size_t max_len);
 size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_len);
+void psa_decode_reverse_0x036(const uint8_t *data, uint8_t dlc, bool *reverse_active);
+void psa_decode_reverse_0x0f6(const uint8_t *data, uint8_t dlc, bool *reverse_active);
+void psa_reverse_set_hardware_trigger(bool reverse_active);
 
 #ifndef HIWORLD_SOF1
 #define HIWORLD_SOF1        0x5A

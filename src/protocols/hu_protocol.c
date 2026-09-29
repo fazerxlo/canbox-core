@@ -118,6 +118,18 @@ void hu_protocol_send_trip2(const vehicle_trip_t *trip) {
     }
 }
 
+void hu_protocol_send_radar(const vehicle_radar_t *radar) {
+    if (s_active_driver && s_active_driver->send_radar) {
+        s_active_driver->send_radar(radar);
+    }
+}
+
+void hu_protocol_send_reverse(bool reverse_active) {
+    if (s_active_driver && s_active_driver->send_reverse) {
+        s_active_driver->send_reverse(reverse_active);
+    }
+}
+
 void hu_protocol_send_heartbeat(void) {
     if (s_active_driver && s_active_driver->send_heartbeat) {
         s_active_driver->send_heartbeat();

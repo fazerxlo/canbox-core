@@ -2,6 +2,7 @@
 #include "protocols/hu_protocol_driver.h"
 #include "protocols/raise_car_mapping.h"
 #include "core/vehicle_profile.h"
+#include "profiles/peugeot_407.h"
 #include "proto_raise.h"
 #include "hal/hal_uart.h"
 
@@ -134,6 +135,39 @@ static void raise_send_heartbeat(void) {
     }
 }
 
+static void raise_send_radar(const vehicle_radar_t *radar) {
+    if (!radar || !radar->valid) return;
+
+    uint8_t rear_buf[16];
+    size_t rlen = build_raise_rear_radar(radar->rear_left_outer,
+                                         radar->rear_left_center,
+                                         radar->rear_right_outer,
+                                         radar->front_left_outer,
+                                         radar->front_left_center,
+                                         radar->front_right_outer,
+                                         rear_buf, sizeof(rear_buf));
+    if (rlen > 0) {
+        hal_uart_write(rear_buf, rlen);
+    }
+
+    uint8_t front_buf[16];
+    size_t flen = build_raise_front_radar(radar->front_left_outer,
+                                          radar->front_left_center,
+                                          radar->front_right_outer,
+                                          front_buf, sizeof(front_buf));
+    if (flen > 0) {
+        hal_uart_write(front_buf, flen);
+    }
+}
+
+static void raise_send_reverse(bool reverse_active) {
+    uint8_t tx_buf[8];
+    size_t len = build_raise_reverse_state(reverse_active, tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_raise = {
     .id = HU_PROTOCOL_RAISE,
     .name = "Raise",
@@ -149,5 +183,7 @@ const hu_protocol_driver_t g_hu_protocol_raise = {
     .send_trip_instant = NULL,
     .send_trip1 = NULL,
     .send_trip2 = NULL,
+    .send_radar = raise_send_radar,
+    .send_reverse = raise_send_reverse,
     .send_heartbeat = raise_send_heartbeat,
 };

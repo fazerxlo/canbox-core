@@ -51,6 +51,9 @@ static void psa_decode_stalk_0x0f6(const can_frame_t *frame, vehicle_state_t *st
     if (frame->dlc < 2) return;
     s_active_state_for_stalk = state;
     psa_stalk_process_can(frame->data, frame->dlc, stalk_key_cb);
+    if (frame->dlc >= 8) {
+        state->reverse_gear = (frame->data[7] & (1 << 7)) != 0;
+    }
 }
 
 static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_t *state) {
@@ -244,8 +247,71 @@ static void psa_decode_trip2_0x261_profile(const can_frame_t *frame, vehicle_sta
     state->trip.updated_page = 3;
 }
 
+static void psa_decode_radar_0x0e1_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 6) return;
+
+    state->radar.rear_active    = (frame->data[1] >> 6) & 1;
+    state->radar.front_active   = (frame->data[1] >> 4) & 1;
+    state->radar.display_active = (frame->data[5] & 0x02) ? true : false;
+
+    if (!state->radar.display_active && !state->radar.rear_active && !state->radar.front_active) {
+        state->radar.rear_left_outer    = 0xFF;
+        state->radar.rear_left_center   = 0xFF;
+        state->radar.rear_right_center  = 0xFF;
+        state->radar.rear_right_outer   = 0xFF;
+        state->radar.front_left_outer   = 0xFF;
+        state->radar.front_left_center  = 0xFF;
+        state->radar.front_right_center = 0xFF;
+        state->radar.front_right_outer  = 0xFF;
+    } else {
+        uint8_t rl = (frame->data[3] >> 5) & 0x07;
+        uint8_t rc = (frame->data[3] >> 2) & 0x07;
+        uint8_t rr = (frame->data[4] >> 5) & 0x07;
+        uint8_t fl = (frame->data[4] >> 2) & 0x07;
+        uint8_t fc = (frame->data[5] >> 5) & 0x07;
+        uint8_t fr = (frame->data[5] >> 2) & 0x07;
+
+        state->radar.rear_left_outer    = psa_radar_map_zone(rl);
+        state->radar.rear_left_center   = psa_radar_map_zone(rc);
+        state->radar.rear_right_center  = psa_radar_map_zone(rc);
+        state->radar.rear_right_outer   = psa_radar_map_zone(rr);
+
+        state->radar.front_left_outer   = psa_radar_map_zone(fl);
+        state->radar.front_left_center  = psa_radar_map_zone(fc);
+        state->radar.front_right_center = psa_radar_map_zone(fc);
+        state->radar.front_right_outer  = psa_radar_map_zone(fr);
+    }
+    state->radar.valid = true;
+    state->radar.updated = true;
+}
+
+static void psa_decode_radar_0x260_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 3) return;
+    state->radar.rear_left_outer   = frame->data[0];
+    state->radar.rear_left_center  = frame->data[1];
+    state->radar.rear_right_center = frame->data[1];
+    state->radar.rear_right_outer  = frame->data[2];
+    if (frame->dlc >= 4) {
+        state->radar.rear_active  = (frame->data[3] & 0x80) ? true : false;
+        state->radar.system_fault = (frame->data[3] & 0x01) ? true : false;
+    }
+    state->radar.valid = true;
+    state->radar.updated = true;
+}
+
+static void psa_decode_radar_0x270_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 3) return;
+    state->radar.front_left_outer   = frame->data[0];
+    state->radar.front_left_center  = frame->data[1];
+    state->radar.front_right_center = frame->data[1];
+    state->radar.front_right_outer  = frame->data[2];
+    state->radar.valid = true;
+    state->radar.updated = true;
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
+    { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
     { PSA_CAN_ID_STEERING_ANGLE,     psa_decode_steering_angle_0x0e6_profile },
     { PSA_CAN_ID_STALK_BUTTONS,      psa_decode_stalk_0x0f6 },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
@@ -257,6 +323,8 @@ static const profile_can_rule_t s_psa_rules[] = {
     { 0x1E3,                         psa_decode_hvac_0x1e3_profile },
     { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
     { PSA_CAN_ID_TRIP_INSTANT,       psa_decode_trip_0x221_profile },
+    { PSA_CAN_ID_REAR_RADAR_AAS,     psa_decode_radar_0x260_profile },
+    { PSA_CAN_ID_FRONT_RADAR_AAS,    psa_decode_radar_0x270_profile },
     { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
     { PSA_CAN_ID_TRIP2_ODB,          psa_decode_trip2_0x261_profile },
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },

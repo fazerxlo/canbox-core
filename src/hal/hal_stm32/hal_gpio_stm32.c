@@ -34,6 +34,14 @@ hal_status_t hal_gpio_init(void) {
     LL_GPIO_Init(GPIOB, &gpio_init);
     LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_1);
 
+    // Reverse Camera Trigger: PB5 (Output Push-Pull, default LOW)
+    gpio_init.Pin = LL_GPIO_PIN_5;
+    gpio_init.Mode = LL_GPIO_MODE_OUTPUT;
+    gpio_init.Speed = LL_GPIO_SPEED_FREQ_LOW;
+    gpio_init.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+    LL_GPIO_Init(GPIOB, &gpio_init);
+    LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_5);
+
     // Ignition IN: PB12 (Input Pull-Down)
     gpio_init.Pin = LL_GPIO_PIN_12;
     gpio_init.Mode = LL_GPIO_MODE_INPUT;
@@ -66,6 +74,13 @@ void hal_gpio_write(hal_gpio_pin_t pin, bool state) {
                 LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_1);
             }
             break;
+        case GPIO_PIN_REVERSE_OUT:
+            if (state) {
+                LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_5);
+            } else {
+                LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_5);
+            }
+            break;
         case GPIO_PIN_IGNITION_IN:
         default:
             break;
@@ -80,6 +95,8 @@ bool hal_gpio_read(hal_gpio_pin_t pin) {
             return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_0) != 0;
         case GPIO_PIN_HEADUNIT_POWER:
             return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_1) != 0;
+        case GPIO_PIN_REVERSE_OUT:
+            return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_5) != 0;
         case GPIO_PIN_IGNITION_IN:
             return LL_GPIO_IsInputPinSet(GPIOB, LL_GPIO_PIN_12) != 0;
         default:
@@ -97,6 +114,9 @@ void hal_gpio_toggle(hal_gpio_pin_t pin) {
             break;
         case GPIO_PIN_HEADUNIT_POWER:
             LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_1);
+            break;
+        case GPIO_PIN_REVERSE_OUT:
+            LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_5);
             break;
         case GPIO_PIN_IGNITION_IN:
         default:

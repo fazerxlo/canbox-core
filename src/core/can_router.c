@@ -1,6 +1,7 @@
 #include "core/can_router.h"
 #include "core/vehicle_profile.h"
 #include "protocols/hu_protocol.h"
+#include "hal/hal_gpio.h"
 #include <string.h>
 
 static vehicle_state_t s_current_state;
@@ -13,6 +14,7 @@ void can_router_init(void) {
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
     s_tpms_periodic_timer = 0;
     s_doors_periodic_timer = 0;
+    hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
     vehicle_profile_init();
     hu_protocol_init();
 }
@@ -93,6 +95,20 @@ void can_router_process_can(const can_frame_t *frame) {
             s_last_sent_state.trip.trip2_distance_km = s_current_state.trip.trip2_distance_km;
             s_last_sent_state.trip.trip2_valid = true;
         }
+    }
+
+    // Immediately push reverse status updates (pull physical BACK wire + notify HU protocol)
+    if (s_current_state.reverse_gear != s_last_sent_state.reverse_gear) {
+        hal_gpio_write(GPIO_PIN_REVERSE_OUT, s_current_state.reverse_gear);
+        hu_protocol_send_reverse(s_current_state.reverse_gear);
+        s_last_sent_state.reverse_gear = s_current_state.reverse_gear;
+    }
+
+    // Immediately push radar telemetry on updates
+    if (s_current_state.radar.updated) {
+        s_current_state.radar.updated = false;
+        hu_protocol_send_radar(&s_current_state.radar);
+        s_last_sent_state.radar = s_current_state.radar;
     }
 }
 

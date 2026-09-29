@@ -319,6 +319,31 @@ static void hiworld_send_trip2(const vehicle_trip_t *trip) {
     }
 }
 
+static void hiworld_send_radar(const vehicle_radar_t *radar) {
+    if (!radar || !radar->valid) return;
+
+    uint8_t payload[12];
+    payload[0] = radar->rear_left_outer;
+    payload[1] = radar->rear_left_center;
+    payload[2] = radar->rear_right_center;
+    payload[3] = radar->rear_right_outer;
+    payload[4] = radar->front_left_outer;
+    payload[5] = radar->front_left_center;
+    payload[6] = radar->front_right_center;
+    payload[7] = radar->front_right_outer;
+    payload[8] = 0x01; /* Radar active / enabled flag */
+    payload[9] = 0x00; /* Reserved */
+    payload[10] = 0x3F; /* 6-sensor config mask */
+    payload[11] = 0x05; /* Distance scale / max zone steps */
+
+    uint8_t tx_buf[20];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_RADAR_STATE, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -334,5 +359,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_trip_instant = hiworld_send_trip_instant,
     .send_trip1 = hiworld_send_trip1,
     .send_trip2 = hiworld_send_trip2,
+    .send_radar = hiworld_send_radar,
+    .send_reverse = NULL,
     .send_heartbeat = hiworld_send_heartbeat,
 };

@@ -109,12 +109,32 @@ typedef struct {
 typedef vehicle_trip_t trip_state_t;
 
 typedef struct {
+    uint8_t rear_left_outer;
+    uint8_t rear_left_center;
+    uint8_t rear_right_center;
+    uint8_t rear_right_outer;
+    uint8_t front_left_outer;
+    uint8_t front_left_center;
+    uint8_t front_right_center;
+    uint8_t front_right_outer;
+    bool    rear_active;
+    bool    front_active;
+    bool    display_active;
+    bool    system_fault;
+    bool    valid;
+    bool    updated;
+} vehicle_radar_t;
+
+typedef vehicle_radar_t radar_state_t;
+
+typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
     vehicle_climate_t        climate;
     vehicle_lights_t         lights;
     vehicle_tpms_t           tpms;
     vehicle_trip_t           trip;
+    vehicle_radar_t          radar;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;

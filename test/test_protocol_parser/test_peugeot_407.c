@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "profiles/peugeot_407.h"
+#include "hal/hal_gpio.h"
 #include <string.h>
 
 static psa_stalk_state_t s_stalk_state;
@@ -39,6 +40,19 @@ static void test_trip_uart_tx(const uint8_t *buf, size_t len) {
     }
 }
 
+#define MAX_RADAR_TX_PACKETS 8
+static uint8_t s_radar_uart_buf[MAX_RADAR_TX_PACKETS][32];
+static size_t  s_radar_uart_len[MAX_RADAR_TX_PACKETS];
+static int     s_radar_uart_tx_calls = 0;
+
+static void test_radar_uart_tx(const uint8_t *buf, size_t len) {
+    if (buf && s_radar_uart_tx_calls < MAX_RADAR_TX_PACKETS && len <= sizeof(s_radar_uart_buf[0])) {
+        memcpy(s_radar_uart_buf[s_radar_uart_tx_calls], buf, len);
+        s_radar_uart_len[s_radar_uart_tx_calls] = len;
+        s_radar_uart_tx_calls++;
+    }
+}
+
 void setUp_peugeot_407(void) {
     psa_stalk_init(&s_stalk_state);
     s_last_stalk_key_id = 0;
@@ -50,6 +64,9 @@ void setUp_peugeot_407(void) {
     s_trip_uart_tx_calls = 0;
     memset(s_trip_uart_len, 0, sizeof(s_trip_uart_len));
     memset(s_trip_uart_buf, 0, sizeof(s_trip_uart_buf));
+    s_radar_uart_tx_calls = 0;
+    memset(s_radar_uart_len, 0, sizeof(s_radar_uart_len));
+    memset(s_radar_uart_buf, 0, sizeof(s_radar_uart_buf));
 }
 
 /* --------------------------------------------------------------------------
@@ -276,6 +293,140 @@ void test_peugeot_407_front_parking_radar(void) {
     TEST_ASSERT_EQUAL_HEX8(0x04, out[6]);
 }
 
+void test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center(void) {
+    psa_radar_ctx_t ctx;
+    psa_radar_init(&ctx, test_radar_uart_tx);
+    s_radar_uart_tx_calls = 0;
+
+    // Vector 1: Native CAN 0x0E1 Obstacle Rear Center
+    // cansend vcan0 0E1#24403F04202600
+    const uint8_t can_0e1[] = { 0x24, 0x40, 0x3F, 0x04, 0x20, 0x26, 0x00 };
+    psa_radar_process_can_0x0e1(&ctx, can_0e1, sizeof(can_0e1));
+
+    TEST_ASSERT_EQUAL_INT(1, s_radar_uart_tx_calls);
+
+    // Expected UART Output (Hiworld 0x41):
+    // 5A A5 0C 41 00 01 01 01 00 01 01 01 01 00 3F 05 97
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0C, 0x41, 0x00, 0x01, 0x01, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x3F, 0x05, 0x97
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), s_radar_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_radar_uart_buf[0], sizeof(expected));
+
+    TEST_ASSERT_EQUAL_HEX8(0x00, ctx.state.rear_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.rear_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.rear_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.rear_right_outer);
+    TEST_ASSERT_EQUAL_HEX8(0x00, ctx.state.front_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.front_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.front_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.front_right_outer);
+    TEST_ASSERT_TRUE(ctx.state.rear_active);
+    TEST_ASSERT_FALSE(ctx.state.front_active);
+    TEST_ASSERT_TRUE(ctx.state.display_active);
+
+    // Verify builder directly
+    uint8_t out[20];
+    size_t len = build_hiworld_radar(&ctx.state, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(17, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 17);
+}
+
+void test_peugeot_407_radar_hiworld_vector_2_quiescent_all_clear(void) {
+    psa_radar_ctx_t ctx;
+    psa_radar_init(&ctx, test_radar_uart_tx);
+    s_radar_uart_tx_calls = 0;
+
+    // Vector 2: Quiescent / All Clear
+    // cansend vcan0 0E1#24003FFCFCFC00
+    const uint8_t can_0e1[] = { 0x24, 0x00, 0x3F, 0xFC, 0xFC, 0xFC, 0x00 };
+    psa_radar_process_can_0x0e1(&ctx, can_0e1, sizeof(can_0e1));
+
+    TEST_ASSERT_EQUAL_INT(1, s_radar_uart_tx_calls);
+
+    // Expected UART Output (Hiworld 0x41):
+    // 5A A5 0C 41 FF FF FF FF FF FF FF FF 01 00 3F 05 89
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0C, 0x41, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x3F, 0x05, 0x89
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), s_radar_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_radar_uart_buf[0], sizeof(expected));
+
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.rear_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.rear_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.rear_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.rear_right_outer);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.front_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.front_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.front_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, ctx.state.front_right_outer);
+    TEST_ASSERT_FALSE(ctx.state.rear_active);
+    TEST_ASSERT_FALSE(ctx.state.front_active);
+    TEST_ASSERT_FALSE(ctx.state.display_active);
+}
+
+void test_peugeot_407_radar_aee2010_0x260_and_0x270(void) {
+    psa_radar_ctx_t ctx;
+    psa_radar_init(&ctx, test_radar_uart_tx);
+    s_radar_uart_tx_calls = 0;
+
+    // Test 0x260 rear radar: RL=0x01, RC=0x02, RR=0x03, byte 3: Active(0x80) | Fault(0x01)
+    const uint8_t can_260[] = { 0x01, 0x02, 0x03, 0x81 };
+    psa_radar_process_can_0x260(&ctx, can_260, sizeof(can_260));
+
+    TEST_ASSERT_EQUAL_INT(1, s_radar_uart_tx_calls);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.rear_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0x02, ctx.state.rear_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0x02, ctx.state.rear_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0x03, ctx.state.rear_right_outer);
+    TEST_ASSERT_TRUE(ctx.state.rear_active);
+    TEST_ASSERT_TRUE(ctx.state.system_fault);
+
+    // Test 0x270 front radar: FL=0x00, FC=0x01, FR=0x02
+    const uint8_t can_270[] = { 0x00, 0x01, 0x02 };
+    psa_radar_process_can_0x270(&ctx, can_270, sizeof(can_270));
+
+    TEST_ASSERT_EQUAL_INT(2, s_radar_uart_tx_calls);
+    TEST_ASSERT_EQUAL_HEX8(0x00, ctx.state.front_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.front_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.state.front_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0x02, ctx.state.front_right_outer);
+}
+
+void test_peugeot_407_radar_zone_mapping_and_boundaries(void) {
+    // 0 -> Zone 0 (closest / critical / touching)
+    TEST_ASSERT_EQUAL_HEX8(0x00, psa_radar_map_zone(0));
+    // 1..6 -> Zones 1..6
+    TEST_ASSERT_EQUAL_HEX8(0x01, psa_radar_map_zone(1));
+    TEST_ASSERT_EQUAL_HEX8(0x02, psa_radar_map_zone(2));
+    TEST_ASSERT_EQUAL_HEX8(0x03, psa_radar_map_zone(3));
+    TEST_ASSERT_EQUAL_HEX8(0x04, psa_radar_map_zone(4));
+    TEST_ASSERT_EQUAL_HEX8(0x05, psa_radar_map_zone(5));
+    TEST_ASSERT_EQUAL_HEX8(0x06, psa_radar_map_zone(6));
+    // 7, 8 -> Inactive (0xFF)
+    TEST_ASSERT_EQUAL_HEX8(0xFF, psa_radar_map_zone(7));
+    TEST_ASSERT_EQUAL_HEX8(0xFF, psa_radar_map_zone(8));
+
+    // Null safety & DLC boundaries
+    psa_radar_ctx_t ctx;
+    psa_radar_init(&ctx, test_radar_uart_tx);
+    s_radar_uart_tx_calls = 0;
+
+    psa_radar_process_can_0x0e1(NULL, (const uint8_t[]){ 0x24 }, 1);
+    psa_radar_process_can_0x0e1(&ctx, NULL, 7);
+    psa_radar_process_can_0x0e1(&ctx, (const uint8_t[]){ 0x24, 0x00 }, 2); // dlc < 6
+    TEST_ASSERT_EQUAL_INT(0, s_radar_uart_tx_calls);
+
+    psa_radar_process_can_0x260(&ctx, (const uint8_t[]){ 0x01 }, 1); // dlc < 3
+    psa_radar_process_can_0x270(&ctx, (const uint8_t[]){ 0x01 }, 1); // dlc < 3
+    TEST_ASSERT_EQUAL_INT(0, s_radar_uart_tx_calls);
+
+    uint8_t out[20];
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(NULL, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(&ctx.state, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(&ctx.state, out, 16)); // too small
+}
+
 /* --------------------------------------------------------------------------
  * 1.4 Trip Computer & Engine Telemetry Tests
  * -------------------------------------------------------------------------- */
@@ -340,6 +491,42 @@ void test_peugeot_407_reverse_state(void) {
     TEST_ASSERT_EQUAL_HEX8(0x01, out[2]);
     TEST_ASSERT_EQUAL_HEX8(0x80, out[3]);
     TEST_ASSERT_EQUAL_HEX8((uint8_t)((0x40 + 0x01 + 0x80) ^ 0xFF), out[4]);
+
+    bool rev = false;
+
+    // CAN 0x036 reverse decoding
+    const uint8_t can_036_rev_on[] = { 0x0E, 0x80, 0x00 };
+    psa_decode_reverse_0x036(can_036_rev_on, sizeof(can_036_rev_on), &rev);
+    TEST_ASSERT_TRUE(rev);
+
+    const uint8_t can_036_rev_off[] = { 0x0E, 0x00, 0x00 };
+    psa_decode_reverse_0x036(can_036_rev_off, sizeof(can_036_rev_off), &rev);
+    TEST_ASSERT_FALSE(rev);
+
+    // CAN 0x0F6 reverse decoding
+    const uint8_t can_0f6_rev_on[] = { 0x88, 0x5A, 0x00, 0x00, 0x00, 0x64, 0x64, 0x80 };
+    psa_decode_reverse_0x0f6(can_0f6_rev_on, sizeof(can_0f6_rev_on), &rev);
+    TEST_ASSERT_TRUE(rev);
+
+    const uint8_t can_0f6_rev_off[] = { 0x88, 0x5A, 0x00, 0x00, 0x00, 0x64, 0x64, 0x00 };
+    psa_decode_reverse_0x0f6(can_0f6_rev_off, sizeof(can_0f6_rev_off), &rev);
+    TEST_ASSERT_FALSE(rev);
+
+    // Boundary checks
+    rev = true;
+    psa_decode_reverse_0x036(NULL, 2, &rev);
+    TEST_ASSERT_TRUE(rev);
+    psa_decode_reverse_0x036(can_036_rev_off, 1, &rev);
+    TEST_ASSERT_TRUE(rev);
+    psa_decode_reverse_0x0f6(can_0f6_rev_off, 7, &rev);
+    TEST_ASSERT_TRUE(rev);
+
+    // Hardware GPIO trigger
+    psa_reverse_set_hardware_trigger(true);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
+
+    psa_reverse_set_hardware_trigger(false);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
 }
 
 /* --------------------------------------------------------------------------

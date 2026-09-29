@@ -21,6 +21,8 @@ void hu_protocol_send_tpms_discrete(const vehicle_tpms_t *tpms);
 void hu_protocol_send_trip_instant(const vehicle_trip_t *trip);
 void hu_protocol_send_trip1(const vehicle_trip_t *trip);
 void hu_protocol_send_trip2(const vehicle_trip_t *trip);
+void hu_protocol_send_radar(const vehicle_radar_t *radar);
+void hu_protocol_send_reverse(bool reverse_active);
 
 #ifdef __cplusplus
 }

@@ -2,6 +2,7 @@
 #include "core/vehicle_profile.h"
 #include "protocols/proto_hiworld.h"
 #include "protocols/hiworld_connection.h"
+#include "hal/hal_gpio.h"
 
 void test_integration_hiworld_steering_wheel_volume_up_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
@@ -415,4 +416,97 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
         can_router_process_uart_byte(nav_p3_cmd[i]);
     }
     TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent_frame));
+}
+
+void test_integration_hiworld_radar_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    // 1. Inject Vector 1: Native CAN 0x0E1 Obstacle
+    // cansend vcan0 0E1#24403F04202600
+    can_frame_t frame_0e1 = {
+        .id = 0x0E1,
+        .dlc = 7,
+        .data = { 0x24, 0x40, 0x3F, 0x04, 0x20, 0x26, 0x00 }
+    };
+    can_router_process_can(&frame_0e1);
+
+    uint8_t rx_buf[32];
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // Expected UART Output (Hiworld 0x41):
+    // 5A A5 0C 41 00 01 01 01 00 01 01 01 01 00 3F 05 97
+    const uint8_t expected_v1[] = {
+        0x5A, 0xA5, 0x0C, 0x41, 0x00, 0x01, 0x01, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x3F, 0x05, 0x97
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_v1), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_v1, rx_buf, sizeof(expected_v1));
+
+    // 2. Inject Vector 2: Quiescent / All Clear
+    // cansend vcan0 0E1#24003FFCFCFC00
+    can_frame_t frame_quiescent = {
+        .id = 0x0E1,
+        .dlc = 7,
+        .data = { 0x24, 0x00, 0x3F, 0xFC, 0xFC, 0xFC, 0x00 }
+    };
+    can_router_process_can(&frame_quiescent);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // Expected UART Output: 5A A5 0C 41 FF FF FF FF FF FF FF FF 01 00 3F 05 89
+    const uint8_t expected_v2[] = {
+        0x5A, 0xA5, 0x0C, 0x41, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x3F, 0x05, 0x89
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_v2), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_v2, rx_buf, sizeof(expected_v2));
+}
+
+void test_integration_hiworld_reverse_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    // Initial state: Reverse off
+    TEST_ASSERT_FALSE(can_router_get_state()->reverse_gear);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
+
+    // 1. Engage reverse via 0x036: byte 1 bit 7 = 1
+    can_frame_t rev_on = {
+        .id = 0x036,
+        .dlc = 8,
+        .data = { 0x0E, 0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&rev_on);
+
+    TEST_ASSERT_TRUE(can_router_get_state()->reverse_gear);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
+
+    // 2. Disengage reverse via 0x036
+    can_frame_t rev_off = {
+        .id = 0x036,
+        .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&rev_off);
+
+    TEST_ASSERT_FALSE(can_router_get_state()->reverse_gear);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
+
+    // 3. Engage reverse via 0x0F6: byte 7 bit 7 = 1
+    can_frame_t f6_on = {
+        .id = 0x0F6,
+        .dlc = 8,
+        .data = { 0x88, 0x5A, 0x00, 0x00, 0x00, 0x64, 0x64, 0x80 }
+    };
+    can_router_process_can(&f6_on);
+
+    TEST_ASSERT_TRUE(can_router_get_state()->reverse_gear);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
+
+    // 4. Disengage reverse via 0x0F6
+    can_frame_t f6_off = {
+        .id = 0x0F6,
+        .dlc = 8,
+        .data = { 0x88, 0x5A, 0x00, 0x00, 0x00, 0x64, 0x64, 0x00 }
+    };
+    can_router_process_can(&f6_off);
+
+    TEST_ASSERT_FALSE(can_router_get_state()->reverse_gear);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
 }
