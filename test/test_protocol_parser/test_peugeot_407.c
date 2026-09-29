@@ -358,19 +358,47 @@ void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void) {
 
     TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
 
-    // Expected UART Output: 5A A5 04 13 00 44 02 80 DC
-    const uint8_t expected[] = { 0x5A, 0xA5, 0x04, 0x13, 0x00, 0x44, 0x02, 0x80, 0xDC };
-    TEST_ASSERT_EQUAL_UINT32(9, s_trip_uart_len[0]);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_trip_uart_buf[0], 9);
+    // Expected UART Output: 5A A5 0A 13 00 44 02 80 00 00 00 00 00 00 E2
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE2 };
+    TEST_ASSERT_EQUAL_UINT32(15, s_trip_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_trip_uart_buf[0], 15);
 
     TEST_ASSERT_EQUAL_UINT16(68, ctx.state.instant_fuel_deci);
     TEST_ASSERT_EQUAL_UINT16(640, ctx.state.range_km);
+    TEST_ASSERT_EQUAL_UINT16(0, ctx.state.dest_dist_km);
 
     // Verify builder directly
     uint8_t out[16];
     size_t len = build_hiworld_trip_instant(&ctx.state, out, sizeof(out));
-    TEST_ASSERT_EQUAL_UINT32(9, len);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 9);
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 15);
+}
+
+void test_peugeot_407_trip_hiworld_vector_target_mileage_dump(void) {
+    psa_trip_ctx_t ctx;
+    psa_trip_init(&ctx, test_trip_uart_tx);
+    s_trip_uart_tx_calls = 0;
+
+    // CAN ID 0x221 injection from dump_2026-09-29_19-37-10.log:
+    // Fuel: 7.1 (0x0047), Range: 619 km (0x026B), Target mileage: 204 km (raw 2040 = 0x07F8)
+    const uint8_t can_221[] = { 0x00, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8 };
+    psa_trip_process_can_0x221(&ctx, can_221, sizeof(can_221));
+
+    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
+
+    // Expected UART Output: 5A A5 0A 13 00 47 02 6B 07 F8 00 00 00 00 CF
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8, 0x00, 0x00, 0x00, 0x00, 0xCF };
+    TEST_ASSERT_EQUAL_UINT32(15, s_trip_uart_len[0]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_trip_uart_buf[0], 15);
+
+    TEST_ASSERT_EQUAL_UINT16(71, ctx.state.instant_fuel_deci);
+    TEST_ASSERT_EQUAL_UINT16(619, ctx.state.range_km);
+    TEST_ASSERT_EQUAL_UINT16(2040, ctx.state.dest_dist_km);
+
+    uint8_t out[16];
+    size_t len = build_hiworld_trip_instant(&ctx.state, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 15);
 }
 
 void test_peugeot_407_trip_hiworld_vector_2_trip1_historical(void) {

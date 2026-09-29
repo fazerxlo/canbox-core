@@ -217,6 +217,7 @@ static void psa_decode_trip_0x221_profile(const can_frame_t *frame, vehicle_stat
 
     state->trip.instant_fuel_deci = fuel;
     state->trip.range_km = range;
+    state->trip.dest_dist_km = read_be16_local(&frame->data[5]);
     state->trip.instant_valid = true;
     state->trip.updated_page = 1;
 }

@@ -435,24 +435,30 @@ size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_l
 }
 
 size_t build_hiworld_trip_instant(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
-    if (!trip || !out || max_len < 9) {
+    if (!trip || !out || max_len < 15) {
         return 0;
     }
     out[0] = HIWORLD_SOF1;
     out[1] = HIWORLD_SOF2;
-    out[2] = 0x04;               /* Length: 4 Payload bytes */
+    out[2] = 0x0A;               /* Length: 10 Payload bytes */
     out[3] = HIWORLD_CMD_ECU_P0; /* Cmd 0x13 */
     out[4] = (uint8_t)(trip->instant_fuel_deci >> 8);
     out[5] = (uint8_t)(trip->instant_fuel_deci & 0xFF);
     out[6] = (uint8_t)(trip->range_km >> 8);
     out[7] = (uint8_t)(trip->range_km & 0xFF);
+    out[8] = (uint8_t)(trip->dest_dist_km >> 8);
+    out[9] = (uint8_t)(trip->dest_dist_km & 0xFF);
+    out[10] = 0x00;
+    out[11] = 0x00;
+    out[12] = 0x00;
+    out[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 7; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum = (uint8_t)(sum + out[i]);
     }
-    out[8] = (uint8_t)((sum - 1) & 0xFF);
-    return 9;
+    out[14] = (uint8_t)((sum - 1) & 0xFF);
+    return 15;
 }
 
 size_t build_hiworld_trip1(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
@@ -510,7 +516,7 @@ void psa_trip_init(psa_trip_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
 void psa_trip_send_instant(psa_trip_ctx_t *ctx) {
     if (!ctx || !ctx->uart_tx) return;
 
-    uint8_t p[9];
+    uint8_t p[16];
     size_t len = build_hiworld_trip_instant(&ctx->state, p, sizeof(p));
     if (len > 0) {
         ctx->uart_tx(p, len);
@@ -551,6 +557,7 @@ void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_
 
     ctx->state.instant_fuel_deci = read_be16(&data[1]);
     ctx->state.range_km          = read_be16(&data[3]);
+    ctx->state.dest_dist_km      = read_be16(&data[5]);
 
     psa_trip_send_instant(ctx);
 }

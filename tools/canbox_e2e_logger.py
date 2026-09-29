@@ -16,6 +16,9 @@ import signal
 import socket
 import struct
 import pty
+import re
+
+CAN_LINE_RE = re.compile(r"^(?:ID:)?(?:0x)?([0-9A-Fa-f]+)\s+(.+)$")
 
 def get_serial_ports():
     return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
@@ -99,7 +102,7 @@ class Logger:
             self.file.write(f"{ts:.3f} [{source}] {message}\n")
             self.file.flush()
 
-    def dump_last_ns(self, ns = 5):
+    def dump_last_ns(self, ns = 5, compact = True):
         with self.lock:
             self.file.flush()
         
@@ -111,18 +114,46 @@ class Logger:
         current_time = time.time()
         cutoff = current_time - float(ns)
         
+        last_can_frames = {}
+        total_count = 0
+        written_count = 0
+        compacted_count = 0
+
         try:
             with open(self.temp_path, "r") as f_in, open(out_filename, "w") as f_out:
                 for line in f_in:
-                    parts = line.split(" ", 1)
-                    if len(parts) == 2:
+                    parts = line.split(" ", 2)
+                    if len(parts) >= 2:
                         try:
                             ts = float(parts[0])
-                            if ts >= cutoff:
-                                f_out.write(line)
+                            if ts < cutoff:
+                                continue
                         except ValueError:
-                            pass
-            print(f"[*] Dump saved to {out_filename}\r")
+                            continue
+
+                        total_count += 1
+                        tag = parts[1]
+                        if compact and tag == "[CAN]" and len(parts) > 2:
+                            msg = parts[2].strip()
+                            m = CAN_LINE_RE.match(msg)
+                            if m:
+                                try:
+                                    can_id = int(m.group(1), 16)
+                                    payload = m.group(2).strip()
+                                    if last_can_frames.get(can_id) == payload:
+                                        compacted_count += 1
+                                        continue
+                                    last_can_frames[can_id] = payload
+                                except ValueError:
+                                    pass
+
+                        f_out.write(line)
+                        written_count += 1
+
+            if compact and compacted_count > 0:
+                print(f"[*] Dump saved to {out_filename} ({written_count}/{total_count} lines, {compacted_count} repeated CAN frames compacted)\r")
+            else:
+                print(f"[*] Dump saved to {out_filename} ({written_count} lines)\r")
         except Exception as e:
             print(f"[!] Failed to dump logs: {e}\r")
             

@@ -25,13 +25,35 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     if (!packet) return;
 
     if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
-        /* ForwardEcuSetting: payload[0] = page (1=Trip1, 2=Trip2), payload[1] = action (1=Reset) */
-        if (packet->payload_len >= 2 && packet->payload[1] == 0x01) {
-            uint8_t page = packet->payload[0];
-            if (page == 0x01) {
+        /* ForwardEcuSetting:
+         * 4-byte variant (standard Android QF/Hiworld APK):
+         *   payload[0] = Active Page (1=Instant, 2=Trip1, 3=Trip2)
+         *   payload[1] = Reset Target (0=None/Navigation only, 2=Trip1 Reset, 3=Trip2 Reset)
+         *   payload[2] = 0x01 (Command validity)
+         *   payload[3] = 0xFF (Parameter mask)
+         * 2-byte variant:
+         *   payload[0] = Trip Page (1=Trip1, 2=Trip2 / 2=Trip1, 3=Trip2)
+         *   payload[1] = Action (0=None, 1=Reset)
+         */
+        if (packet->payload_len >= 4) {
+            uint8_t reset_target = packet->payload[1];
+            if (reset_target == 0x02) {
+                /* Hiworld EcuInfoPage2 (Cmd 0x14) = Trip 1 */
                 can_router_reset_trip(1);
-            } else if (page == 0x02) {
+            } else if (reset_target == 0x03) {
+                /* Hiworld EcuInfoPage3 (Cmd 0x15) = Trip 2 */
                 can_router_reset_trip(2);
+            }
+            /* reset_target == 0x00: tab navigation only, do NOT trigger reset */
+        } else if (packet->payload_len >= 2) {
+            uint8_t page = packet->payload[0];
+            uint8_t action = packet->payload[1];
+            if (action == 0x01) {
+                if (page == 0x03) {
+                    can_router_reset_trip(2);
+                } else if (page == 0x01 || page == 0x02) {
+                    can_router_reset_trip(1);
+                }
             }
         }
     }
@@ -225,17 +247,21 @@ static void hiworld_send_tpms(const vehicle_tpms_t *tpms) {
 static void hiworld_send_trip_instant(const vehicle_trip_t *trip) {
     if (!trip || !trip->instant_valid) return;
 
-    /* Hiworld Instantaneous Telemetry (Cmd 0x13): 4 payload bytes
+    /* Hiworld Instantaneous Telemetry (Cmd 0x13): 10 payload bytes as captured from real PSA Hiworld Canbox
      * Byte 0..1: Instantaneous Fuel Consumption (0.1 L/100km, Big-Endian)
      * Byte 2..3: Range / DTE (km, Big-Endian)
+     * Byte 4..5: Target Mileage / Remaining Destination Distance (Big-Endian)
+     * Byte 6..9: Reserved / Padding (0x00)
      */
-    uint8_t payload[4];
+    uint8_t payload[10] = {0};
     payload[0] = (uint8_t)(trip->instant_fuel_deci >> 8);
     payload[1] = (uint8_t)(trip->instant_fuel_deci & 0xFF);
     payload[2] = (uint8_t)(trip->range_km >> 8);
     payload[3] = (uint8_t)(trip->range_km & 0xFF);
+    payload[4] = (uint8_t)(trip->dest_dist_km >> 8);
+    payload[5] = (uint8_t)(trip->dest_dist_km & 0xFF);
 
-    uint8_t tx_buf[16];
+    uint8_t tx_buf[20];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P0, payload, sizeof(payload),
                                          tx_buf, sizeof(tx_buf));
     if (len > 0) {

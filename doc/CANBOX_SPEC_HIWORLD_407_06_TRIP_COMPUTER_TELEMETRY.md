@@ -89,13 +89,15 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 
 ### 3.1 Hiworld Instantaneous Telemetry (`Cmd 0x13` / `Handle.EcuInfoPage1`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length ($L$):** `0x04` (4 payload bytes)
+- **Length ($L$):** `0x0A` (10 payload bytes)
 - **Command ID:** `0x13` (`19` decimal / `Handle.EcuInfoPage1`)
-- **Payload Layout (4 Bytes - Big Endian):**
+- **Payload Layout (10 Bytes - Big Endian):**
   - `Byte 0..1`: Instantaneous Fuel Consumption ($0.1\text{ L/100km}$, e.g. `0x0044` = $6.8\text{ L/100km}$)
   - `Byte 2..3`: Cruising Range / Distance-to-Empty ($\text{km}$, e.g. `0x0280` = $640\text{ km}$)
+  - `Byte 4..5`: Remaining Destination Distance / Target Mileage ($\text{km}$, e.g. `0x04B0` = $1200\text{ raw}$ / $120\text{ km}$, or `0x07F8` = $2040\text{ raw}$ / $204\text{ km}$)
+  - `Byte 6..9`: Reserved / Padding (`0x00 0x00 0x00 0x00`)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
-- **Wire Frame:** `5A A5 04 13 [4 Bytes] Checksum`
+- **Wire Frame:** `5A A5 0A 13 [10 Bytes] Checksum`
 
 ### 3.2 Hiworld Trip 1 Telemetry (`Cmd 0x14` / `Handle.EcuInfoPage2`)
 - **Sync Header:** `0x5A 0xA5`
@@ -118,6 +120,22 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
   - `Byte 3`: Average Speed ($\text{km/h}$, `0xFF` = 0)
   - `Byte 4..5`: Trip Distance Traveled ($\text{km}$)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
+
+### 3.4 Hiworld Downlink Trip Reset & Navigation (`Cmd 0x1B` / `Command.ForwardEcuSetting`)
+- **Sync Header:** `0x5A 0xA5`
+- **Length ($L$):** `0x04`
+- **Command ID:** `0x1B` (`27` decimal / `ForwardEcuSetting`)
+- **Payload Layout (4 Bytes):**
+  - `Byte 0`: Active/Visible Page (`0x01` = Instant, `0x02` = Trip 1, `0x03` = Trip 2)
+  - `Byte 1`: Reset Target (`0x00` = Navigation only, `0x02` = Trip 1 Reset, `0x03` = Trip 2 Reset)
+  - `Byte 2`: Command validity / enable flag (`0x01`)
+  - `Byte 3`: Parameter mask (`0xFF`)
+- **Wire Frames:**
+  - View Instant: `5A A5 04 1B 01 00 01 FF 1F` (No CAN action)
+  - View Trip 1: `5A A5 04 1B 02 00 01 FF 20` (No CAN action)
+  - View Trip 2: `5A A5 04 1B 03 00 01 FF 21` (No CAN action)
+  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x221` with `0x80`
+  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x221` with `0x40`
 
 ---
 
@@ -147,6 +165,7 @@ typedef struct {
     
     uint16_t instant_fuel_deci; /* 0.1 L/100km */
     uint16_t range_km;          /* Distance to Empty */
+    uint16_t dest_dist_km;      /* Remaining Destination Distance / Target Mileage */
     
     uint16_t trip1_avg_fuel;    /* 0.1 L/100km */
     uint8_t  trip1_avg_speed;   /* km/h */
@@ -173,23 +192,29 @@ static inline void psa_trip_init(psa_trip_ctx_t *ctx, canbox_uart_tx_fn uart_tx)
 static inline void psa_trip_send_instant(psa_trip_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[9];
+    uint8_t p[15];
     p[0] = HIWORLD_SOF1;
     p[1] = HIWORLD_SOF2;
-    p[2] = 0x04;               /* Length: 4 Payload bytes */
+    p[2] = 0x0A;               /* Length: 10 Payload bytes */
     p[3] = HIWORLD_CMD_ECU_P0; /* Cmd 0x13 */
     p[4] = (uint8_t)(ctx->state.instant_fuel_deci >> 8);
     p[5] = (uint8_t)(ctx->state.instant_fuel_deci & 0xFF);
     p[6] = (uint8_t)(ctx->state.range_km >> 8);
     p[7] = (uint8_t)(ctx->state.range_km & 0xFF);
+    p[8] = (uint8_t)(ctx->state.dest_dist_km >> 8);
+    p[9] = (uint8_t)(ctx->state.dest_dist_km & 0xFF);
+    p[10] = 0x00;
+    p[11] = 0x00;
+    p[12] = 0x00;
+    p[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 7; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum += p[i];
     }
-    p[8] = (uint8_t)((sum - 1) & 0xFF);
+    p[14] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 9);
+    ctx->uart_tx(p, 15);
 }
 
 /* Transmit Hiworld Trip 1 Telemetry (Cmd 0x14) */
@@ -258,6 +283,7 @@ static inline void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t
 
     ctx->state.instant_fuel_deci = ((uint16_t)data[1] << 8) | data[2];
     ctx->state.range_km          = ((uint16_t)data[3] << 8) | data[4];
+    ctx->state.dest_dist_km      = ((uint16_t)data[5] << 8) | data[6];
 
     psa_trip_send_instant(ctx);
 }
@@ -308,8 +334,8 @@ static inline void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t
   cansend vcan0 221#00004402800000
   ```
 - **Expected UART Output (Hiworld `0x13`):**
-  - Frame: `5A A5 04 13 00 44 02 80 DC`
-  - Checksum Calculation: `(0x04 + 0x13 + 0x00 + 0x44 + 0x02 + 0x80 - 1) & 0xFF = (0xDD - 1) & 0xFF = 0xDC`
+  - Frame: `5A A5 0A 13 00 44 02 80 00 00 00 00 00 00 E2`
+  - Checksum Calculation: `(0x0A + 0x13 + 0x00 + 0x44 + 0x02 + 0x80 - 1) & 0xFF = (0xE3 - 1) & 0xFF = 0xE2`
 
 ### Vector 2: Trip 1 Historical (Distance 569 km, Fuel 7.3 L/100km, Mean Speed 37 km/h)
 - **CAN ID `0x2A1` Injection:**

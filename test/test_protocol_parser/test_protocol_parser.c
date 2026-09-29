@@ -46,6 +46,7 @@ void test_peugeot_407_front_parking_radar(void);
 void test_peugeot_407_trip_computer_0x165_and_0x1a5(void);
 void test_peugeot_407_reverse_state(void);
 void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void);
+void test_peugeot_407_trip_hiworld_vector_target_mileage_dump(void);
 void test_peugeot_407_trip_hiworld_vector_2_trip1_historical(void);
 void test_peugeot_407_trip_hiworld_vector_3_trip2_historical(void);
 void test_peugeot_407_trip_hiworld_vector_4_fast_dynamics_0x0b6(void);
@@ -147,6 +148,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_trip_computer_0x165_and_0x1a5);
     RUN_TEST(test_peugeot_407_reverse_state);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_1_instant_fuel);
+    RUN_TEST(test_peugeot_407_trip_hiworld_vector_target_mileage_dump);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_2_trip1_historical);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_3_trip2_historical);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_4_fast_dynamics_0x0b6);

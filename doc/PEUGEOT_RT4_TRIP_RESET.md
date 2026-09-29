@@ -66,9 +66,31 @@ Raise uses Command ID **`0x82`** (Length: 2 bytes):
 - **Reset Trip 2**: `2E 82 02 22 00 59`
 
 ### B. Hiworld Protocol (`5A A5`)
-Hiworld uses Command ID **`0x1B`** (`ForwardEcuSetting`, Length: 2 bytes):
-- **Reset Trip 1**: `5A A5 02 1B 01 01 1E` (`Payload: [0x01, 0x01]`)
-- **Reset Trip 2**: `5A A5 02 1B 02 01 1F` (`Payload: [0x02, 0x01]`)
+Hiworld uses Command ID **`0x1B`** (`ForwardEcuSetting`):
+
+#### Standard 4-Byte Format (`QF_Canbus.apk` / Real Android HU):
+Frame Layout: `5A A5 04 1B [Page] [ResetTarget] 01 FF [CS]`
+- **Byte 0 (Active Page):**
+  - `0x01`: Instantaneous consumption tab
+  - `0x02`: Trip 1 tab (`EcuInfoPage2` / `Cmd 0x14`)
+  - `0x03`: Trip 2 tab (`EcuInfoPage3` / `Cmd 0x15`)
+- **Byte 1 (Reset Target):**
+  - `0x00`: **Tab navigation / page viewing only — DO NOT RESET**
+  - `0x02`: **Reset Trip 1 (`EcuInfoPage2`)**
+  - `0x03`: **Reset Trip 2 (`EcuInfoPage3`)**
+- **Byte 2 (`0x01`):** Command validity / enable flag
+- **Byte 3 (`0xFF`):** Parameter mask
+
+**Bench-Verified Wire Frames:**
+- **View Instantaneous Tab:** `5A A5 04 1B 01 00 01 FF 1F` (No CAN action)
+- **View Trip 1 Tab:** `5A A5 04 1B 02 00 01 FF 20` (No CAN action)
+- **View Trip 2 Tab:** `5A A5 04 1B 03 00 01 FF 21` (No CAN action)
+- **Reset Trip 1:** `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Pulse CAN ID `0x221` with `0x80`
+- **Reset Trip 2:** `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Pulse CAN ID `0x221` with `0x40`
+
+#### 2-Byte Fallback Format:
+- **Reset Trip 1**: `5A A5 02 1B 01 01 1E` or `5A A5 02 1B 02 01 1F`
+- **Reset Trip 2**: `5A A5 02 1B 03 01 20`
 
 ---
 
@@ -126,11 +148,24 @@ void canbox_handle_downlink_trip_reset(uint8_t protocol_type, uint8_t cmd_id, co
     
     /* 2. Hiworld Protocol Handler */
     else if (cmd_id == 0x1B) {
-        uint8_t page = payload[0];
-        uint8_t action = payload[1];
-        if (action == 0x01) {
-            if (page == 0x01) psa_trip_send_reset(1);
-            if (page == 0x02) psa_trip_send_reset(2);
+        if (len >= 4) {
+            uint8_t reset_target = payload[1];
+            if (reset_target == 0x02) {
+                psa_trip_send_reset(1);
+            } else if (reset_target == 0x03) {
+                psa_trip_send_reset(2);
+            }
+            /* reset_target == 0x00: Tab navigation only, do NOT trigger reset */
+        } else if (len >= 2) {
+            uint8_t page = payload[0];
+            uint8_t action = payload[1];
+            if (action == 0x01) {
+                if (page == 0x03) {
+                    psa_trip_send_reset(2);
+                } else if (page == 0x01 || page == 0x02) {
+                    psa_trip_send_reset(1);
+                }
+            }
         }
     }
 }

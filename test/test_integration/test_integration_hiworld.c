@@ -219,7 +219,7 @@ void test_integration_hiworld_trip_pipeline(void) {
     can_router_process_can(&frame_221);
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    const uint8_t expected_221[] = { 0x5A, 0xA5, 0x04, 0x13, 0x00, 0x44, 0x02, 0x80, 0xDC };
+    const uint8_t expected_221[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE2 };
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_221), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_221, rx_buf, sizeof(expected_221));
 
@@ -252,7 +252,7 @@ void test_integration_hiworld_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_261, rx_buf, sizeof(expected_261));
 
     // 4. Test frames from dump_2026-09-28_20-24-29.log:
-    // CAN 0x221: DATA: 00 00 47 02 18 04 b0 -> Instant fuel: 7.1 L/100km (0x0047), Range: 536 km (0x0218)
+    // CAN 0x221: DATA: 00 00 47 02 18 04 b0 -> Instant fuel: 7.1 L/100km (0x0047), Range: 536 km (0x0218), Dest: 1200 raw (0x04B0)
     can_frame_t dump_221 = {
         .id = 0x221,
         .dlc = 7,
@@ -261,9 +261,28 @@ void test_integration_hiworld_trip_pipeline(void) {
     can_router_process_can(&dump_221);
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    const uint8_t expected_dump_221[] = { 0x5A, 0xA5, 0x04, 0x13, 0x00, 0x47, 0x02, 0x18, 0x77 };
+    const uint8_t expected_dump_221[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x47, 0x02, 0x18, 0x04, 0xB0, 0x00, 0x00, 0x00, 0x00, 0x31 };
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_dump_221), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_221, rx_buf, sizeof(expected_dump_221));
+
+    // 5. Test frames from user dump_2026-09-29_19-37-10.log:
+    // CAN 0x221: DATA: 00 00 47 02 6b 07 f8 -> Instant fuel: 7.1 (0x0047), Range: 619 km (0x026B), Target mileage: 204 km (raw 2040 = 0x07F8)
+    can_frame_t log_221 = {
+        .id = 0x221,
+        .dlc = 7,
+        .data = { 0x00, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8 }
+    };
+    can_router_process_can(&log_221);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_log_221[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8, 0x00, 0x00, 0x00, 0x00, 0xCF };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_log_221), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_log_221, rx_buf, sizeof(expected_log_221));
+
+    const vehicle_state_t *st = can_router_get_state();
+    TEST_ASSERT_EQUAL_UINT16(71, st->trip.instant_fuel_deci);
+    TEST_ASSERT_EQUAL_UINT16(619, st->trip.range_km);
+    TEST_ASSERT_EQUAL_UINT16(2040, st->trip.dest_dist_km);
 
     // CAN 0x2A1: DATA: 47 02 39 00 49 00 47 -> Dist: 569 km (0x0239), Fuel: 7.3 (0x0049), Speed: 71 km/h (0x47)
     can_frame_t dump_2a1 = {
@@ -318,7 +337,7 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     hal_can_native_clear_sent_frame();
     can_frame_t sent_frame;
 
-    // 1. Android sends Trip 1 Reset: 5A A5 02 1B 01 01 1E
+    // 1. Android sends Trip 1 Reset (fallback 1-indexed): 5A A5 02 1B 01 01 1E
     const uint8_t reset_trip1_cmd[] = { 0x5A, 0xA5, 0x02, 0x1B, 0x01, 0x01, 0x1E };
     for (size_t i = 0; i < sizeof(reset_trip1_cmd); i++) {
         can_router_process_uart_byte(reset_trip1_cmd[i]);
@@ -332,11 +351,41 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
         TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
     }
 
-    // 2. Android sends Trip 2 Reset: 5A A5 02 1B 02 01 1F
+    // 2. Android sends Trip 1 Reset (2-byte format, page 2 = EcuInfoPage2): 5A A5 02 1B 02 01 1F
     hal_can_native_clear_sent_frame();
-    const uint8_t reset_trip2_cmd[] = { 0x5A, 0xA5, 0x02, 0x1B, 0x02, 0x01, 0x1F };
-    for (size_t i = 0; i < sizeof(reset_trip2_cmd); i++) {
-        can_router_process_uart_byte(reset_trip2_cmd[i]);
+    const uint8_t reset_trip1_p2_cmd[] = { 0x5A, 0xA5, 0x02, 0x1B, 0x02, 0x01, 0x1F };
+    for (size_t i = 0; i < sizeof(reset_trip1_p2_cmd); i++) {
+        can_router_process_uart_byte(reset_trip1_p2_cmd[i]);
+    }
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[0]); // Bit 7: Trip 1 Reset
+    for (int i = 1; i < 8; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
+    }
+
+    // 3. Android sends Trip 1 Reset (4-byte format from bench log dump_2026-09-29_17-13-36.log): 5A A5 04 1B 02 02 01 FF 22
+    hal_can_native_clear_sent_frame();
+    const uint8_t reset_trip1_4byte_cmd[] = { 0x5A, 0xA5, 0x04, 0x1B, 0x02, 0x02, 0x01, 0xFF, 0x22 };
+    for (size_t i = 0; i < sizeof(reset_trip1_4byte_cmd); i++) {
+        can_router_process_uart_byte(reset_trip1_4byte_cmd[i]);
+    }
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[0]); // Bit 7: Trip 1 Reset
+    for (int i = 1; i < 8; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
+    }
+
+    // 4. Android sends Trip 2 Reset (4-byte format from bench log dump_2026-09-29_17-17-52.log): 5A A5 04 1B 03 03 01 FF 24
+    hal_can_native_clear_sent_frame();
+    const uint8_t reset_trip2_4byte_cmd[] = { 0x5A, 0xA5, 0x04, 0x1B, 0x03, 0x03, 0x01, 0xFF, 0x24 };
+    for (size_t i = 0; i < sizeof(reset_trip2_4byte_cmd); i++) {
+        can_router_process_uart_byte(reset_trip2_4byte_cmd[i]);
     }
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
@@ -346,4 +395,24 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     for (int i = 1; i < 8; i++) {
         TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
     }
+
+    // 5. Android sends Tab Navigation frames (dump_2026-09-29_17-22-10.log): MUST NOT trigger any CAN reset
+    hal_can_native_clear_sent_frame();
+    const uint8_t nav_p1_cmd[] = { 0x5A, 0xA5, 0x04, 0x1B, 0x01, 0x00, 0x01, 0xFF, 0x1F };
+    for (size_t i = 0; i < sizeof(nav_p1_cmd); i++) {
+        can_router_process_uart_byte(nav_p1_cmd[i]);
+    }
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent_frame));
+
+    const uint8_t nav_p2_cmd[] = { 0x5A, 0xA5, 0x04, 0x1B, 0x02, 0x00, 0x01, 0xFF, 0x20 };
+    for (size_t i = 0; i < sizeof(nav_p2_cmd); i++) {
+        can_router_process_uart_byte(nav_p2_cmd[i]);
+    }
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent_frame));
+
+    const uint8_t nav_p3_cmd[] = { 0x5A, 0xA5, 0x04, 0x1B, 0x03, 0x00, 0x01, 0xFF, 0x21 };
+    for (size_t i = 0; i < sizeof(nav_p3_cmd); i++) {
+        can_router_process_uart_byte(nav_p3_cmd[i]);
+    }
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent_frame));
 }

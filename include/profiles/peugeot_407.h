@@ -159,6 +159,7 @@ typedef struct {
     
     uint16_t instant_fuel_deci; /* 0.1 L/100km */
     uint16_t range_km;          /* Distance to Empty */
+    uint16_t dest_dist_km;      /* Remaining Destination Distance / Target Mileage */
     
     uint16_t trip1_avg_fuel;    /* 0.1 L/100km */
     uint8_t  trip1_avg_speed;   /* km/h */
