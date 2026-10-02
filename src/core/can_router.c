@@ -126,18 +126,76 @@ void can_router_process_can(const can_frame_t *frame) {
     if (s_current_state.alerts.realtime_updated) {
         s_current_state.alerts.realtime_updated = false;
         if (s_current_state.alerts.realtime_alert.is_active) {
-            hu_protocol_send_alert_single(s_current_state.alerts.realtime_alert.alert_code);
+            if (!s_last_sent_state.alerts.realtime_alert.is_active ||
+                s_current_state.alerts.realtime_alert.alert_code != s_last_sent_state.alerts.realtime_alert.alert_code) {
+                hu_protocol_send_alert_single(s_current_state.alerts.realtime_alert.alert_code);
+            }
             s_last_sent_state.alerts.realtime_alert = s_current_state.alerts.realtime_alert;
         } else if (s_last_sent_state.alerts.realtime_alert.is_active) {
-            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
             s_last_sent_state.alerts.realtime_alert = s_current_state.alerts.realtime_alert;
+            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
         }
     }
 
-    // Immediately push alert journal summary on update
+    // Handle alert journal updates (edge-triggered single alerts & table synchronization)
     if (s_current_state.alerts.journal_updated) {
         s_current_state.alerts.journal_updated = false;
-        hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+
+        if (!s_initial_alerts_scanned) {
+            /* Startup / first scan: transmit full 24-byte table once; no popup toasts */
+            s_initial_alerts_scanned = true;
+            s_prev_alert_count = s_current_state.alerts.active_count;
+            memcpy(s_prev_alert_codes, s_current_state.alerts.active_codes, sizeof(s_prev_alert_codes));
+            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+            s_bsi_alert_query_pending = false;
+        } else {
+            bool has_new = false;
+            bool has_cleared = false;
+
+            /* Check for newly active alerts (0 -> 1 transition) */
+            for (uint8_t i = 0; i < s_current_state.alerts.active_count; i++) {
+                uint16_t code = s_current_state.alerts.active_codes[i];
+                bool found = false;
+                for (uint8_t j = 0; j < s_prev_alert_count; j++) {
+                    if (s_prev_alert_codes[j] == code) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    /* Edge-triggered new alert event: emit single alert frame (Len = 0x02) */
+                    hu_protocol_send_alert_single(code);
+                    has_new = true;
+                }
+            }
+
+            /* Check for cleared alerts (1 -> 0 transition) */
+            for (uint8_t i = 0; i < s_prev_alert_count; i++) {
+                uint16_t code = s_prev_alert_codes[i];
+                bool found = false;
+                for (uint8_t j = 0; j < s_current_state.alerts.active_count; j++) {
+                    if (s_current_state.alerts.active_codes[j] == code) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    has_cleared = true;
+                }
+            }
+
+            bool table_changed = has_new || has_cleared || (s_prev_alert_count != s_current_state.alerts.active_count);
+
+            /* Transmit full 24-byte table ONLY on table change or active query pending */
+            if (table_changed || s_bsi_alert_query_pending) {
+                hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+                s_bsi_alert_query_pending = false;
+            }
+
+            s_prev_alert_count = s_current_state.alerts.active_count;
+            memcpy(s_prev_alert_codes, s_current_state.alerts.active_codes, sizeof(s_prev_alert_codes));
+        }
+
         s_last_sent_state.alerts = s_current_state.alerts;
     }
 }
@@ -145,8 +203,6 @@ void can_router_process_can(const can_frame_t *frame) {
 void can_router_process_uart_byte(uint8_t byte) {
     hu_protocol_feed_byte(byte);
 }
-
-static uint16_t s_alerts_periodic_timer = 0;
 
 void can_router_periodic_100ms(void) {
     // Broadcast periodic states (Vehicle speed, RPM, Radar/Parking)
@@ -189,10 +245,15 @@ void can_router_periodic_100ms(void) {
         }
     }
 
-    // Retransmit cached active alerts summary every 60 seconds (600 * 100ms ticks)
-    if (++s_alerts_periodic_timer >= 600) {
-        s_alerts_periodic_timer = 0;
-        hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+    // BSI alert query timeout check (500ms / 5 ticks)
+    if (s_bsi_alert_query_pending) {
+        if (s_bsi_alert_query_timeout_ticks > 0) {
+            s_bsi_alert_query_timeout_ticks--;
+        }
+        if (s_bsi_alert_query_timeout_ticks == 0) {
+            s_bsi_alert_query_pending = false;
+            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+        }
     }
 
     // Send keep-alive packet to keep Android HU comms link alive
@@ -205,4 +266,10 @@ const vehicle_state_t *can_router_get_state(void) {
 
 bool can_router_reset_trip(uint8_t trip_index) {
     return vehicle_profile_reset_trip(trip_index);
+}
+
+bool can_router_query_alert_journal(void) {
+    s_bsi_alert_query_pending = true;
+    s_bsi_alert_query_timeout_ticks = 5; /* 5 * 100ms = 500ms */
+    return vehicle_profile_query_alerts();
 }

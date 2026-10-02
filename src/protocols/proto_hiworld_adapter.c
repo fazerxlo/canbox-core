@@ -3,6 +3,7 @@
 #include "protocols/hiworld_connection.h"
 #include "protocols/hiworld_car_mapping.h"
 #include "proto_hiworld.h"
+#include "core/can_router.h"
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
 #include <stdbool.h>
@@ -59,7 +60,7 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         }
     } else if (packet->cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY) {
         /* Head Unit requested alert/diagnostic log refresh (forwardType 0x2F) */
-        hu_protocol_send_alerts_summary(NULL, 0); /* will trigger retransmission in adapter */
+        can_router_query_alert_journal();
     }
 }
 

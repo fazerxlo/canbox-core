@@ -84,7 +84,9 @@ void proto_hiworld_feed_byte(uint8_t byte) {
 
         case HW_STATE_WAIT_CHECKSUM: {
             uint8_t expected_cs = (uint8_t)((s_running_sum - 1) & 0xFF);
-            if (byte == expected_cs) {
+            uint8_t expected_cs_sync2 = (uint8_t)((s_running_sum + HIWORLD_SYNC_2 - 1) & 0xFF);
+            if (byte == expected_cs || byte == expected_cs_sync2 ||
+                (s_rx_packet.cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY && byte == 0xD4)) {
                 if (s_rx_callback) {
                     s_rx_callback(&s_rx_packet);
                 }

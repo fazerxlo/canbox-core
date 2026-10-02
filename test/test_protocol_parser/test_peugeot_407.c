@@ -5,6 +5,9 @@
 #include "hal/hal_gpio.h"
 #include <string.h>
 
+bool hal_can_native_get_last_sent_frame(can_frame_t *out_frame);
+void hal_can_native_clear_sent_frame(void);
+
 static psa_stalk_state_t s_stalk_state;
 static uint8_t s_last_stalk_key_id = 0;
 static uint8_t s_last_stalk_key_state = 0;
@@ -1876,7 +1879,7 @@ void test_peugeot_407_alert_router_pipeline_and_query(void) {
     st = can_router_get_state();
     TEST_ASSERT_FALSE(st->alerts.realtime_alert.is_active);
 
-    /* 3. Feed multi-frame journal sequence */
+    /* 3. Feed multi-frame journal sequence (Initial Scan: 3 active faults) */
     can_frame_t f_ff = { .id = PSA_CAN_ID_ALERT_JOURNAL, .dlc = 8, .data = { 0x10, 0x15, 0x40, 0x00, 0x00, 0x00, 0xC0, 0x00 } };
     can_frame_t f_c1 = { .id = PSA_CAN_ID_ALERT_JOURNAL, .dlc = 8, .data = { 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
     can_frame_t f_c2 = { .id = PSA_CAN_ID_ALERT_JOURNAL, .dlc = 8, .data = { 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
@@ -1893,10 +1896,48 @@ void test_peugeot_407_alert_router_pipeline_and_query(void) {
     TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_ABS, st->alerts.active_codes[1]);
     TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_DPF, st->alerts.active_codes[2]);
 
-    /* 4. Feed UART Query Cmd 0x2F (Head Unit Diagnostic query on UI resume) */
-    const uint8_t query_packet[] = { 0x5A, 0xA5, 0x01, 0x2F, 0x01, 0x30 };
-    for (size_t i = 0; i < sizeof(query_packet); i++) {
-        can_router_process_uart_byte(query_packet[i]);
+    /* 4. Retransmit identical journal sequence: no state change, no unsolicited popup */
+    can_router_process_can(&f_ff);
+    can_router_process_can(&f_c1);
+    can_router_process_can(&f_c2);
+    can_router_process_can(&f_c3);
+    st = can_router_get_state();
+    TEST_ASSERT_EQUAL_UINT8(3, st->alerts.active_count);
+
+    /* 5. Feed UART Query Cmd 0x2F with 0xD4 checksum variant (Android APK forwardType 0x2F) */
+    hal_can_native_clear_sent_frame();
+    const uint8_t query_packet_d4[] = { 0x5A, 0xA5, 0x01, 0x2F, 0x01, 0xD4 };
+    for (size_t i = 0; i < sizeof(query_packet_d4); i++) {
+        can_router_process_uart_byte(query_packet_d4[i]);
+    }
+
+    /* Verify BSI diagnostic query CAN frame 0x39B was transmitted on CAN */
+    can_frame_t sent_query;
+    memset(&sent_query, 0, sizeof(sent_query));
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_query));
+    TEST_ASSERT_EQUAL_HEX32(PSA_CAN_ID_ALERT_QUERY, sent_query.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent_query.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x01, sent_query.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, sent_query.data[1]);
+
+    /* 6. Verify 500ms timeout handling in periodic tick */
+    for (int t = 0; t < 5; t++) {
+        can_router_periodic_100ms();
+    }
+
+    /* 7. Verify standard 0x30 checksum for 0x2F also triggers BSI query */
+    hal_can_native_clear_sent_frame();
+    const uint8_t query_packet_30[] = { 0x5A, 0xA5, 0x01, 0x2F, 0x01, 0x30 };
+    for (size_t i = 0; i < sizeof(query_packet_30); i++) {
+        can_router_process_uart_byte(query_packet_30[i]);
+    }
+    memset(&sent_query, 0, sizeof(sent_query));
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_query));
+    TEST_ASSERT_EQUAL_HEX32(PSA_CAN_ID_ALERT_QUERY, sent_query.id);
+
+    /* 8. Verify periodic timer ticks do not spam alert summaries when no query is pending */
+    for (int t = 0; t < 600; t++) {
+        can_router_periodic_100ms();
     }
 }
 

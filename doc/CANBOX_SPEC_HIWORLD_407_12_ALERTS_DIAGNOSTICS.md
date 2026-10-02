@@ -207,8 +207,17 @@ typedef struct {
 ### 5.3 Protocol Driver Interface & Adapter (`src/protocols/proto_hiworld_adapter.c`)
 - Implements `hiworld_send_alert_single()` using Command `0x42` with 2-byte payload.
 - Implements `hiworld_send_alerts_summary()` using Command `0x42` with 24-byte payload.
-- Caches active alert state and automatically retransmits the full journal when the Head Unit sends diagnostic query `forwardType(0x2F)`.
-- Dispatches periodic resync every 60 seconds to protect against unannounced Android UI restarts.
+- Dispatches active CAN query to car's BSI via `can_router_query_alert_journal()` upon receiving `HIWORLD_CMD_DIAGNOSTIC_QUERY` (`0x2F`).
+- Accepts both standard checksum `(sum - 1) & 0xFF`, sync2 variant `(sum + 0xA5 - 1) & 0xFF`, and `0xD4` from Android APK `forwardType(0x2F)`.
+
+### 5.4 CAN Router Dispatch & Rate Limiting (`src/core/can_router.c`)
+- **Stop Periodic Spam:** Periodic broadcast of 24-byte `0x42` table is disabled to eliminate non-stop floating popup banners on Android HU.
+- **Edge-Triggered Real-Time Popups (`Len = 0x02`):** When a fault code transition (0 &rarr; 1) is detected (new alert chime/fault), emits a single 2-byte Hiworld event frame `5A A5 02 42 <HI> <LO> <CHK>`.
+- **Full Table Transmission (`Len = 0x18`):** Emitted strictly on:
+  1. Response to HU `0x2F` query (once BSI alert journal collected, or upon 500ms timeout fallback).
+  2. Once on firmware startup / first CAN scan.
+  3. When an alert is added or cleared from the active alert set.
+- **BSI Alert Log CAN Uplink:** Sends Comfort CAN diagnostic frame `0x39B` (DLC 8, `{0x01, 0x01, ...}`) to BSI when the HU queries the alert journal.
 
 ---
 
@@ -220,5 +229,11 @@ Automated unit tests in `test/test_protocol_parser/test_peugeot_407.c`:
 3. `test_peugeot_407_alert_single_low_fuel`: Verifies CAN `0x1A1` (`0x000D`) -> Hiworld `0x42` (`0x0001`) serialization and alert clear on `POPUP_ACTIVE == 0`.
 4. `test_peugeot_407_alert_journal_multi`: Verifies 4-frame segmented ISO-TP transfer on `0x120` (Engine Temp, ABS, DPF) -> 24-byte Hiworld frame with `mNumber = 3`.
 5. `test_peugeot_407_alert_journal_clear`: Verifies clear frame with `mNumber = 0`.
-6. `test_peugeot_407_alert_router_pipeline_and_query`: Verifies end-to-end CAN router pipeline and UART query `0x2F` handling.
+6. `test_peugeot_407_alert_router_pipeline_and_query`: Verifies end-to-end CAN router pipeline:
+   - Initial scan 24-byte table transmission without unsolicited single alert popups.
+   - Suppression of duplicate/unchanged journal transmissions (zero spam).
+   - Receipt of UART query `0x2F` (`5A A5 01 2F 01 D4` and `0x30` variant) triggering CAN diagnostic query frame `0x39B` (DLC 8).
+   - 500ms timeout expiration and state synchronization.
+   - Freedom from periodic spam across 600 periodic ticks.
 7. `test_peugeot_407_alert_boundary_and_malformed`: Verifies NULL safety, truncated DLC, and corrupted ISO-TP sequence handling.
+8. `test_peugeot_407_alert_journal_block_multiplexed_real_log`: Verifies block-multiplexed transport on `0x120` parsed from real vehicle log.
