@@ -33,6 +33,7 @@ typedef struct {
     uint8_t                    rule_count;
     void                     (*init)(void);
     bool                     (*reset_trip)(uint8_t trip_index);
+    bool                     (*query_alerts)(void);
 } vehicle_profile_t;
 
 void vehicle_profile_init(void);
@@ -40,6 +41,7 @@ bool vehicle_profile_set_active(vehicle_profile_id_t profile_id);
 const vehicle_profile_t *vehicle_profile_get_active(void);
 void vehicle_profile_process_frame(const can_frame_t *frame, vehicle_state_t *state);
 bool vehicle_profile_reset_trip(uint8_t trip_index);
+bool vehicle_profile_query_alerts(void);
 
 #ifdef __cplusplus
 }

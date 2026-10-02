@@ -1,5 +1,7 @@
 #include "unity.h"
 #include "profiles/peugeot_407.h"
+#include "protocols/hu_protocol.h"
+#include "protocols/hu_protocol_driver.h"
 #include "hal/hal_gpio.h"
 #include <string.h>
 
@@ -1668,5 +1670,296 @@ void test_peugeot_407_trip_reset_frames(void) {
     TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(1));
     TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(2));
     TEST_ASSERT_EQUAL(HAL_STATUS_ERROR, psa_trip_send_reset(0));
+}
+
+/* --------------------------------------------------------------------------
+ * Vehicle Alerts & Diagnostic Journal Verification Tests
+ * -------------------------------------------------------------------------- */
+void test_peugeot_407_alert_single_abs(void) {
+    /* CAN 0x1A1: POPUP_ACTIVE=1, CAN_ALARM_ID=0x006C (ABS Fault), DISPLAY=1 (0x80), PRIORITY=3 (0x30), SOUND=2 (0x02) -> 0xB2 */
+    const uint8_t can_data[8] = { 0x80, 0x6C, 0xB2, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    vehicle_alert_item_t alert;
+    memset(&alert, 0, sizeof(alert));
+
+    psa_decode_alert_message_0x1a1(can_data, 8, &alert);
+
+    TEST_ASSERT_TRUE(alert.is_active);
+    TEST_ASSERT_TRUE(alert.display_req);
+    TEST_ASSERT_EQUAL_HEX16(0x006C, alert.can_alarm_id);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_ABS, alert.alert_code);
+    TEST_ASSERT_EQUAL_UINT8(3, alert.severity);
+    TEST_ASSERT_EQUAL_UINT8(2, alert.chime_id);
+
+    /* Serialize Hiworld single alert frame */
+    uint8_t out[16];
+    size_t len = build_hiworld_alert_single(alert.alert_code, out, sizeof(out));
+    TEST_ASSERT_EQUAL_size_t(7, len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x42, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x69, out[5]);
+    /* CS = (0x02 + 0x42 + 0x00 + 0x69 - 1) & 0xFF = 0xAC */
+    TEST_ASSERT_EQUAL_HEX8(0xAC, out[6]);
+}
+
+void test_peugeot_407_alert_single_suspension(void) {
+    /* CAN 0x1A1: POPUP_ACTIVE=1, CAN_ALARM_ID=0x009E (Suspension 90km/h), DISPLAY=1, PRIORITY=2, SOUND=1 */
+    const uint8_t can_data[8] = { 0x80, 0x9E, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    vehicle_alert_item_t alert;
+    memset(&alert, 0, sizeof(alert));
+
+    psa_decode_alert_message_0x1a1(can_data, 8, &alert);
+
+    TEST_ASSERT_TRUE(alert.is_active);
+    TEST_ASSERT_TRUE(alert.display_req);
+    TEST_ASSERT_EQUAL_HEX16(0x009E, alert.can_alarm_id);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_SUSPENSION_90KMH, alert.alert_code);
+
+    uint8_t out[16];
+    size_t len = build_hiworld_alert_single(alert.alert_code, out, sizeof(out));
+    TEST_ASSERT_EQUAL_size_t(7, len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x42, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x6B, out[5]);
+    /* CS = (0x02 + 0x42 + 0x00 + 0x6B - 1) & 0xFF = 0xAE */
+    TEST_ASSERT_EQUAL_HEX8(0xAE, out[6]);
+}
+
+void test_peugeot_407_alert_single_low_fuel(void) {
+    /* CAN 0x1A1: POPUP_ACTIVE=1, CAN_ALARM_ID=0x000D (Low Fuel), DISPLAY=1, PRIORITY=2, SOUND=1 */
+    const uint8_t can_data[8] = { 0x80, 0x0D, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    vehicle_alert_item_t alert;
+    memset(&alert, 0, sizeof(alert));
+
+    psa_decode_alert_message_0x1a1(can_data, 8, &alert);
+
+    TEST_ASSERT_TRUE(alert.is_active);
+    TEST_ASSERT_EQUAL_HEX16(0x000D, alert.can_alarm_id);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_LOW_FUEL, alert.alert_code);
+
+    uint8_t out[16];
+    size_t len = build_hiworld_alert_single(alert.alert_code, out, sizeof(out));
+    TEST_ASSERT_EQUAL_size_t(7, len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x42, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[5]);
+    /* CS = (0x02 + 0x42 + 0x00 + 0x01 - 1) & 0xFF = 0x44 */
+    TEST_ASSERT_EQUAL_HEX8(0x44, out[6]);
+
+    /* Test clear alert: POPUP_ACTIVE = 0 */
+    const uint8_t clear_data[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    psa_decode_alert_message_0x1a1(clear_data, 8, &alert);
+    TEST_ASSERT_FALSE(alert.is_active);
+    TEST_ASSERT_FALSE(alert.display_req);
+    TEST_ASSERT_EQUAL_HEX16(0x0000, alert.alert_code);
+}
+
+void test_peugeot_407_alert_journal_multi(void) {
+    psa_journal_iso_tp_t ctx;
+    psa_journal_iso_tp_init(&ctx);
+
+    uint16_t out_codes[CANBOX_MAX_ACTIVE_ALERTS];
+    uint8_t  out_count = 0;
+    memset(out_codes, 0, sizeof(out_codes));
+
+    /* Journal test payload:
+     * Byte 0: 0x40 (Bit 1 = Engine Overheat -> Alarm Index 0x07 -> CAN 0x0001 -> Hiworld 0x0003)
+     * Byte 4: 0xC0 (Bit 32 = ABS -> Alarm Index 0x16 -> CAN 0x006C -> Hiworld 0x0069,
+     *               Bit 33 = DPF -> Alarm Index 0x1A -> CAN 0x006F -> Hiworld 0x0064)
+     */
+    const uint8_t ff_data[8]  = { 0x10, 0x15, 0x40, 0x00, 0x00, 0x00, 0xC0, 0x00 };
+    const uint8_t cf1_data[8] = { 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t cf2_data[8] = { 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t cf3_data[8] = { 0x23, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, ff_data, 8, out_codes, &out_count));
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, cf1_data, 8, out_codes, &out_count));
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, cf2_data, 8, out_codes, &out_count));
+    TEST_ASSERT_TRUE(psa_process_journal_0x120(&ctx, cf3_data, 8, out_codes, &out_count));
+
+    TEST_ASSERT_EQUAL_UINT8(3, out_count);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_ENGINE_TEMP, out_codes[0]);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_ABS, out_codes[1]);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_DPF, out_codes[2]);
+
+    /* Serialize Hiworld Multi-Alert Summary (24 payload bytes) */
+    uint8_t out[36];
+    size_t len = build_hiworld_alerts_summary(out_codes, out_count, out, sizeof(out));
+    TEST_ASSERT_EQUAL_size_t(29, len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x18, out[2]); /* Len = 24 */
+    TEST_ASSERT_EQUAL_HEX8(0x42, out[3]); /* Cmd = 0x42 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[6]);
+    TEST_ASSERT_EQUAL_HEX8(0x03, out[7]); /* mNumber = 3 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x03, out[9]); /* Alert 1: 0x0003 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[10]);
+    TEST_ASSERT_EQUAL_HEX8(0x69, out[11]); /* Alert 2: 0x0069 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[12]);
+    TEST_ASSERT_EQUAL_HEX8(0x64, out[13]); /* Alert 3: 0x0064 */
+    /* Check padding to 24 payload bytes */
+    for (int i = 14; i < 28; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, out[i]);
+    }
+    /* CS = (0x18 + 0x42 + 3 + 3 + 0x69 + 0x64 - 1) & 0xFF = 0x2C */
+    TEST_ASSERT_EQUAL_HEX8(0x2C, out[28]);
+}
+
+void test_peugeot_407_alert_journal_clear(void) {
+    psa_journal_iso_tp_t ctx;
+    psa_journal_iso_tp_init(&ctx);
+
+    uint16_t out_codes[CANBOX_MAX_ACTIVE_ALERTS];
+    uint8_t  out_count = 0;
+    memset(out_codes, 0, sizeof(out_codes));
+
+    /* Journal test payload with 0 active faults */
+    const uint8_t ff_data[8]  = { 0x10, 0x15, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t cf1_data[8] = { 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t cf2_data[8] = { 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t cf3_data[8] = { 0x23, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, ff_data, 8, out_codes, &out_count));
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, cf1_data, 8, out_codes, &out_count));
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, cf2_data, 8, out_codes, &out_count));
+    TEST_ASSERT_TRUE(psa_process_journal_0x120(&ctx, cf3_data, 8, out_codes, &out_count));
+
+    TEST_ASSERT_EQUAL_UINT8(0, out_count);
+
+    /* Serialize Hiworld clear frame (mNumber = 0) */
+    uint8_t out[36];
+    size_t len = build_hiworld_alerts_summary(out_codes, out_count, out, sizeof(out));
+    TEST_ASSERT_EQUAL_size_t(29, len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x18, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x42, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[7]); /* mNumber = 0 */
+    /* CS = (0x18 + 0x42 - 1) & 0xFF = 0x59 */
+    TEST_ASSERT_EQUAL_HEX8(0x59, out[28]);
+}
+
+void test_peugeot_407_alert_router_pipeline_and_query(void) {
+    can_router_init();
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    /* 1. Feed single alert frame (CAN 0x1A1, ABS fault) */
+    can_frame_t frame_abs = {
+        .id = PSA_CAN_ID_ALERT_MESSAGE,
+        .dlc = 8,
+        .data = { 0x80, 0x6C, 0xF2, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_abs);
+
+    const vehicle_state_t *st = can_router_get_state();
+    TEST_ASSERT_TRUE(st->alerts.realtime_alert.is_active);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_ABS, st->alerts.realtime_alert.alert_code);
+
+    /* 2. Feed clear frame (CAN 0x1A1, POPUP_ACTIVE=0) */
+    can_frame_t frame_clear = {
+        .id = PSA_CAN_ID_ALERT_MESSAGE,
+        .dlc = 8,
+        .data = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_clear);
+    st = can_router_get_state();
+    TEST_ASSERT_FALSE(st->alerts.realtime_alert.is_active);
+
+    /* 3. Feed multi-frame journal sequence */
+    can_frame_t f_ff = { .id = PSA_CAN_ID_ALERT_JOURNAL, .dlc = 8, .data = { 0x10, 0x15, 0x40, 0x00, 0x00, 0x00, 0xC0, 0x00 } };
+    can_frame_t f_c1 = { .id = PSA_CAN_ID_ALERT_JOURNAL, .dlc = 8, .data = { 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
+    can_frame_t f_c2 = { .id = PSA_CAN_ID_ALERT_JOURNAL, .dlc = 8, .data = { 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
+    can_frame_t f_c3 = { .id = PSA_CAN_ID_ALERT_JOURNAL, .dlc = 8, .data = { 0x23, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } };
+
+    can_router_process_can(&f_ff);
+    can_router_process_can(&f_c1);
+    can_router_process_can(&f_c2);
+    can_router_process_can(&f_c3);
+
+    st = can_router_get_state();
+    TEST_ASSERT_EQUAL_UINT8(3, st->alerts.active_count);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_ENGINE_TEMP, st->alerts.active_codes[0]);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_ABS, st->alerts.active_codes[1]);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_DPF, st->alerts.active_codes[2]);
+
+    /* 4. Feed UART Query Cmd 0x2F (Head Unit Diagnostic query on UI resume) */
+    const uint8_t query_packet[] = { 0x5A, 0xA5, 0x01, 0x2F, 0x01, 0x30 };
+    for (size_t i = 0; i < sizeof(query_packet); i++) {
+        can_router_process_uart_byte(query_packet[i]);
+    }
+}
+
+void test_peugeot_407_alert_boundary_and_malformed(void) {
+    /* 1. NULL safety */
+    psa_decode_alert_message_0x1a1(NULL, 8, NULL);
+    psa_journal_iso_tp_init(NULL);
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(NULL, NULL, 0, NULL, NULL));
+
+    /* 2. Short DLC on 0x1A1 */
+    vehicle_alert_item_t alert;
+    memset(&alert, 0, sizeof(alert));
+    const uint8_t short_data[3] = { 0x80, 0x6C, 0xF2 };
+    psa_decode_alert_message_0x1a1(short_data, 3, &alert);
+    TEST_ASSERT_FALSE(alert.is_active);
+
+    /* 3. Short DLC on 0x120 */
+    psa_journal_iso_tp_t ctx;
+    psa_journal_iso_tp_init(&ctx);
+    uint16_t codes[CANBOX_MAX_ACTIVE_ALERTS];
+    uint8_t count = 0;
+    const uint8_t short_pci[1] = { 0x10 };
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, short_pci, 1, codes, &count));
+
+    /* 4. Out of sequence consecutive frame */
+    const uint8_t ff_data[8] = { 0x10, 0x15, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t wrong_cf[8] = { 0x25, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; /* expected 0x21 */
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, ff_data, 8, codes, &count));
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, wrong_cf, 8, codes, &count));
+    TEST_ASSERT_FALSE(ctx.in_progress);
+
+    /* 5. Buffer size boundaries */
+    uint8_t small_buf[5];
+    TEST_ASSERT_EQUAL_size_t(0, build_hiworld_alert_single(0x0069, small_buf, sizeof(small_buf)));
+    TEST_ASSERT_EQUAL_size_t(0, build_hiworld_alerts_summary(codes, count, small_buf, sizeof(small_buf)));
+}
+
+void test_peugeot_407_alert_journal_block_multiplexed_real_log(void) {
+    psa_journal_iso_tp_t ctx;
+    psa_journal_iso_tp_init(&ctx);
+
+    uint16_t out_codes[CANBOX_MAX_ACTIVE_ALERTS];
+    uint8_t  out_count = 0;
+    memset(out_codes, 0, sizeof(out_codes));
+
+    /* Real frames captured from dump_2026-10-02_12-15-52.log:
+     * Frame 1: FC 00 00 00 00 0F 00 00 (Block 3)
+     * Frame 2: BC 00 00 00 00 00 00 00 (Block 2)
+     * Frame 3: 7C 10 00 03 00 04 00 08 (Block 1)
+     */
+    const uint8_t blk3[8] = { 0xFC, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x00 };
+    const uint8_t blk2[8] = { 0xBC, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t blk1[8] = { 0x7C, 0x10, 0x00, 0x03, 0x00, 0x04, 0x00, 0x08 };
+
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, blk3, 8, out_codes, &out_count));
+    TEST_ASSERT_FALSE(psa_process_journal_0x120(&ctx, blk2, 8, out_codes, &out_count));
+    TEST_ASSERT_TRUE(psa_process_journal_0x120(&ctx, blk1, 8, out_codes, &out_count));
+
+    /* Verify parsed alerts from real dump */
+    TEST_ASSERT_TRUE(out_count >= 4);
+    TEST_ASSERT_EQUAL_HEX16(0x0008, out_codes[0]);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_AIRBAG, out_codes[2]);
+    TEST_ASSERT_EQUAL_HEX16(PSA_HIWORLD_ALERT_SUSPENSION_SYSTEM, out_codes[3]);
+    TEST_ASSERT_EQUAL_HEX16(0x00DE, out_codes[4]);
 }
 

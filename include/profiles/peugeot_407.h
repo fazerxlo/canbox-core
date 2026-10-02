@@ -17,10 +17,13 @@ extern "C" {
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
 #define PSA_CAN_ID_BSI_SLOW_DATA    0x0F6
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
+#define PSA_CAN_ID_ALERT_JOURNAL    0x120
+#define PSA_CAN_ID_ALERT_QUERY      0x39B
 #define PSA_CAN_ID_BSI_GAUGES       0x161
 #define PSA_CAN_ID_FUEL_RANGE_TEMP  0x165
 #define PSA_CAN_ID_ALERTS_INDICATORS 0x168
 #define PSA_CAN_ID_JBL_AMPLIFIER    0x1A0
+#define PSA_CAN_ID_ALERT_MESSAGE    0x1A1
 #define PSA_CAN_ID_TRIP1            0x1A5
 #define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
@@ -390,6 +393,72 @@ size_t build_raise_adas(const canbox_adas_state_t *adas, uint8_t *out);
 void psa_decode_alerts_0x168(const uint8_t *data, uint8_t dlc,
                              bool *tpms_fault, bool *tpms_underinflation,
                              bool *tpms_puncture, bool *esp_fault);
+
+/* --------------------------------------------------------------------------
+ * 2.5 Vehicle Alerts & Diagnostic Journal (Hiworld Command 0x42)
+ * -------------------------------------------------------------------------- */
+#define HIWORLD_CMD_WARNING_INFO     0x42
+#define HIWORLD_CMD_DIAGNOSTIC_QUERY 0x2F
+
+#define PSA_JOURNAL_PAYLOAD_BYTES    21
+#define PSA_JOURNAL_TOTAL_BITS       168
+
+/* Canonical Hiworld Alert Presets (mOriginalType) */
+#define PSA_HIWORLD_ALERT_GENERAL             0x0000
+#define PSA_HIWORLD_ALERT_LOW_FUEL            0x0001
+#define PSA_HIWORLD_ALERT_ENGINE_TEMP         0x0003
+#define PSA_HIWORLD_ALERT_OIL_PRESSURE        0x0004
+#define PSA_HIWORLD_ALERT_BRAKE_FLUID         0x0005
+#define PSA_HIWORLD_ALERT_HANDBRAKE           0x0008
+#define PSA_HIWORLD_ALERT_KEY_BATTERY         0x000A
+#define PSA_HIWORLD_ALERT_DIRECTIONAL_LIGHTS  0x000B
+#define PSA_HIWORLD_ALERT_BATTERY_CHARGE      0x000D
+#define PSA_HIWORLD_ALERT_ESP                 0x000F
+#define PSA_HIWORLD_ALERT_DOOR_FL             0x0011
+#define PSA_HIWORLD_ALERT_DOOR_FR             0x0012
+#define PSA_HIWORLD_ALERT_DOOR_REAR           0x0013
+#define PSA_HIWORLD_ALERT_BOOT                0x0014
+#define PSA_HIWORLD_ALERT_SERVICE_DUE         0x0061
+#define PSA_HIWORLD_ALERT_DPF                 0x0064
+#define PSA_HIWORLD_ALERT_GEARBOX             0x0067
+#define PSA_HIWORLD_ALERT_ANTIPOLLUTION       0x0068
+#define PSA_HIWORLD_ALERT_ABS                 0x0069
+#define PSA_HIWORLD_ALERT_EBD                 0x006A
+#define PSA_HIWORLD_ALERT_SUSPENSION_90KMH    0x006B
+#define PSA_HIWORLD_ALERT_SUSPENSION_SYSTEM   0x006C
+#define PSA_HIWORLD_ALERT_AUTO_LIGHTS         0x0081
+#define PSA_HIWORLD_ALERT_AUTO_WIPERS         0x0083
+#define PSA_HIWORLD_ALERT_TPMS_UNDER_FL       0x009A
+#define PSA_HIWORLD_ALERT_TPMS_UNDER_FR       0x009B
+#define PSA_HIWORLD_ALERT_TPMS_UNDER_RR       0x009C
+#define PSA_HIWORLD_ALERT_TPMS_UNDER_RL       0x009D
+#define PSA_HIWORLD_ALERT_TPMS_PUNCTURE_FL    0x009E
+#define PSA_HIWORLD_ALERT_TPMS_PUNCTURE_FR    0x009F
+#define PSA_HIWORLD_ALERT_TPMS_PUNCTURE_REAR  0x00A0
+#define PSA_HIWORLD_ALERT_BULB_SIDELIGHT      0x00E3
+#define PSA_HIWORLD_ALERT_BULB_DIPPED         0x00E5
+#define PSA_HIWORLD_ALERT_BULB_BRAKE          0x00E7
+#define PSA_HIWORLD_ALERT_BULB_REVERSE        0x00E8
+#define PSA_HIWORLD_ALERT_AIRBAG              0x00F0
+#define PSA_HIWORLD_ALERT_SEATBELT_FL         0x012F
+#define PSA_HIWORLD_ALERT_SEATBELT_FR         0x0130
+#define PSA_HIWORLD_ALERT_IMMOBILIZER         0x01FA
+
+typedef struct {
+    uint8_t buffer[PSA_JOURNAL_PAYLOAD_BYTES];
+    uint8_t bytes_rx;
+    uint8_t expected_seq;
+    bool    in_progress;
+    uint8_t blocks_received;
+} psa_journal_iso_tp_t;
+
+void psa_journal_iso_tp_init(psa_journal_iso_tp_t *ctx);
+uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_mask, uint8_t param);
+void psa_decode_alert_message_0x1a1(const uint8_t *data, uint8_t dlc, vehicle_alert_item_t *alert);
+bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, uint8_t dlc,
+                               uint16_t *out_codes, uint8_t *out_count);
+size_t build_hiworld_alert_single(uint16_t alert_code, uint8_t *out, size_t max_len);
+size_t build_hiworld_alerts_summary(const uint16_t *codes, uint8_t count, uint8_t *out, size_t max_len);
 
 #ifdef __cplusplus
 }

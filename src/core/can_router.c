@@ -9,11 +9,22 @@ static vehicle_state_t s_last_sent_state;
 static uint16_t        s_tpms_periodic_timer = 0;
 static uint8_t         s_doors_periodic_timer = 0;
 
+static bool            s_initial_alerts_scanned = false;
+static bool            s_bsi_alert_query_pending = false;
+static uint8_t         s_bsi_alert_query_timeout_ticks = 0;
+static uint16_t        s_prev_alert_codes[CANBOX_MAX_ACTIVE_ALERTS];
+static uint8_t         s_prev_alert_count = 0;
+
 void can_router_init(void) {
     memset(&s_current_state, 0, sizeof(s_current_state));
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
     s_tpms_periodic_timer = 0;
     s_doors_periodic_timer = 0;
+    s_initial_alerts_scanned = false;
+    s_bsi_alert_query_pending = false;
+    s_bsi_alert_query_timeout_ticks = 0;
+    s_prev_alert_count = 0;
+    memset(s_prev_alert_codes, 0, sizeof(s_prev_alert_codes));
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
     vehicle_profile_init();
     hu_protocol_init();
@@ -110,11 +121,32 @@ void can_router_process_can(const can_frame_t *frame) {
         hu_protocol_send_radar(&s_current_state.radar);
         s_last_sent_state.radar = s_current_state.radar;
     }
+
+    // Immediately push single alert popup or clear
+    if (s_current_state.alerts.realtime_updated) {
+        s_current_state.alerts.realtime_updated = false;
+        if (s_current_state.alerts.realtime_alert.is_active) {
+            hu_protocol_send_alert_single(s_current_state.alerts.realtime_alert.alert_code);
+            s_last_sent_state.alerts.realtime_alert = s_current_state.alerts.realtime_alert;
+        } else if (s_last_sent_state.alerts.realtime_alert.is_active) {
+            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+            s_last_sent_state.alerts.realtime_alert = s_current_state.alerts.realtime_alert;
+        }
+    }
+
+    // Immediately push alert journal summary on update
+    if (s_current_state.alerts.journal_updated) {
+        s_current_state.alerts.journal_updated = false;
+        hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+        s_last_sent_state.alerts = s_current_state.alerts;
+    }
 }
 
 void can_router_process_uart_byte(uint8_t byte) {
     hu_protocol_feed_byte(byte);
 }
+
+static uint16_t s_alerts_periodic_timer = 0;
 
 void can_router_periodic_100ms(void) {
     // Broadcast periodic states (Vehicle speed, RPM, Radar/Parking)
@@ -155,6 +187,12 @@ void can_router_periodic_100ms(void) {
         if (s_current_state.tpms.valid) {
             hu_protocol_send_tpms(&s_current_state.tpms);
         }
+    }
+
+    // Retransmit cached active alerts summary every 60 seconds (600 * 100ms ticks)
+    if (++s_alerts_periodic_timer >= 600) {
+        s_alerts_periodic_timer = 0;
+        hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
     }
 
     // Send keep-alive packet to keep Android HU comms link alive

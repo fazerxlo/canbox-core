@@ -171,7 +171,7 @@ Before declaring any feature complete, verify that every layer in the chain has 
 
 ### Step 1: Model Domain Data in Canonical State (`include/core/can_router.h`)
 - Create or update the normalized, hardware-independent C structure representing the feature (e.g. `vehicle_doors_t`, `vehicle_climate_t`, `vehicle_tpms_t`, `vehicle_trip_t`, `vehicle_gear_t`).
-- Embed this struct into the master vehicle state structure [`vehicle_state_t`](file:///home/Fazer/git/canbox-core/include/core/can_router.h#L90-L125).
+- Embed this struct into the master vehicle state structure [`vehicle_state_t`](file://include/core/can_router.h#L90-L125).
 - Use canonical engineering units (e.g. 0.1 Bar for TPMS, 0.1 L/100km for fuel, degrees for steering angle, km/h for speed, bool for discrete states).
 
 ### Step 2: Implement Vehicle Profile Decoder (`src/profiles/`)
@@ -186,15 +186,15 @@ Before declaring any feature complete, verify that every layer in the chain has 
 ### Step 3: Implement Delta Routing & Frequency Throttling (`src/core/can_router.c`)
 - Add change detection comparing `s_current_state.your_feature` with `s_last_sent_state.your_feature`.
 - Decide dispatch class:
-  - **Class A (Event):** Place check inside [`can_router_process_can()`](file:///home/Fazer/git/canbox-core/src/core/can_router.c#L20). If changed, call `hu_protocol_send_your_feature(&s_current_state.your_feature)` and update `s_last_sent_state.your_feature`.
-  - **Class B/C/D (Throttled/Periodic):** Place check inside [`can_router_periodic_100ms()`](file:///home/Fazer/git/canbox-core/src/core/can_router.c#L78) with appropriate tick prescaler and deadbands.
+  - **Class A (Event):** Place check inside [`can_router_process_can()`](file://src/core/can_router.c#L20). If changed, call `hu_protocol_send_your_feature(&s_current_state.your_feature)` and update `s_last_sent_state.your_feature`.
+  - **Class B/C/D (Throttled/Periodic):** Place check inside [`can_router_periodic_100ms()`](file://src/core/can_router.c#L78) with appropriate tick prescaler and deadbands.
 
 ### Step 4: Declare Driver Interface & Implement Protocol Adapters
-1. Add function pointer to [`hu_protocol_driver_t`](file:///home/Fazer/git/canbox-core/include/protocols/hu_protocol_driver.h#L20-L36):
+1. Add function pointer to [`hu_protocol_driver_t`](file://include/protocols/hu_protocol_driver.h#L20-L36):
    ```c
    void (*send_your_feature)(const vehicle_your_feature_t *data);
    ```
-2. Add public dispatcher to [`hu_protocol.h`](file:///home/Fazer/git/canbox-core/include/protocols/hu_protocol.h) and [`hu_protocol.c`](file:///home/Fazer/git/canbox-core/src/protocols/hu_protocol.c):
+2. Add public dispatcher to [`hu_protocol.h`](file://include/protocols/hu_protocol.h) and [`hu_protocol.c`](file://src/protocols/hu_protocol.c):
    ```c
    void hu_protocol_send_your_feature(const vehicle_your_feature_t *data) {
        if (s_active_driver && s_active_driver->send_your_feature) {
@@ -324,9 +324,9 @@ Never run only a single environment (e.g. `-e native_test_runner`) and assume al
 All commands must exit with code `0`. Any compilation error, warning under `-Werror`, or linker error is an immediate blocker.
 
 ### 10.2 Header Dependency & Single-Source-of-Truth Gate
-- **Canonical Model Declaration:** All shared data models (`vehicle_<feature>_t`) MUST be declared in [`include/core/can_router.h`](file:///home/Fazer/git/canbox-core/include/core/can_router.h) and embedded in `vehicle_state_t` before any driver or adapter header references them.
+- **Canonical Model Declaration:** All shared data models (`vehicle_<feature>_t`) MUST be declared in [`include/core/can_router.h`](file://include/core/can_router.h) and embedded in `vehicle_state_t` before any driver or adapter header references them.
 - **Header Self-Containment:** Every header must be able to compile independently. Avoid forward-declaration assumptions or circular header dependencies.
-- **Synchronized Driver Interfaces:** Whenever adding a callback to [`hu_protocol_driver_t`](file:///home/Fazer/git/canbox-core/include/protocols/hu_protocol_driver.h):
+- **Synchronized Driver Interfaces:** Whenever adding a callback to [`hu_protocol_driver_t`](file://include/protocols/hu_protocol_driver.h):
   1. Add the function pointer to `hu_protocol_driver_t`.
   2. Add the public wrapper to `include/protocols/hu_protocol.h` and `src/protocols/hu_protocol.c`.
   3. Update **ALL** protocol driver structs (`g_hu_protocol_raise`, `g_hu_protocol_hiworld`, `g_hu_protocol_bagoo`). Unused/unimplemented drivers must be explicitly assigned `= NULL`.

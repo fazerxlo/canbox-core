@@ -74,3 +74,10 @@ bool vehicle_profile_reset_trip(uint8_t trip_index) {
     return false;
 }
 
+bool vehicle_profile_query_alerts(void) {
+    if (s_active_profile && s_active_profile->query_alerts) {
+        return s_active_profile->query_alerts();
+    }
+    return false;
+}
+

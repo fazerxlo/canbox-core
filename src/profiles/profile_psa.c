@@ -1,5 +1,6 @@
 #include "core/vehicle_profile.h"
 #include "profiles/peugeot_407.h"
+#include <string.h>
 
 static inline uint16_t read_be16_local(const uint8_t *d) {
     return ((uint16_t)d[0] << 8) | (uint16_t)d[1];
@@ -309,13 +310,34 @@ static void psa_decode_radar_0x270_profile(const can_frame_t *frame, vehicle_sta
     state->radar.updated = true;
 }
 
+static psa_journal_iso_tp_t s_journal_ctx;
+
+static void psa_decode_alert_message_0x1a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_decode_alert_message_0x1a1(frame->data, frame->dlc, &state->alerts.realtime_alert);
+    state->alerts.realtime_updated = true;
+}
+
+static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    uint16_t codes[CANBOX_MAX_ACTIVE_ALERTS] = {0};
+    uint8_t count = 0;
+    if (psa_process_journal_0x120(&s_journal_ctx, frame->data, frame->dlc, codes, &count)) {
+        memcpy(state->alerts.active_codes, codes, sizeof(codes));
+        state->alerts.active_count = count;
+        state->alerts.journal_updated = true;
+    }
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
     { PSA_CAN_ID_STEERING_ANGLE,     psa_decode_steering_angle_0x0e6_profile },
     { PSA_CAN_ID_STALK_BUTTONS,      psa_decode_stalk_0x0f6 },
+    { PSA_CAN_ID_ALERT_JOURNAL,      psa_decode_alert_journal_0x120_profile },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
     { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
+    { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },
     { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
     { 0x0B6,                         psa_decode_engine_speed_0x0b6 },
     { 0x0E8,                         psa_decode_steering_angle_0x0e8 },
@@ -334,10 +356,21 @@ static const profile_can_rule_t s_psa_rules[] = {
 
 static void psa_init(void) {
     psa_stalk_init(NULL);
+    psa_journal_iso_tp_init(&s_journal_ctx);
 }
 
 static bool psa_reset_trip(uint8_t trip_index) {
     return psa_trip_send_reset(trip_index) == HAL_STATUS_OK;
+}
+
+static bool psa_query_alerts(void) {
+    can_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.id = PSA_CAN_ID_ALERT_QUERY;
+    frame.dlc = 8;
+    frame.data[0] = 0x01;
+    frame.data[1] = 0x01;
+    return hal_can_send(&frame) == HAL_STATUS_OK;
 }
 
 const vehicle_profile_t g_profile_psa = {
@@ -347,5 +380,6 @@ const vehicle_profile_t g_profile_psa = {
     .rules        = s_psa_rules,
     .rule_count   = sizeof(s_psa_rules) / sizeof(s_psa_rules[0]),
     .init         = psa_init,
-    .reset_trip   = psa_reset_trip
+    .reset_trip   = psa_reset_trip,
+    .query_alerts = psa_query_alerts
 };

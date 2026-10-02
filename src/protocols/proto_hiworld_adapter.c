@@ -6,6 +6,7 @@
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
 #include <stdbool.h>
+#include <string.h>
 
 static hiworld_connection_ctx_t s_hw_conn_ctx;
 static bool s_hiworld_initialized = false;
@@ -56,6 +57,9 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
                 }
             }
         }
+    } else if (packet->cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY) {
+        /* Head Unit requested alert/diagnostic log refresh (forwardType 0x2F) */
+        hu_protocol_send_alerts_summary(NULL, 0); /* will trigger retransmission in adapter */
     }
 }
 
@@ -344,6 +348,56 @@ static void hiworld_send_radar(const vehicle_radar_t *radar) {
     }
 }
 
+static uint16_t s_cached_alert_codes[CANBOX_MAX_ACTIVE_ALERTS];
+static uint8_t  s_cached_alert_count = 0;
+
+static void hiworld_send_alert_single(uint16_t alert_code) {
+    uint8_t payload[2];
+    payload[0] = (uint8_t)(alert_code >> 8);
+    payload[1] = (uint8_t)(alert_code & 0xFF);
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_WARNING_INFO, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_alerts_summary(const uint16_t *alert_codes, uint8_t count) {
+    if (alert_codes != NULL) {
+        if (count > CANBOX_MAX_ACTIVE_ALERTS) {
+            count = CANBOX_MAX_ACTIVE_ALERTS;
+        }
+        s_cached_alert_count = count;
+        if (count > 0) {
+            memcpy(s_cached_alert_codes, alert_codes, count * sizeof(uint16_t));
+        }
+    } else {
+        /* Retransmit cached summary */
+        count = s_cached_alert_count;
+        alert_codes = s_cached_alert_codes;
+    }
+
+    uint8_t payload[24] = {0};
+    /* D0..D2: Reserved = 0x00 */
+    /* D3: mNumber = count */
+    payload[3] = count;
+
+    for (uint8_t i = 0; i < count; i++) {
+        uint8_t offset = (uint8_t)(4 + (i * 2));
+        payload[offset]     = (uint8_t)(alert_codes[i] >> 8);
+        payload[offset + 1] = (uint8_t)(alert_codes[i] & 0xFF);
+    }
+
+    uint8_t tx_buf[36];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_WARNING_INFO, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -361,5 +415,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_trip2 = hiworld_send_trip2,
     .send_radar = hiworld_send_radar,
     .send_reverse = NULL,
+    .send_alert_single = hiworld_send_alert_single,
+    .send_alerts_summary = hiworld_send_alerts_summary,
     .send_heartbeat = hiworld_send_heartbeat,
 };

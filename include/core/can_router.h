@@ -127,6 +127,29 @@ typedef struct {
 
 typedef vehicle_radar_t radar_state_t;
 
+#define CANBOX_MAX_ACTIVE_ALERTS 10
+
+typedef struct {
+    uint16_t alert_code;    /* 16-bit Hiworld alert code (mOriginalType) */
+    uint16_t can_alarm_id;  /* 15-bit PSA CAN alarm ID */
+    uint8_t  severity;      /* 0=Info, 1=Minor, 2=Service, 3=Stop */
+    uint8_t  chime_id;      /* Acoustic chime index (0..15) */
+    uint8_t  door_mask;     /* Door / opening bitfield */
+    uint8_t  param_detail;  /* Parameter detail (wheel index, bulb index, etc.) */
+    bool     is_active;     /* true if alert currently triggered */
+    bool     display_req;   /* true if modal dialog popup requested */
+} vehicle_alert_item_t;
+
+typedef struct {
+    vehicle_alert_item_t realtime_alert;
+    uint16_t             active_codes[CANBOX_MAX_ACTIVE_ALERTS];
+    uint8_t              active_count;     /* 0..10 */
+    bool                 realtime_updated; /* Single alert state changed */
+    bool                 journal_updated;  /* Summary list changed */
+} vehicle_alerts_t;
+
+typedef vehicle_alerts_t alerts_state_t;
+
 typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
@@ -135,6 +158,7 @@ typedef struct {
     vehicle_tpms_t           tpms;
     vehicle_trip_t           trip;
     vehicle_radar_t          radar;
+    vehicle_alerts_t         alerts;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;
@@ -156,6 +180,7 @@ void can_router_process_uart_byte(uint8_t byte);
 void can_router_periodic_100ms(void);
 const vehicle_state_t *can_router_get_state(void);
 bool can_router_reset_trip(uint8_t trip_index);
+bool can_router_query_alert_journal(void);
 
 #ifdef __cplusplus
 }
