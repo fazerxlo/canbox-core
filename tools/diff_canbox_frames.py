@@ -38,8 +38,8 @@ HIWORLD_CMD_NAMES = {
     0x31: "HVAC_STATUS",
     0x32: "FRONT_RADAR",
     0x33: "REAR_RADAR",
-    0x41: "COMPASS_STATUS",
-    0x42: "SPEED_STATUS",
+    0x41: "PARKING_RADAR",
+    0x42: "ALERTS_WARNINGS",
     0x71: "FEATURE_CONFIG_1",
     0x72: "FEATURE_CONFIG_2",
     0x76: "PANEL_KEYS",
@@ -792,6 +792,12 @@ def main():
         help="Filter interesting CAN IDs in hex (e.g. -c 1D0 1E3 or -c 1d0,12d)"
     )
     parser.add_argument(
+        "--preset",
+        dest="preset",
+        choices=["radar", "hvac", "doors", "swc", "trip", "tpms", "alerts", "bsi_config"],
+        help="Quick PSA 407 preset for CAN IDs and serial prefixes (radar, hvac, doors, swc, trip, tpms, alerts, bsi_config)"
+    )
+    parser.add_argument(
         "-p", "--prefix", "--prefixes", "--canbox-prefix",
         dest="prefixes",
         nargs="+",
@@ -846,8 +852,28 @@ def main():
         print("\n[ERROR] Log file is required. Provide path as first argument or via -l / --log.")
         sys.exit(1)
 
-    can_ids = parse_can_id_arg(args.can_ids)
-    prefixes = parse_prefix_arg(args.prefixes)
+    PSA_PRESETS = {
+        "radar": (["0E1", "260"], ["41"]),
+        "hvac": (["1D0", "1E3", "0F6"], ["31"]),
+        "doors": (["036", "0F6"], ["12"]),
+        "swc": (["228", "128"], ["11", "21", "22"]),
+        "trip": (["221", "261", "2A1", "0B6", "0F6"], ["13", "14", "15"]),
+        "tpms": (["3A1", "348", "1E1"], ["18", "66"]),
+        "alerts": (["1A1", "120", "168"], ["42"]),
+        "bsi_config": (["39B", "2A8"], ["71", "72", "76", "79"]),
+    }
+
+    can_ids_arg = args.can_ids
+    prefixes_arg = args.prefixes
+    if args.preset and args.preset in PSA_PRESETS:
+        preset_cids, preset_prefs = PSA_PRESETS[args.preset]
+        if not can_ids_arg:
+            can_ids_arg = preset_cids
+        if not prefixes_arg:
+            prefixes_arg = preset_prefs
+
+    can_ids = parse_can_id_arg(can_ids_arg)
+    prefixes = parse_prefix_arg(prefixes_arg)
     use_color = (not args.no_color) and sys.stdout.isatty()
 
     try:

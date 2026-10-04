@@ -11,6 +11,7 @@ You are acting as an embedded systems software engineer specializing in automoti
 * **Lock-Free SPSC:** All producer-consumer queues must use power-of-two capacities and the bitwise-masked `ring_buffer_t` implementation. Never introduce mutexes or RTOS primitives into the core layer.
 * **Non-Destructive Testing:** Never write code that blocks indefinitely (`while (!flag);`) in common paths unless running inside hardware-specific HAL drivers. Desktop targets must run non-blocking loops.
 * **Boundary & Arithmetic Safety:** Always boundary-check `frame->dlc` prior to array indexing. Unpack multi-byte integers using `read_be16()`, `read_le16()`, `read_be32()`, or `read_le32()` helpers; never cast byte pointers directly to multi-byte structures.
+* **Strict CAN2004 Proven Data Only (Zero Guesses / Zero Unverified Placeholders):** The primary target vehicle architecture is Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps). The AI must strictly use verified, documented CAN2004 data provided by the user. The user provides verified documentation before implementation. Never guess signals, never implement speculative placeholder decoders, and never import or mix CAN2010 / AEE2010 signal definitions (such as radar on `0x260`/`0x270` or unconfirmed SAS frames). If a CAN frame or signal mapping is not explicitly proven or provided by the user, mark it as pending in `doc/TODO_PROGRESS.md` and DO NOT write decoder code for it.
 * **Path Privacy in Documentation:** Never include absolute system paths (e.g. `/home/...` or `file:///home/...`) in documentation files (`doc/*.md` or markdown files). Use relative repository paths for internal files. For external files outside the workspace, only reference the filename or class name without local paths or links.
 
 ---
@@ -50,7 +51,12 @@ CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec
 
 When implementing functionality, the user will typically provide three sources of information:
 
-### 3.1 PSA / RT4 Firmware Reverse Engineering (CAN Bus Messages)
+### 3.1 PSA CAN2004 Reverse Engineering & Proven Ground Truth (CAN Bus Messages)
+* **User-Provided Verified Documentation as Mandatory Precondition:** The user provides verified documentation before implementation. Always wait for and base decoders strictly on verified documentation provided by the user before writing implementation code.
+* **CAN2004 vs CAN2010 Architectural Isolation:** Peugeot 407 operates strictly on PSA CAN2004 (AEE2004 Comfort Bus @ 125 kbps). Never mix CAN2010 / AEE2010 definitions into CAN2004 profile code:
+  - CAN ID `0x0E1` is the native CAN2004 parking radar (AAS) frame.
+  - CAN ID `0x260` on CAN2004 is `MSG_BSI_INF_PROFILS` (BSI User Profiles: Profile 1, Profile 2, Manufacturer; 8 bytes, 250 ms), NOT parking sensors (which only use `0x260` on CAN2010).
+* **Zero Unverified Placeholders:** Never implement placeholder decoders for unconfirmed CAN IDs (e.g. SAS steering angles, ABS pulses as steering). If a frame is unconfirmed, do not implement it in code; keep it marked as pending in `doc/TODO_PROGRESS.md`.
 * **Byte Ordering (Endianness):** PSA CAN frames typically use Motorola (Big-Endian) byte order for multi-byte telemetry (e.g. RPM, speed, mileage, temperatures). Pay strict attention to whether high bits/bytes arrive first.
 * **Bit Offset & Bitfield Indexing:** Disentangle MSB-0 vs LSB-0 numbering. Verify signal bit offsets against known constants (e.g., PSA RPM on `0x0B6` is `(data[0]<<8 | data[1]) >> 3`).
 * **Scale Factors & Offsets:** Watch for common PSA transformations:
@@ -100,15 +106,15 @@ Whenever a new feature is requested or reverse engineering documentation is prov
 ```
 
 ### Phase 1: Ingestion & Analysis
-Thoroughly inspect the provided RT4 CAN documentation, APK decompiled sources, and test scripts. Identify:
-1. Target vehicle CAN frame IDs, cycle periods, DLC, and signal bitfields.
+Thoroughly inspect the user-provided RT4/CAN2004 documentation, APK decompiled sources, and test scripts. Identify:
+1. Target vehicle CAN frame IDs, cycle periods, DLC, and signal bitfields (**MUST be strictly verified against user-provided CAN2004 documentation**; reject any unconfirmed or CAN2010 frames).
 2. Target Head Unit protocol, command IDs, and payload layouts.
 3. Relevant state variables and physical conversion formulas.
 
 ### Phase 2: Interactive Plan Presentation
 Before writing code, present a structured architectural plan in chat and **confirm alignment with the user**. The plan must contain:
 1. **Signal Mapping Table:**
-   - Source CAN Signal (ID, byte, bit range, formula, raw range).
+   - Source CAN Signal (ID, byte, bit range, formula, raw range, **user-provided CAN2004 documentation reference**).
    - Canonical State Representation (normalized field name, type, SI unit, sentinel handling).
    - Target HU Serial Packet (protocol, Cmd ID, byte offset, wire encoding).
 2. **Uplink Scope:** Details of telemetry sent from vehicle to Android HU.
@@ -159,9 +165,10 @@ To protect the 38,400 baud serial bus while guaranteeing display responsiveness:
 ## 6. Vehicle Profile & Protocol Checklist
 
 When adding or editing a car profile:
-1. Unpack multi-byte integers using `read_be16()`, `read_le16()`, etc. Never cast byte pointers directly.
-2. Boundary-check `frame->dlc` prior to array indexing.
-3. Update `vehicle_profile_id_t` in `include/core/vehicle_profile.h` and the registry table in `src/core/vehicle_profile_manager.c`.
-4. Add model index mappings in `raise_car_mapping.c` and `hiworld_car_mapping.c`.
-5. Keep profile decoders decoupled from protocol adapters—all inter-layer communication flows via the canonical state cache.
+1. Verify that all CAN IDs and signal bitfields match user-provided, documented CAN2004 frames. Zero unverified placeholders.
+2. Unpack multi-byte integers using `read_be16()`, `read_le16()`, etc. Never cast byte pointers directly.
+3. Boundary-check `frame->dlc` prior to array indexing.
+4. Update `vehicle_profile_id_t` in `include/core/vehicle_profile.h` and the registry table in `src/core/vehicle_profile_manager.c`.
+5. Add model index mappings in `raise_car_mapping.c` and `hiworld_car_mapping.c`.
+6. Keep profile decoders decoupled from protocol adapters—all inter-layer communication flows via the canonical state cache.
 
