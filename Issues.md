@@ -3,4 +3,7 @@
 - Fixed in `src/profiles/peugeot_407.c` (aligned 0x1D0 and 0x1E3 decoding) and `src/protocols/proto_hiworld_adapter.c`.
 - Verified with Unit Test Vector 9 in `test_peugeot_407.c`.
 
+2. [x] Full paths in documentation (RESOLVED)
+- Added strict constraint in `AGENTS.md` ("Path Privacy in Documentation") prohibiting absolute local paths in documentation.
+- Sanitized existing documentation files to remove local filesystem paths.
 

@@ -1,6 +1,6 @@
 # OpenCanbox Core: HU Feature Compatibility & Implementation Progress
 
-**Target Head Unit Document:** [`/home/Fazer/git/QF_Canbus_system/README.md`](file:///home/Fazer/git/QF_Canbus_system/README.md)  
+**Target Head Unit Document:** `QF_Canbus_system`  
 **Target Head Unit Application:** `com.qf.vehicle` (QF Canbus System / Peugeot Hiworld `wc` Driver)  
 **Firmware Core Project:** `canbox-core` (Pure C99 Embedded Automotive Firmware)  
 **Primary Vehicle Profile:** Peugeot 407 (PSA CAN2004 Comfort Bus @ 125 kbps)  

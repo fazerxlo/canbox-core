@@ -134,42 +134,67 @@ Used when a single fault or warning triggers while driving:
 ---
 
 # 4. Master Signal & Alert ID Mapping Table
+The Android Head Unit (`PeugeotDataController.getWarningString`) incorporates a sparse-switch for Command `0x42` that expects canonical Hiworld alert codes (`PSA_HIWORLD_ALERT_*`). In `canbox-core`, `psa_can_alarm_id_to_hiworld_code()` maps native PSA CAN Alarm IDs to their corresponding Hiworld wire codes:
 
-| Fault Condition | PSA CAN ID (`0x1A1`/`0x120`) | Hiworld Code (`mOriginalType`) | Android String Res | Description |
+| Fault Condition / Event | PSA CAN ID (`0x1A1`/`0x120`) | Hiworld Wire Code (`mOriginalType`) | Android Localized Resource | Canonical RT4 / Car Display Text |
 |---|---|---|---|---|
-| **Low Fuel Level** | `0x000D` | `0x0001` | `vehicle_warning_145` | Low fuel reserve reached |
-| **Engine Overheat (STOP)** | `0x0001` | `0x0003` | `vehicle_warning_4` | Engine coolant temperature too high: STOP |
-| **Engine Oil Pressure Low (STOP)** | `0x0002` | `0x0004` | `vehicle_warning_5` | Engine oil pressure low: STOP |
-| **Brake System Failure (STOP)** | `0x000F` | `0x0005` | `vehicle_warning_6` | Braking system failure: Brake fluid low |
-| **Handbrake Applied** | `0x000C` | `0x0008` | `vehicle_warning_42` | Handbrake engaged while driving |
-| **Remote Key Battery Flat** | `0x00DF` | `0x000A` | `vehicle_warning_10` | Keyfob battery flat |
-| **Directional Headlamps Faulty** | `0x0195` | `0x000B` | `vehicle_warning_11` | Adaptive swiveling xenon headlights fault |
-| **Battery Charge / Alternator** | `0x006B` | `0x000D` | `vehicle_warning_13` | Alternator charging fault |
-| **ESP / ASR System Faulty** | `0x006A` | `0x000F` | `vehicle_warning_15` | Dynamic stability control unavailable |
-| **Front Left Door Open** | `0x0074` | `0x0011` | `vehicle_warning_17` | FL door open |
-| **Front Right Door Open** | `0x0085` | `0x0012` | `vehicle_warning_18` | FR door open |
-| **Rear Door Open** | `0x0084` / `0x0081` | `0x0013` | `vehicle_warning_19` | Rear door open |
-| **Boot Open** | `0x0080` | `0x0014` | `vehicle_warning_20` | Boot / tailgate open |
-| **Service Overdue** | `0x0061` | `0x0061` | `vehicle_warning_97` | Service maintenance overdue |
-| **DPF / Particle Filter Clogging** | `0x006F` | `0x0064` | `vehicle_warning_100` | FAP / DPF soot clogging risk |
-| **Automatic Gearbox Faulty** | `0x0073` / `0x0202` | `0x0067` | `vehicle_warning_103` | Automatic / EGS gearbox fault |
-| **Depollution System Faulty** | `0x006E` | `0x0068` | `vehicle_warning_104` | Anti-pollution system fault |
-| **ABS Braking System Faulty** | `0x006C` | `0x0069` | `absError` | Anti-lock braking system failure |
-| **Electronic Brakeforce Distribution** | `0x0008` (param) | `0x006A` | `vehicle_warning_106` | EBD / REF failure |
-| **Suspension Fault (Max 90 km/h)** | `0x009E` | `0x006B` | `SuspensionError` | AMVAR / Hydractive emergency mode |
-| **Suspension System Error** | `0x0072` / `0x00D8` | `0x006C` | `SuspensionSystemError` | Suspension electronic error |
-| **Automatic Headlamp Control Faulty** | `0x007F` | `0x0081` | `vehicle_warning_129` | Light sensor / auto headlamp error |
-| **Automatic Wiping Faulty** | `0x00CB` | `0x0083` | `vehicle_warning_131` | Rain sensor error |
-| **TPMS Under-inflated (FL/FR/RR/RL)**| `0x0004` | `0x009A`..`0x009D` | `vehicle_warning_154`..`157` | Tire pressure under-inflated |
-| **TPMS Puncture (FL/FR/Rear)** | `0x0005` | `0x009E`..`0x00A0` | `vehicle_warning_158`..`160` | Sudden pressure loss / Puncture |
-| **Sidelight Bulb Faulty** | `0x00D3` | `0x00E3` | `vehicle_warning_227` | Sidelight bulb blown |
-| **Dipped Beam Bulb Faulty** | `0x013D` | `0x00E5` | `vehicle_warning_229` | Low beam bulb blown |
-| **Brake Light Bulb Faulty** | `0x00CE` / `0x0134` | `0x00E7` | `vehicle_warning_231` | Brake light bulb blown |
-| **Reversing Lamp Bulb Faulty** | `0x0092` / `0x0095` | `0x00E8` | `vehicle_warning_232` | Reverse / turn indicator bulb blown |
-| **Airbags / Pretensioners Faulty** | `0x0078` | `0x00F0` | `vehicle_warning_240` | Airbag ECU fault |
-| **Driver Seatbelt Unfastened** | `0x000B` | `0x012F` | `vehicle_warning_303` | Driver seatbelt unbuckled |
-| **Passenger Seatbelt Unfastened** | `0x013A` | `0x0130` | `vehicle_warning_304` | Passenger seatbelt unbuckled |
-| **Electronic Immobilizer Fault** | `0x0086` | `0x01FA` | `vehicle_warning_506` | Transponder key unlearned / fault |
+| **Diagnosis In Progress** | `0x00F0` (240) | `0x00F0` | Default branch | **Diagnosis in progress...** |
+| **Braking System Faulty** | `0x0008` (8) | `0x0008` (`PSA_HIWORLD_ALERT_HANDBRAKE`) | `brakingError` (`0x7f0b03ce`) | **Braking system faulty** |
+| **Brake System Failure (STOP)** | `0x000F` (15) | `0x0008` | `brakingError` | **Brake system faulty** |
+| **Automatic Screen Wipe Deactivated** | `0x0139` (313) | `0x0083` (`PSA_HIWORLD_ALERT_AUTO_WIPERS`) | `autoWiper` (`0x7f0b033b`) | **Automatic screen wipe deactivated** |
+| **Automatic Headlamp Lighting Activated**| `0x0130` (304) | `0x0081` (`PSA_HIWORLD_ALERT_AUTO_LIGHTS`) | `autoLight` (`0x7f0b0337`) | **Automatic headlamp lighting activated** |
+| **Child Safety Deactivated** | `0x0131` (305) | `0x0131` | Default branch | **Child safety deactivated** |
+| **Low Fuel Level** | `0x0138` (312) / `0x000D` | `0x0001` (`PSA_HIWORLD_ALERT_LOW_FUEL`) | `lowFuel` (`0x7f0b07ee`) | **Fuel level low** |
+| **Airbags / Pretensioners Faulty** | `0x0078` (120) | `0x00F0` (`PSA_HIWORLD_ALERT_AIRBAG`) | `airbagFault` (`0x7f0b0244`) | **Airbag(s) or pretensioner seat belt(s) faulty** |
+| **Depollution System Faulty** | `0x007E` / `0x007F` / `0x006E` | `0x0068` (`PSA_HIWORLD_ALERT_ANTIPOLLUTION`) | `depollutionFault` (`0x7f0b0635`) | **Depollution system faulty** |
+| **Electronic Anti-theft Faulty** | `0x0083` (131) | `0x0083` | Default branch | **Electronic anti-theft faulty** |
+| **Tyre Pressures Not Monitored** | `0x00E5` (229) / `0x00C9` | `0x00A0` (`PSA_HIWORLD_ALERT_TPMS_UNDER_FL`) | `tpmsUnder` | **Tyre pressure(s) not monitored** |
+| **Diagnosis Completed** | `0x00F1` (241) | `0x00F1` | Default branch | **Diagnostic completed** |
+| **Engine Overheat (STOP)** | `0x0001` (1) | `0x0001` | `getPsaAlertString(0x1)` | **Engine temperature too high** |
+| **Engine Oil Pressure Low (STOP)** | `0x0002` (2) | `0x0002` | `getPsaAlertString(0x2)` | **Warning, engine oil pressure** |
+| **Check Engine Oil Level** | `0x0003` (3) | `0x0003` | `getPsaAlertString(0x3)` | **Check engine oil level** |
+| **Tyre Pressure(s) Low** | `0x0004` (4) | `0x0004` | `getPsaAlertString(0x4)` | **Tyre pressure(s) low** |
+| **Tyre Puncture Detected (STOP)** | `0x0005` (5) | `0x0005` | `getPsaAlertString(0x5)` | **Tyre puncture(s) detected** |
+| **Risk of Black Ice** | `0x000A` (10) | `0x000A` | `getPsaAlertString(0xA)` | **Risk of black ice** |
+| **Driver Seatbelt Not Fastened** | `0x000B` (11) | `0x000B` | `getPsaAlertString(0xB)` | **Driver's seatbelt not fastened** |
+| **Handbrake Applied (In Motion)** | `0x000C` (12) | `0x000C` | `getPsaAlertString(0xC)` | **Handbrake on !** |
+| **Power Steering Faulty** | `0x000E` (14) | `0x000E` | `getPsaAlertString(0xE)` | **Power steering faulty** |
+| **Brake Pads Worn** | `0x0067` (103) | `0x0067` | `getPsaAlertString(0x67)` | **Brake pads worn** |
+| **ESP System Deactivated** | `0x0069` (105) | `0x0069` | `getPsaAlertString(0x69)` | **ESP system deactivated.** |
+| **ESP / ASR System Faulty** | `0x006A` (106) | `0x006A` | `getPsaAlertString(0x6A)` | **ESP/ASR system faulty** |
+| **Battery Charge / Alternator** | `0x006B` (107) | `0x006B` | `getPsaAlertString(0x6B)` | **Battery charge faulty** |
+| **ABS Braking System Faulty** | `0x006C` (108) | `0x006C` | `getPsaAlertString(0x6C)` | **ABS braking system faulty** |
+| **DPF / Particle Filter Clogging** | `0x006F` (111) | `0x006F` | `getPsaAlertString(0x6F)` | **Risk of particle filter clogging** |
+| **Suspension Faulty** | `0x0072` (114) | `0x0072` | `getPsaAlertString(0x72)` | **Suspension faulty** |
+| **Automatic Gearbox Faulty** | `0x0073` (115) | `0x0073` | `getPsaAlertString(0x73)` | **Gearbox faulty** |
+| **Front Left Door Open** | `0x0074` (116) | `0x0074` | `getPsaAlertString(0x74)` | **Front left hand door open** |
+| **Battery Low** | `0x0075` (117) | `0x0075` | `getPsaAlertString(0x75)` | **Battery low** |
+| **Roof Screen Not Deployed** | `0x0076` (118) | `0x0076` | `getPsaAlertString(0x76)` | **Impossible to move roof: screen not deployed.** |
+| **Boot Open** | `0x0080` (128) | `0x0080` | `getPsaAlertString(0x80)` | **Boot open** |
+| **Rear Right Door Open** | `0x0081` (129) | `0x0081` | `getPsaAlertString(0x81)` | **Rear right hand door open** |
+| **Bonnet Open** | `0x0083` (131) | `0x0083` | `getPsaAlertString(0x83)` | **Bonnet open** |
+| **Rear Left Door Open** | `0x0084` (132) | `0x0084` | `getPsaAlertString(0x84)` | **Rear left hand door open** |
+| **Front Right Door Open** | `0x0085` (133) | `0x0085` | `getPsaAlertString(0x85)` | **Front right hand door open** |
+| **Immobiliser Faulty** | `0x0086` (134) | `0x0086` | `getPsaAlertString(0x86)` | **Immobiliser faulty** |
+| **Speed Control System Faulty** | `0x0087` (135) | `0x0087` | `getPsaAlertString(0x87)` | **Speed control system faulty** |
+| **More Than One Door Open** | `0x009C` (156) | `0x009C` | `getPsaAlertString(0x9C)` | **More than one door open.** |
+| **Suspension Fault (Max 90 km/h)** | `0x009E` (158) | `0x009E` | `getPsaAlertString(0x9E)` | **Suspension faulty max. speed : 90 km/h.** |
+| **Rain Sensor Faulty** | `0x00CB` (203) | `0x00CB` | `getPsaAlertString(0xCB)` | **Rain sensor faulty** |
+| **Screen Washer Fluid Low** | `0x00D0` (208) | `0x00D0` | `getPsaAlertString(0xD0)` | **Screen washer fluid level low** |
+| **Handbrake Faulty** | `0x00DE` (222) | `0x00DE` | `getPsaAlertString(0xDE)` | **Handbrake faulty.** |
+| **Remote Key Battery Flat** | `0x00DF` (223) | `0x00DF` | `getPsaAlertString(0xDF)` | **Remote control battery flat** |
+| **Sidelights Left On** | `0x00E0` (224) | `0x00E0` | `getPsaAlertString(0xE0)` | **Sidelights left on** |
+| **Parking Assistance Faulty** | `0x00E3` (227) | `0x00E3` | `getPsaAlertString(0xE3)` | **Parking assistance system faulty** |
+| **Ignition Key Left In** | `0x00E5` (229) | `0x00E5` | `getPsaAlertString(0xE5)` | **Ignition key left in** |
+| **ECO Mode Activated** | `0x00EF` (239) | `0x00EF` | `getPsaAlertString(0xEF)` | **ECO activated.** |
+| **Stop Warning** | `0x00F7` (247) | `0x00F7` | `getPsaAlertString(0xF7)` | **Stop** |
+| **Max Speed 40 km/h** | `0x00F8` (248) | `0x00F8` | `getPsaAlertString(0xF8)` | **Max speed : 40 km/h** |
+| **Max Speed 10 km/h** | `0x00F9` (249) | `0x00F9` | `getPsaAlertString(0xF9)` | **Max speed : 10 km/h** |
+| **Stop & Start Activated** | `0x01F5` (501) | `0x01F5` | `getPsaAlertString(0x1F5)` | **Stop & Start activated.** |
+| **Use Stop & Start** | `0x01F6` (502) | `0x01F6` | `getPsaAlertString(0x1F6)` | **Use Stop & Start.** |
+| **Stop & Start Faulty** | `0x01F7` (503) | `0x01F7` | `getPsaAlertString(0x1F7)` | **STOP - START system faulty.** |
+| **Stop & Start Available** | `0x01FE` (510) | `0x01FE` | `getPsaAlertString(0x1F8)` | **Stop & Start available.** |
+| **Roof Speed Too High** | `0x0222` (546) | `0x0222` | `getPsaAlertString(0x222)` | **Operation of roof impossible : speed too high.** |
 
 ---
 

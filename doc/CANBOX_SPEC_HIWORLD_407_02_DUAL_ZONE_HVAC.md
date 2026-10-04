@@ -134,13 +134,13 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 | Byte   | Bit    | Signal Name                        | Value / Encoding             |
 +--------+--------+------------------------------------+------------------------------+
 | Byte 0 | Bit 7  | RECIRC_STATUS (Recirculation)      | 1 = Cabin recirc active      |
-|        | Bit 4  | AC_COMPRESSOR                      | 1 = A/C compressor ON        |
-|        |        |                                    |   (bench-verified; RT4 reads |
-|        |        |                                    |    bit 6 as AC_OFF in demand |
-|        |        |                                    |    direction)                |
+|        | Bit 4  | AQS_AUTO_INTAKE                    | 1 = Auto Air Intake (AQS)    |
+|        |        |                                    |   (bench-verified; 0x15=Auto |
+|        |        |                                    |    intake, 0x05=Fresh,       |
+|        |        |                                    |    0x85=Recirc)              |
 |        | Bit 3  | AUTO_BLOWER (both bits 3+2 = AUTO) | 0x0C = AUTO mode active      |
-|        | Bit 2  | INTAKE_EXPLICIT                    | 1 = explicit Fresh/Recirc    |
-|        | Bit 1  | INTAKE_NOTIFY (one-shot)           | 1 = MFD popup trigger        |
+|        | Bit 2  | BASELINE_FLAG / DISTRIBUTION       | Always 1 (0x04) in dual setup|
+|        | Bit 1  | INTAKE_NOTIFY (one-shot)           | 1 = MFD popup trigger pulse  |
 |        | Bit 0  | DUAL_ACTIVE                        | 1 = Dual-zone independent    |
 +--------+--------+------------------------------------+------------------------------+
 | Byte 1 | Bit 7  | UNFROST_FRONT                      | 1 = Front demist active      |
@@ -166,13 +166,14 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 
 | Byte 0 value | Meaning |
 |:---:|:---|
-| `0x1C` | AUTO + A/C ON + Mono (bits 3+2+4) |
-| `0x1D` | AUTO + A/C ON + Dual |
-| `0x11` | Manual implicit fresh + Mono |
-| `0x05` | Explicit fresh + A/C OFF + Mono |
-| `0x85` | Explicit recirc + A/C OFF + Mono |
-| `0x87` | Explicit recirc + intake notify (one-shot popup) |
-| `0x07` | Explicit fresh + intake notify (one-shot popup) |
+| `0x1C` | AUTO blower + Auto intake + Mono (bits 3+2+4) |
+| `0x1D` | AUTO blower + Auto intake + Dual (bits 3+2+4+0) |
+| `0x15` | Manual blower + Auto intake (AQS) + Dual (bits 4+2+0) |
+| `0x05` | Manual blower + Fresh air + Dual (bits 2+0) |
+| `0x85` | Manual blower + Cabin recirc + Dual (bits 7+2+0) |
+| `0x87` | Recirc + intake notify pulse (one-shot popup) |
+| `0x17` | Auto intake + intake notify pulse (one-shot popup) |
+| `0x07` | Fresh air + intake notify pulse (one-shot popup) |
 
 ---
 

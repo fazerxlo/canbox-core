@@ -17,7 +17,7 @@ Every message sent from the CANbox to the HU uses the **Hiworld 5AA5 protocol fr
 
 * **Header (SOF):** `0x5A 0xA5`
 * **Length (`Len`):** `0x0C` (12 data bytes `D0` .. `D11`)
-* **Command ID:** `0x31` ([`PeugeotDataDefine$Handle.CarAcState`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataDefine$Handle.smali#L22))
+* **Command ID:** `0x31` ([`PeugeotDataDefine$Handle.CarAcState`](#L22))
 * **Payload Offset:** Data starts at **array index 4** (`D0 = packet[4]`)
 * **Total Frame Size:** 17 bytes (2 header + 1 length + 1 command ID + 12 data + 1 checksum)
 
@@ -86,7 +86,7 @@ Data Byte 0 (packet[4]) Bitfield:
   * `0x01` = A/C compressor ON
   * `0x00` = A/C compressor OFF
 
-### Head Unit Smali Verification ([`PeugeotDataParser.smali#L4042-L4060`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L4042-L4060)):
+### Head Unit Smali Verification ([`PeugeotDataParser.smali#L4042-L4060`](#L4042-L4060)):
 ```smali
 aget-byte v1, p1, p0       # v1 = packet[4]
 const/4 v7, 0x2
@@ -133,7 +133,7 @@ Data Byte 4 (packet[8]):
 | **`0x0E`** | 14 | **Windshield + Face + Floor** | `mWindUp` + `mWindParallel` + `mWindDown` |
 | `0x00` (or other) | 0 | None / Auto default | All direction booleans `false` |
 
-### Head Unit Smali Verification ([`PeugeotDataParser.smali#L4174-L4328`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L4174-L4328)):
+### Head Unit Smali Verification ([`PeugeotDataParser.smali#L4174-L4328`](#L4174-L4328)):
 
 #### Right (Passenger) Airflow Parsing:
 ```smali

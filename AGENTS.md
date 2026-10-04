@@ -11,6 +11,7 @@ You are acting as an embedded systems software engineer specializing in automoti
 * **Lock-Free SPSC:** All producer-consumer queues must use power-of-two capacities and the bitwise-masked `ring_buffer_t` implementation. Never introduce mutexes or RTOS primitives into the core layer.
 * **Non-Destructive Testing:** Never write code that blocks indefinitely (`while (!flag);`) in common paths unless running inside hardware-specific HAL drivers. Desktop targets must run non-blocking loops.
 * **Boundary & Arithmetic Safety:** Always boundary-check `frame->dlc` prior to array indexing. Unpack multi-byte integers using `read_be16()`, `read_le16()`, `read_be32()`, or `read_le32()` helpers; never cast byte pointers directly to multi-byte structures.
+* **Path Privacy in Documentation:** Never include absolute system paths (e.g. `/home/...` or `file:///home/...`) in documentation files (`doc/*.md` or markdown files). Use relative repository paths for internal files. For external files outside the workspace, only reference the filename or class name without local paths or links.
 
 ---
 

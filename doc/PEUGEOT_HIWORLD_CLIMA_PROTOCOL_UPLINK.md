@@ -8,9 +8,9 @@ This document details the reverse-engineered CAN communication protocol for Peug
 
 * **Supplier ID / Rule:** `WcVehicleDataRuleHead5aa5` (`canprovider_hiworld_5aa5`)
 * **Header / SOF:** `0x5A 0xA5`
-* **Parser:** [`PeugeotDataParser.smali`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali)
-* **Controller:** [`PeugeotDataController.smali`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataController.smali)
-* **Definitions:** [`PeugeotDataDefine.smali`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataDefine.smali)
+* **Parser:** `PeugeotDataParser.smali`
+* **Controller:** `PeugeotDataController.smali`
+* **Definitions:** `PeugeotDataDefine.smali`
 
 ### Frame Layout
 All frames follow the standard Hiworld `5A A5` frame format:
@@ -25,7 +25,7 @@ All frames follow the standard Hiworld `5A A5` frame format:
 | `4+N` | Checksum | `(sum(Byte[1 .. 3+N]) - 1) & 0xFF` |
 
 ### Checksum Algorithm
-Implemented in [`WcVehicleDataRuleHead5aa5.calCheckSum(...)`](file:///home/Fazer/git/QF_Canbus_system/smali_classes2/com/qf/vehicle/supplier/wc/WcVehicleDataRuleHead5aa5.smali#L44-L75):
+Implemented in [`WcVehicleDataRuleHead5aa5.calCheckSum(...)`](#L44-L75):
 ```java
 byte calCheckSum(byte[] packet, int startOffset, int endOffset) {
     int sum = 0;
@@ -43,14 +43,14 @@ byte calCheckSum(byte[] packet, int startOffset, int endOffset) {
 In PSA / Peugeot systems, temperature synchronization (Mono/Dual) is controlled via the **SYNC** function.
 
 ### A. Sending the Command (Headunit -> CAN Box)
-* **Command ID:** `0x3B` ([`PeugeotDataDefine$Command.ForwardAcSetting`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataDefine$Command.smali#L18))
+* **Command ID:** `0x3B` ([`PeugeotDataDefine$Command.ForwardAcSetting`](#L18))
 * **Length:** `0x02`
 * **Data Byte 0 (Control Function):** `0x0F` (15 decimal)
 * **Data Byte 1 (Value):**
   * `0x01` = **Mono / Sync ON** (Passenger temperature follows driver)
   * `0x00` = **Dual / Sync OFF** (Independent left & right temperatures)
 
-#### Smali Logic ([`PeugeotDataParser.smali#L305-L322`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L305-L322)):
+#### Smali Logic ([`PeugeotDataParser.smali#L305-L322`](#L305-L322)):
 ```smali
 :pswitch_3
 const/16 v0, 0xf          # Function code 0x0F
@@ -78,11 +78,11 @@ aput-byte p2, v1, v2      # Data[1] = inverted sync bit
 ---
 
 ### B. Receiving / Reading Status (CAN Box -> Headunit)
-* **Command ID:** `0x31` ([`PeugeotDataDefine$Handle.CarAcState`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataDefine$Handle.smali#L22))
+* **Command ID:** `0x31` ([`PeugeotDataDefine$Handle.CarAcState`](#L22))
 * **Offset:** Data Byte 0 (Byte 4 of overall packet)
 * **Bit Position:** Bit 2 (`0x04`)
 
-#### Smali Logic ([`PeugeotDataParser.smali#L4042-L4061`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L4042-L4061)):
+#### Smali Logic ([`PeugeotDataParser.smali#L4042-L4061`](#L4042-L4061)):
 ```smali
 aget-byte v1, p1, p0       # Data Byte 0
 const/4 v7, 0x2
@@ -119,7 +119,7 @@ iput-boolean v1, v0, Lcom/qf/vehicle/entity/AcState;->mSync:Z
 | `0x0F` (15) | `:pswitch_1` | **Wind Parallel** (Face / Center vents) | `0x09` | `mWindParallel ^ 1` (`0x01` / `0x00`) |
 | `0x10` (16) | `:pswitch_0` | **Wind Down** (Floor / Footwell) | `0x0A` | `mWindDown ^ 1` (`0x01` / `0x00`) |
 
-#### Smali Logic ([`PeugeotDataParser.smali#L248-L304`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L248-L304)):
+#### Smali Logic ([`PeugeotDataParser.smali#L248-L304`](#L248-L304)):
 ```smali
 :pswitch_0                 # SettingType 0x10 (Wind Down)
 const/16 v0, 0xa           # Code 0x0A
@@ -166,7 +166,7 @@ aput-byte p2, v1, v2
 * **Command ID:** `0x31`
 * **Offset:** Data Byte 4 (Byte 8 of overall packet)
 
-#### Nibble Structure ([`PeugeotDataParser.smali#L4174-L4328`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L4174-L4328)):
+#### Nibble Structure ([`PeugeotDataParser.smali#L4174-L4328`](#L4174-L4328)):
 * **Bits 7..4 (Upper nibble):** Passenger / Right-side reported mode
 * **Bits 3..0 (Lower nibble):** Driver / Left-side reported mode
 
@@ -186,7 +186,7 @@ aput-byte p2, v1, v2
 
 ## 4. Summary of CAN Commands (Command ID `0x3B`)
 
-For reference, the complete command table implemented in [`PeugeotDataParser.forwardAcState`](file:///home/Fazer/git/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L180-L613) is:
+For reference, the complete command table implemented in [`PeugeotDataParser.forwardAcState`](#L180-L613) is:
 
 | Function Code (Data[0]) | Value (Data[1]) | Description |
 |:---:|:---:|:---|

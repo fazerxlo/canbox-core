@@ -198,7 +198,7 @@ void psa_decode_config_0x361(const uint8_t *data, uint8_t dlc) {
 
 ### 2.2 Changing Car Configuration Settings
 
-As verified in the reverse-engineered RT4 routine [`set_mmi_config`](file:///home/Fazer/Dokumenty/hu/ORGSW/CD_RT4-5_SW_8.31/doc/RT4_CAR_CONFIG.md#L143-L162), changing a configuration parameter requires transmitting `0x361` with the modified bits onto the CAN bus. The BSI receives this frame, commits the value to NVRAM, and begins broadcasting the updated state.
+As verified in the reverse-engineered RT4 routine [`set_mmi_config`](#L143-L162), changing a configuration parameter requires transmitting `0x361` with the modified bits onto the CAN bus. The BSI receives this frame, commits the value to NVRAM, and begins broadcasting the updated state.
 
 #### C99 Config Writer Function:
 ```c
