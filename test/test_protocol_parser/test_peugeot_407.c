@@ -1629,18 +1629,34 @@ void test_peugeot_407_hvac_hiworld(void) {
     TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
     TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
 
-    // Vector 7: 0x1E3 Recirculation ON, AC OFF (0x85)
+    // Vector 7: 0x1E3 Recirculation ON (0x85)
     const uint8_t can_1e3_v7[] = { 0x85, 0x30, 0x0D, 0x08, 0x00, 0x00, 0x01, 0x00 };
     psa_hvac_process_can_0x1e3(&climate, can_1e3_v7, 8);
     TEST_ASSERT_TRUE(climate.recirculate);
     TEST_ASSERT_FALSE(climate.aqs_auto);
-    TEST_ASSERT_FALSE(climate.ac_on);
 
     // Vector 8: 0x1E3 Fresh Air (0x05)
     const uint8_t can_1e3_v8[] = { 0x05, 0x30, 0x0D, 0x08, 0x00, 0x00, 0x01, 0x00 };
     psa_hvac_process_can_0x1e3(&climate, can_1e3_v8, 8);
     TEST_ASSERT_FALSE(climate.recirculate);
     TEST_ASSERT_FALSE(climate.aqs_auto);
+
+    // Vector 9: Provenance scenario from dump_2026-10-02_13-43-03.log:
+    // 0x1D0 sets Auto Air Intake (Byte 4 = 0x00) with manual fan speed 3 (Byte 2 = 0x02)
+    const uint8_t can_1d0_v9[] = { 0x08, 0x00, 0x02, 0x43, 0x00, 0x06, 0x11, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_v9, 8);
+    TEST_ASSERT_TRUE(climate.power_on);
+    TEST_ASSERT_TRUE(climate.ac_on);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+
+    // 0x1E3 arrives ~80ms later: Byte 0 = 0x15 (Bit 4 = Auto intake AQS, Bit 0 = Dual)
+    const uint8_t can_1e3_v9[] = { 0x15, 0x30, 0x06, 0x11, 0x40, 0x30, 0x02 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v9, 7);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+    TEST_ASSERT_TRUE(climate.ac_on);
+    TEST_ASSERT_TRUE(climate.dual_mode);
 }
 
 void test_peugeot_407_trip_reset_frames(void) {

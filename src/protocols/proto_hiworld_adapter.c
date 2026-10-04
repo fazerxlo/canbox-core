@@ -196,7 +196,7 @@ static void hiworld_send_climate(const vehicle_climate_t *climate) {
     payload[8] = 0x00;
     payload[9] = 0x00;
     payload[10] = 0x00;
-    payload[11] = (climate->outdoor_temp_raw != 0) ? climate->outdoor_temp_raw : 0x78;
+    payload[11] = (climate->outdoor_temp_raw != 0) ? climate->outdoor_temp_raw : 0xFF;
 
     uint8_t tx_buf[20];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_AC_STATE, payload, sizeof(payload), 

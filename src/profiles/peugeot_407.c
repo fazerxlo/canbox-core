@@ -192,6 +192,7 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
     if (!climate || !data || dlc < 7) return;
 
     climate->power_on = (data[0] != 0xA8);
+    climate->ac_on = climate->power_on;
 
     uint8_t fan = data[2] & 0x0F;
     if (fan == 0x0F) {
@@ -213,12 +214,9 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
     } else if ((data[4] & 0x20) != 0) {
         climate->recirculate = false;
         climate->aqs_auto = false;
-    } else if (data[0] == 0x08 || climate->auto_mode) {
-        climate->recirculate = false;
-        climate->aqs_auto = true;
     } else {
         climate->recirculate = false;
-        climate->aqs_auto = false;
+        climate->aqs_auto = true;
     }
     climate->rear_defrost = (data[4] & 0x01) != 0;
 
@@ -231,14 +229,13 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
 void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
     if (!climate || !data || dlc < 2) return;
 
-    climate->ac_on = (data[0] & 0x10) != 0;
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
 
     if ((data[0] & 0x80) != 0) {
         climate->recirculate = true;
         climate->aqs_auto = false;
-    } else if (climate->auto_mode) {
+    } else if ((data[0] & 0x10) != 0) {
         climate->recirculate = false;
         climate->aqs_auto = true;
     } else {
@@ -1478,6 +1475,7 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
         case 0x0064: return PSA_HIWORLD_ALERT_DPF;                /* DPF direct code */
         case 0x006E: return PSA_HIWORLD_ALERT_ANTIPOLLUTION;      /* Depollution system faulty */
         case 0x0068: return PSA_HIWORLD_ALERT_ANTIPOLLUTION;      /* Depollution direct code */
+        case 0x007E: return PSA_HIWORLD_ALERT_ANTIPOLLUTION;      /* Depollution system error */
         case 0x0073:
         case 0x0202: return PSA_HIWORLD_ALERT_GEARBOX;            /* Gearbox faulty */
         case 0x0067: return PSA_HIWORLD_ALERT_GEARBOX;            /* Gearbox direct code */
@@ -1490,17 +1488,27 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
         case 0x0081: return PSA_HIWORLD_ALERT_AUTO_LIGHTS;        /* Auto lights code */
         case 0x00CB: return PSA_HIWORLD_ALERT_AUTO_WIPERS;        /* Automatic wipers */
         case 0x0083: return PSA_HIWORLD_ALERT_AUTO_WIPERS;        /* Auto wipers code */
+        case 0x0139: return PSA_HIWORLD_ALERT_AUTO_WIPERS;        /* Auto wipers deactivated */
         case 0x0074: return PSA_HIWORLD_ALERT_DOOR_FL;            /* FL door open */
         case 0x0085: return PSA_HIWORLD_ALERT_DOOR_FR;            /* FR door open */
-        case 0x0084:
-            return PSA_HIWORLD_ALERT_DOOR_REAR;                   /* Rear door open */
+        case 0x0084: return PSA_HIWORLD_ALERT_DOOR_REAR;          /* Rear door open */
         case 0x0080: return PSA_HIWORLD_ALERT_BOOT;               /* Boot open */
-        case 0x0008:                                              /* Door open general */
-            if (door_mask & 0x01) return PSA_HIWORLD_ALERT_DOOR_FL;
-            if (door_mask & 0x02) return PSA_HIWORLD_ALERT_DOOR_FR;
-            if (door_mask & 0x0C) return PSA_HIWORLD_ALERT_DOOR_REAR;
-            if (door_mask & 0x10) return PSA_HIWORLD_ALERT_BOOT;
-            return can_alarm_id;
+        case 0x0008:                                              /* Door open / Braking system faulty */
+            if (door_mask != 0 && door_mask != 0xFF) {
+                if (door_mask & 0x01) return PSA_HIWORLD_ALERT_DOOR_FL;
+                if (door_mask & 0x02) return PSA_HIWORLD_ALERT_DOOR_FR;
+                if (door_mask & 0x0C) return PSA_HIWORLD_ALERT_DOOR_REAR;
+                if (door_mask & 0x10) return PSA_HIWORLD_ALERT_BOOT;
+            }
+            return PSA_HIWORLD_ALERT_HANDBRAKE;                   /* 0x0008: Braking system faulty in Hiworld HU */
+        case 0x000B:                                              /* Door open general / Driver seatbelt */
+            if (door_mask != 0 && door_mask != 0xFF) {
+                if (door_mask & 0x01) return PSA_HIWORLD_ALERT_DOOR_FL;
+                if (door_mask & 0x02) return PSA_HIWORLD_ALERT_DOOR_FR;
+                if (door_mask & 0x0C) return PSA_HIWORLD_ALERT_DOOR_REAR;
+                if (door_mask & 0x10) return PSA_HIWORLD_ALERT_BOOT;
+            }
+            return PSA_HIWORLD_ALERT_SEATBELT_FL;                 /* Driver seatbelt */
         case 0x0004:                                              /* Tyre pressure low */
             if (param == 1) return PSA_HIWORLD_ALERT_TPMS_UNDER_FR;
             if (param == 2) return PSA_HIWORLD_ALERT_TPMS_UNDER_RR;
@@ -1510,6 +1518,7 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
             if (param == 1) return PSA_HIWORLD_ALERT_TPMS_PUNCTURE_FR;
             if (param == 2 || param == 3) return PSA_HIWORLD_ALERT_TPMS_PUNCTURE_REAR;
             return PSA_HIWORLD_ALERT_TPMS_PUNCTURE_FL;
+        case 0x00C9: return PSA_HIWORLD_ALERT_TPMS_UNDER_FL;      /* Tyre pressure(s) not monitored */
         case 0x00D3:
         case 0x00E3: return PSA_HIWORLD_ALERT_BULB_SIDELIGHT;     /* Sidelight bulb */
         case 0x013D:
@@ -1524,7 +1533,6 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
         case 0x00E8: return PSA_HIWORLD_ALERT_BULB_REVERSE;       /* Reversing / indicator */
         case 0x0078:
         case 0x00F0: return PSA_HIWORLD_ALERT_AIRBAG;             /* Airbag / pretensioner */
-        case 0x000B:
         case 0x012F: return PSA_HIWORLD_ALERT_SEATBELT_FL;        /* Driver seatbelt */
         case 0x013A:
         case 0x0130: return PSA_HIWORLD_ALERT_SEATBELT_FR;        /* Front passenger seatbelt */
