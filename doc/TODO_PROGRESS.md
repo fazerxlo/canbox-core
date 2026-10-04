@@ -59,10 +59,10 @@ flowchart LR
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **1. Peugeot UI Panels & Telemetry** | 7 | 6 | 1 | 0 | 0 | **86%** |
 | **2. Floating Overlays (`Window...`)** | 8 | 6 | 1 | 0 | 1 | **75%** |
-| **3. General Configuration & Panels** | 12 | 4 | 3 | 4 | 1 | **33%** |
+| **3. General Configuration & Panels** | 12 | 3 | 3 | 5 | 1 | **25%** |
 | **4. Configuration & Diagnostics** | 4 | 3 | 1 | 0 | 0 | **75%** |
 | **5. Physical Hardware Synthesis (GPIO)** | 3 | 3 | 0 | 0 | 0 | **100%** |
-| **Overall** | **34** | **22** | **6** | **4** | **2** | **65%** |
+| **Overall** | **34** | **21** | **6** | **5** | **2** | **62%** |
 
 ---
 
@@ -99,7 +99,7 @@ Mapped against `QF_Canbus_system/README.md` Section *System Floating Overlays*.
 | Status | Feature | HU Class / Layout | Hiworld Cmd | Car CAN ID | Core Files / Drivers | Test Verification |
 | :---: | :--- | :--- | :--- | :---: | :--- | :--- |
 | `[x]` | **Door & Trunk Overlay**<br>(4 Doors, Boot, Bonnet, Handbrake) | `WindowDoor.smali`<br>`door_window_layer.xml` | `0x12`<br>(10 bytes) | `0x0F6`<br>`0x036` | [`peugeot_407.c`](file://src/profiles/peugeot_407.c)<br>[`proto_hiworld_adapter.c`](file://src/protocols/proto_hiworld_adapter.c) | `test_peugeot_407_doors_hiworld_vector_1_driver_front`<br>`test_integration_hiworld_door_status_pipeline` |
-| `[x]` | **Parking Radar (OPS)**<br>(8-channel proximity overlay) | `WindowRadar.smali`<br>`common_radar_view.xml` | `0x41`<br>(12 bytes) | `0x3A1`<br>`0x348` | [`peugeot_407.c`](file://src/profiles/peugeot_407.c)<br>[`proto_hiworld_adapter.c`](file://src/protocols/proto_hiworld_adapter.c) | `test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center`<br>`test_integration_hiworld_radar_pipeline` |
+| `[x]` | **Parking Radar (OPS)**<br>(8-channel proximity overlay) | `WindowRadar.smali`<br>`common_radar_view.xml` | `0x41`<br>(12 bytes) | `0x0E1`<br>*(CAN2004)* | [`peugeot_407.c`](file://src/profiles/peugeot_407.c)<br>[`proto_hiworld_adapter.c`](file://src/protocols/proto_hiworld_adapter.c) | `test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center`<br>`test_integration_hiworld_radar_pipeline`<br>*(Note: CAN2004 uses `0x0E1` exclusively; `0x260` is `MSG_BSI_INF_PROFILS`, not AAS)* |
 | `[-]` | **Climate Control Popup**<br>(Dual HVAC bar / Floating panel) | `WindowAcControl.smali`<br>`WindowAcShow.smali`<br>`public_air_conditon_view.xml` | `0x31` (Up)<br>`0x3B` (Down) | `0x1D0`<br>`0x1E3`<br>`0x0F6` | [`peugeot_407.c`](file://src/profiles/peugeot_407.c)<br>[`proto_hiworld_adapter.c`](file://src/protocols/proto_hiworld_adapter.c) | `test_peugeot_407_hvac_hiworld` (Uplink complete & verified; Downlink `0x3B` pending) |
 | `[x]` | **Text Warning / BSI Alerts**<br>(Ice alert, Low fuel, Bulbs) | `WindowTextWarning.smali`<br>`WarningLayer.smali`<br>`text_reminder_layer.xml` | `0x42` | `0x1A1`<br>`0x120` | [`peugeot_407.c`](file://src/profiles/peugeot_407.c)<br>[`proto_hiworld_adapter.c`](file://src/protocols/proto_hiworld_adapter.c) | `test_peugeot_407_alert_single_abs`<br>`test_peugeot_407_alert_single_suspension`<br>`test_peugeot_407_alert_single_low_fuel` |
 | `[N/A]`| **Drive Mode Selector**<br>(Eco, Normal, Sport, Snow) | `WindowDriveMode.smali`<br>`common_drivermode_view.xml` | N/A | N/A | N/A (Standard Peugeot 407 does not broadcast drive mode selector frames) | N/A |
@@ -114,7 +114,7 @@ Mapped against `QF_Canbus_system/README.md` Section *System Floating Overlays*.
 Mapped against `QF_Canbus_system/README.md` Section *General Vehicle Configuration & Telemetry Panels*.
 
 | Status | Feature | HU Class / Layout | Hiworld Cmd | Car CAN ID | Core Files / Drivers | Test Verification |
-| :---: | :--- | :--- | :---: | :---: | :--- | :--- |
+| :---: | :--- | :--- | :--- | :---: | :--- | :--- |
 | `[-]` | **Central Settings & Preferences**<br>(DRL, Follow-me-home, Mirrors) | `CentralSettingFragment.smali`<br>`SettingFragment.smali`<br>`fragment_sub_setting.xml` | `0x71`, `0x72`<br>`0x76`, `0x79`<br>(`0x7B`/`0x7D` down) | `0x39B`<br>`0x2A8` | [`hiworld_connection.c`](file://src/protocols/hiworld_connection.c)<br>[`PEUGEOT_RT4_CAR_CONFIG.md`](file://doc/PEUGEOT_RT4_CAR_CONFIG.md) | `test_hiworld_verification_vector_3_feature_enables` (Uplink flags verified; downlink pending) |
 | `[x]` | **Steering Wheel Controls (SWC)**<br>(Key mapping, stalks, rollers) | `OriginalSteeringWheel.smali`<br>`swc_study_layout.xml` | `0x11` | `0x228` | [`peugeot_407.c`](file://src/profiles/peugeot_407.c)<br>[`proto_hiworld_adapter.c`](file://src/protocols/proto_hiworld_adapter.c) | `test_peugeot_407_stalk_buttons_press_and_release`<br>`test_peugeot_407_stalk_rotary_encoder` |
 | `[ ]` | **Factory Amplifier / DSP (JBL)**<br>(Bass, Treble, Sub, Surround) | `AmpFragment.smali`<br>`public_ampstate.xml` | `0xAD`<br>(Downlink) | CAN/VAN | [`CANBOX_SPEC_HIWORLD_407_08_JBL_AMPLIFIER_DSP.md`](file://doc/CANBOX_SPEC_HIWORLD_407_08_JBL_AMPLIFIER_DSP.md) | Spec ready; Downlink parser pending |
@@ -123,7 +123,7 @@ Mapped against `QF_Canbus_system/README.md` Section *General Vehicle Configurati
 | `[ ]` | **OEM Radio Tuner Passthrough**<br>(AM/FM, RDS, Preset memory) | `OriginalTuner.smali`<br>`car_radio.xml` | `0xA2` | `0x225` | [`CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md`](file://doc/CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md) | `test_peugeot_407_cd_changer_and_rds` (Partial decoder verified) |
 | `[ ]` | **OEM CD / Media Player**<br>(Factory CD changer / CDC) | `OriginalMediaPlayer.smali`<br>`media_player.xml` | `0xA4` | `0x2A5` | Same as above | `test_peugeot_407_cd_changer_and_rds` |
 | `[ ]` | **Original Car Screen Passthrough**<br>(MFD text / Host screen emulation) | `CarScreenFragment.smali`<br>`common_car_screen.xml` | `0x97`<br>`0xE1`<br>`0xE4` | `0x3B6` | Same as above | Spec documented |
-| `[x]` | **Off-Road / Dynamic Telemetry**<br>(Steering angle, Speed, RPM) | `OffroadInfoFragment.smali`<br>`common_offroad_layout.xml` | `0x11` | `0x0B6`<br>`0x21F` (SAS) | [`peugeot_407.c`](file://src/profiles/peugeot_407.c)<br>[`proto_hiworld_adapter.c`](file://src/protocols/proto_hiworld_adapter.c) | `test_peugeot_407_steering_wheel_angle`<br>`test_integration_hiworld_telemetry_periodic_pipeline` |
+| `[ ]` | **Dynamic Trajectory / Steering Angle (SAS)**<br>(Dynamic guidelines & angle) | `WindowRadar.smali`<br>`OffroadInfoFragment.smali` | `0x11` | Pending / Unknown | Pending CAN frame identification | Removed placeholder decoder & trajectory lines until real 407 SAS CAN frame is sniffed |
 | `[-]` | **Clock / Date Synchronization**<br>(Bi-directional Android/BSI time) | `TimeSetFragment.smali`<br>`common_cartime_setting.xml` | `0xC2` (Up)<br>`0xCB` (Down) | `0x228`<br>`0x3F6` | [`hiworld_connection.c`](file://src/protocols/hiworld_connection.c)<br>[`CANBOX_SPEC_HIWORLD_407_10_BSI_SETTINGS_CLOCK_SYNC.md`](file://doc/CANBOX_SPEC_HIWORLD_407_10_BSI_SETTINGS_CLOCK_SYNC.md) | `test_hiworld_verification_vector_4_gps_time_sync` (Rx verified; BSI Tx frame pending) |
 | `[N/A]`| **EV / PHEV Charging Management**<br>(Charge limits, precondition) | `ChargingSettingFragment.smali`<br>`common_charging_setting_layout.xml` | N/A | N/A | N/A (Peugeot 407 is purely ICE) | N/A |
 | `[x]` | **Vehicle Units Sync**<br>(km/h vs mph, Celsius vs Fahrenheit) | `CarbodyState.smali` | `0xC1` | Fixed / BSI | [`hiworld_connection.c`](file://src/protocols/hiworld_connection.c) | `test_hiworld_verification_vector_3_feature_enables` |
@@ -186,6 +186,12 @@ Hardware lines synthesized by OpenCanbox Core for head units lacking CAN-driven 
 - **Target Changes:**
   1. Hook `HIWORLD_CMD_CENTRAL_SETTING1` and `CENTRAL_SETTING2` in adapter.
   2. Format PSA BSI configuration messages (`0x39B` / `0x2A8`).
+
+### Priority 5: Reverse Trajectory Lines & Steering Wheel Angle (SAS) Frame Discovery
+- **Objective:** Identify the true PSA CAN Comfort bus frame for optical steering angle on Peugeot 407 (CAN2004).
+- **Specification:** [`CANBOX_SPEC_HIWORLD_407_05_STEERING_ANGLE_SAS.md`](file://doc/CANBOX_SPEC_HIWORLD_407_05_STEERING_ANGLE_SAS.md)
+- **Current Status:** Placeholder decoders (`0x0E6`/`0x0E8`) and trajectory packet dispatch have been completely removed. In live testing, cluster lighting (`0x128`) previously triggered phantom steering angle packets (`Cmd 0x11`), causing trajectory lines to erratically oscillate. Dynamic guidelines remain disabled until verified CAN frame ID and telemetry layout are captured.
+- **Radar AAS Note:** Peugeot 407 CAN2004 parking radar is strictly on `0x0E1`. Frame `0x260` is `MSG_BSI_INF_PROFILS` (BSI user profile options: Profile 1, Profile 2, Manufacturer; 8 bytes, 250 ms) on CAN2004, NOT parking sensors (which only use `0x260` on CAN2010/AEE2010). Frame `0x260` must not be bound to AAS decoders.
 
 ---
 

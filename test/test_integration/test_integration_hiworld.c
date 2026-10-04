@@ -85,25 +85,14 @@ void test_integration_hiworld_door_status_pipeline(void) {
 void test_integration_hiworld_telemetry_periodic_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
 
-    // Steering angle CAN frame: 150 -> 15 deg (0x000F)
-    can_frame_t e8_frame = {
-        .id = 0x0E8,
-        .dlc = 4,
-        .data = { 0x00, 0x96, 0x00, 0x00 }
-    };
-    can_router_process_can(&e8_frame);
-
     // Trigger periodic 100ms update
     can_router_periodic_100ms();
 
     uint8_t rx_buf[64];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
-    // Hiworld telemetry dispatches:
-    // 1. Steering Track Angle (Cmd 0x11, Len 0x02, Payload: angle_le16(0x0F, 0x00), CS = (0x02 + 0x11 + 0x0F + 0x00 - 1) = 0x21)
-    // 2. Heartbeat (Cmd 0xFF, Len 0x01, Payload: 0x01, CS = (0x01 + 0xFF + 0x01 - 1) = 0x00)
+    // Hiworld periodic heartbeat (Cmd 0xFF, Len 0x01, Payload: 0x01, CS = (0x01 + 0xFF + 0x01 - 1) = 0x00)
     const uint8_t expected[] = {
-        0x5A, 0xA5, 0x02, 0x11, 0x0F, 0x00, 0x21,
         0x5A, 0xA5, 0x01, 0xFF, 0x01, 0x00
     };
 
@@ -509,4 +498,83 @@ void test_integration_hiworld_reverse_pipeline(void) {
 
     TEST_ASSERT_FALSE(can_router_get_state()->reverse_gear);
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_REVERSE_OUT));
+}
+
+void test_integration_hiworld_reverse_quiescent_no_blinking_or_trajectory(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+
+    // Drain any leftover UART bytes
+    uint8_t drain[128];
+    while (read_uart_output(drain, sizeof(drain)) > 0);
+
+    // 1. Engage reverse via 0x036 (byte 1 bit 7 = 1)
+    can_frame_t rev_frame = {
+        .id = 0x036,
+        .dlc = 8,
+        .data = { 0x0E, 0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&rev_frame);
+    TEST_ASSERT_TRUE(can_router_get_state()->reverse_gear);
+    while (read_uart_output(drain, sizeof(drain)) > 0);
+
+    // 2. Inject CAN 0x128 with cluster lighting telemetry (data[0] = 0x91)
+    // Must NOT trigger fake SWC key press or trajectory angle jump (Cmd 0x11 with 00 01)
+    can_frame_t frame_128 = {
+        .id = 0x128,
+        .dlc = 8,
+        .data = { 0x91, 0xE0, 0x00, 0x00, 0x00, 0x80, 0xB0, 0x01 }
+    };
+    can_router_process_can(&frame_128);
+
+    TEST_ASSERT_EQUAL_INT(WHEEL_KEY_NONE, can_router_get_state()->wheel.active_key);
+    TEST_ASSERT_EQUAL_UINT8(0, can_router_get_state()->wheel.press_state);
+
+    uint8_t rx_buf[64];
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    // 3. Inject native CAN2004 radar frame 0x0E1: All clear (FC FC FE)
+    can_frame_t frame_0e1 = {
+        .id = 0x0E1,
+        .dlc = 7,
+        .data = { 0x24, 0x40, 0x3F, 0xFC, 0xFC, 0xFE, 0x00 }
+    };
+    can_router_process_can(&frame_0e1);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_radar_clear[] = {
+        0x5A, 0xA5, 0x0C, 0x41, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x3F, 0x05, 0x89
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_radar_clear), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_radar_clear, rx_buf, sizeof(expected_radar_clear));
+
+    const vehicle_state_t *st = can_router_get_state();
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_right_outer);
+
+    // 4. Inject CAN 0x260 (MSG_BSI_INF_PROFILS on CAN2004)
+    // Must NOT be treated as parking radar and must NOT overwrite rear sensors with 0x00
+    can_frame_t frame_260 = {
+        .id = 0x260,
+        .dlc = 8,
+        .data = { 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_260);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    st = can_router_get_state();
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_left_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_right_center);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, st->radar.rear_right_outer);
+
+    // 5. Re-inject 0x0E1: Delta detection prevents duplicate serial frames
+    can_router_process_can(&frame_0e1);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 }

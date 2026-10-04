@@ -11,14 +11,18 @@
 
 # 1. Functional Domain & Architecture Overview
 
-The Peugeot 407 Parking Assistance ECU (AAS - *Aide au Stationnement*) monitors front and rear ultrasonic sensors. In native Peugeot 407 CAN2004 Comfort bus architecture, sensor obstacle distances and zone activations are multiplexed onto CAN ID **`0x0E1`** (7 bytes, periodic 100 ms). On newer PSA architectures (AEE2010 / Peugeot 308/508) or certain aftermarket gateways, distances are separated into CAN IDs `0x260` (Rear AAS) and `0x270` (Front AAS).
+The Peugeot 407 Parking Assistance ECU (AAS - *Aide au Stationnement*) monitors front and rear ultrasonic sensors. In native Peugeot 407 CAN2004 Comfort bus architecture, sensor obstacle distances and zone activations are multiplexed onto CAN ID **`0x0E1`** (7 bytes, periodic 100 ms).
+
+> [!IMPORTANT]
+> **CAN2004 vs CAN2010 (AEE2010) Architecture Separation:**  
+> On Peugeot 407 (CAN2004), CAN ID **`0x260`** is `MSG_BSI_INF_PROFILS` (BSI user profile configuration options: Profile 1, Profile 2, Manufacturer; 8 bytes, 250 ms), **NOT** parking sensors. Parking sensors on `0x260` (Rear AAS) and `0x270` (Front AAS) belong strictly to CAN2010 / AEE2010 (e.g. Peugeot 308, 508, RCZ). In `canbox-core`, CAN2004 decoding uses `0x0E1` exclusively and ignores `0x260` for AAS to prevent profile bytes from triggering false obstacle alarms or radar display flickering.
 
 The CAN box translates these raw distance zones into serialized headunit radar packets (**`Cmd 0x41`** / `Handle.CarRadarState`), allowing the Android infotainment screen to render graphical distance arcs and trigger corresponding parking buzzer audio profiles.
 
 ```
 +------------------------------------------------------------------------------------+
 |                         Peugeot 407 Parking Assist ECU (AAS)                       |
-|           [Native CAN2004: 0x0E1 (7 bytes) / AEE2010: 0x260 & 0x270]               |
+|           [Native CAN2004: 0x0E1 (7 bytes) | (0x260/0x270 are CAN2010 only)]       |
 +------------------------------------------------------------------------------------+
                                           │
                                  [PSA CAN 0x0E1]
@@ -82,7 +86,8 @@ The CAN box translates these raw distance zones into serialized headunit radar p
 +--------+--------+------------------------------------+-----------------------------+
 ```
 
-### 2.2 Alternate / AEE2010 Parking Radar Frames (`0x260` / `0x270`)
+### 2.2 Alternate / AEE2010 Parking Radar Frames (`0x260` / `0x270`) — CAN2010 Only
+*(Note: Not applicable to Peugeot 407 CAN2004. On CAN2004, `0x260` is `MSG_BSI_INF_PROFILS` broadcast by the BSI at 250 ms. These frames are only used on CAN2010 / AEE2010 platforms.)*
 - **Rear Radar (`0x260`):**
   - `Byte 0`: Rear Left Outer (0x00..0x04, 0xFF = Inactive)
   - `Byte 1`: Rear Center Inner (0x00..0x04, 0xFF = Inactive)

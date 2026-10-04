@@ -143,20 +143,9 @@ static void hiworld_send_doors(const vehicle_doors_t *doors) {
 }
 
 static void hiworld_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) {
-    /* Hiworld Steering Angle (Cmd 0x11): 2 bytes signed Little-Endian */
-    uint8_t angle_payload[2];
-    angle_payload[0] = (uint8_t)(angle & 0xFF);
-    angle_payload[1] = (uint8_t)((angle >> 8) & 0xFF);
-
-    uint8_t tx_buf[16];
-    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_BASE_INFO, angle_payload, sizeof(angle_payload), 
-                                         tx_buf, sizeof(tx_buf));
-    if (len > 0) {
-        hal_uart_write(tx_buf, len);
-    }
-
     (void)speed;
     (void)rpm;
+    (void)angle;
 }
 
 static void hiworld_send_heartbeat(void) {

@@ -118,8 +118,10 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push radar telemetry on updates
     if (s_current_state.radar.updated) {
         s_current_state.radar.updated = false;
-        hu_protocol_send_radar(&s_current_state.radar);
-        s_last_sent_state.radar = s_current_state.radar;
+        if (memcmp(&s_current_state.radar, &s_last_sent_state.radar, sizeof(vehicle_radar_t)) != 0) {
+            hu_protocol_send_radar(&s_current_state.radar);
+            s_last_sent_state.radar = s_current_state.radar;
+        }
     }
 
     // Immediately push single alert popup or clear
@@ -205,18 +207,16 @@ void can_router_process_uart_byte(uint8_t byte) {
 }
 
 void can_router_periodic_100ms(void) {
-    // Broadcast periodic states (Vehicle speed, RPM, Radar/Parking)
+    // Broadcast periodic states (Vehicle speed, RPM)
     if (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||
-        s_current_state.rpm != s_last_sent_state.rpm ||
-        s_current_state.steering_angle_deg != s_last_sent_state.steering_angle_deg) {
+        s_current_state.rpm != s_last_sent_state.rpm) {
 
         hu_protocol_send_telemetry(s_current_state.speed_kmh,
                                    s_current_state.rpm,
-                                   s_current_state.steering_angle_deg);
+                                   0);
 
         s_last_sent_state.speed_kmh = s_current_state.speed_kmh;
         s_last_sent_state.rpm = s_current_state.rpm;
-        s_last_sent_state.steering_angle_deg = s_current_state.steering_angle_deg;
     }
 
     // Repeat door status frame at 1 Hz (every 1000ms / 10 ticks) while ANY door/trunk/hood is open.

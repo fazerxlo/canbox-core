@@ -103,24 +103,16 @@ void test_integration_raise_telemetry_periodic_pipeline(void) {
     };
     can_router_process_can(&b6_frame);
 
-    // Steering angle CAN frame: 150 -> 15 deg
-    can_frame_t e8_frame = {
-        .id = 0x0E8,
-        .dlc = 4,
-        .data = { 0x00, 0x96, 0x00, 0x00 }
-    };
-    can_router_process_can(&e8_frame);
-
     // Trigger periodic 100ms update
     can_router_periodic_100ms();
 
     uint8_t rx_buf[64];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
-    // Telemetry: Cmd 0x29, Len 0x06, Payload: speed_be16(0x00, 0x32), rpm_be16(0x03, 0xE8), angle_be16(0x00, 0x0F)
+    // Telemetry: Cmd 0x29, Len 0x06, Payload: speed_be16(0x00, 0x32), rpm_be16(0x03, 0xE8), angle_be16(0x00, 0x00)
     // Heartbeat: Cmd 0x20, Len 0x01, Payload: 0x01
     const uint8_t expected_telemetry[] = {
-        0x2E, 0x29, 0x06, 0x00, 0x32, 0x03, 0xE8, 0x00, 0x0F, 0xA4,
+        0x2E, 0x29, 0x06, 0x00, 0x32, 0x03, 0xE8, 0x00, 0x00, 0xB3,
         0x2E, 0x20, 0x01, 0x01, 0xDD
     };
 

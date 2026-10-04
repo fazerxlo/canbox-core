@@ -70,7 +70,7 @@ static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_
         case 0x20: state->wheel.active_key = WHEEL_KEY_MUTE; break;
         default:   state->wheel.active_key = WHEEL_KEY_NONE; break;
     }
-    state->wheel.press_state = (btn != 0) ? 1 : 0;
+    state->wheel.press_state = (state->wheel.active_key != WHEEL_KEY_NONE) ? 1 : 0;
 
     if (frame->dlc >= 5) {
         uint8_t light_flags = frame->data[4];
@@ -110,18 +110,6 @@ static void psa_decode_engine_speed_0x0b6(const can_frame_t *frame, vehicle_stat
 
     state->rpm = read_be16_local(&frame->data[0]) >> 3;
     state->speed_kmh = read_be16_local(&frame->data[2]) >> 7;
-}
-
-static void psa_decode_steering_angle_0x0e8(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 4) return;
-    int16_t raw_angle = (int16_t)read_be16_local(&frame->data[0]);
-    state->steering_angle_deg = raw_angle / 10;
-}
-
-static void psa_decode_steering_angle_0x0e6_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    int16_t angle = 0;
-    psa_decode_steering_angle_0x0e6(frame->data, frame->dlc, &angle);
-    state->steering_angle_deg = angle / 10;
 }
 
 static void psa_decode_hvac_0x1d0_profile(const can_frame_t *frame, vehicle_state_t *state) {
@@ -286,30 +274,6 @@ static void psa_decode_radar_0x0e1_profile(const can_frame_t *frame, vehicle_sta
     state->radar.updated = true;
 }
 
-static void psa_decode_radar_0x260_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 3) return;
-    state->radar.rear_left_outer   = frame->data[0];
-    state->radar.rear_left_center  = frame->data[1];
-    state->radar.rear_right_center = frame->data[1];
-    state->radar.rear_right_outer  = frame->data[2];
-    if (frame->dlc >= 4) {
-        state->radar.rear_active  = (frame->data[3] & 0x80) ? true : false;
-        state->radar.system_fault = (frame->data[3] & 0x01) ? true : false;
-    }
-    state->radar.valid = true;
-    state->radar.updated = true;
-}
-
-static void psa_decode_radar_0x270_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 3) return;
-    state->radar.front_left_outer   = frame->data[0];
-    state->radar.front_left_center  = frame->data[1];
-    state->radar.front_right_center = frame->data[1];
-    state->radar.front_right_outer  = frame->data[2];
-    state->radar.valid = true;
-    state->radar.updated = true;
-}
-
 static psa_journal_iso_tp_t s_journal_ctx;
 
 static void psa_decode_alert_message_0x1a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
@@ -332,7 +296,6 @@ static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, veh
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
-    { PSA_CAN_ID_STEERING_ANGLE,     psa_decode_steering_angle_0x0e6_profile },
     { PSA_CAN_ID_STALK_BUTTONS,      psa_decode_stalk_0x0f6 },
     { PSA_CAN_ID_ALERT_JOURNAL,      psa_decode_alert_journal_0x120_profile },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
@@ -340,13 +303,10 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },
     { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
     { 0x0B6,                         psa_decode_engine_speed_0x0b6 },
-    { 0x0E8,                         psa_decode_steering_angle_0x0e8 },
     { PSA_CAN_ID_CLIMATE_HVAC,       psa_decode_hvac_0x1d0_profile },
     { 0x1E3,                         psa_decode_hvac_0x1e3_profile },
     { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
     { PSA_CAN_ID_TRIP_INSTANT,       psa_decode_trip_0x221_profile },
-    { PSA_CAN_ID_REAR_RADAR_AAS,     psa_decode_radar_0x260_profile },
-    { PSA_CAN_ID_FRONT_RADAR_AAS,    psa_decode_radar_0x270_profile },
     { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
     { PSA_CAN_ID_TRIP2_ODB,          psa_decode_trip2_0x261_profile },
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },

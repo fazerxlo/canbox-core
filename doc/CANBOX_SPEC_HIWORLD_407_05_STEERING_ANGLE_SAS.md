@@ -11,11 +11,15 @@
 
 # 1. Functional Domain & Architecture Overview
 
-The Peugeot 407 Steering Column Control Module integrates an optical Steering Wheel Angle Sensor (SAS). The absolute steering wheel position is broadcast at high frequency (every 50 ms) over the PSA Comfort CAN bus on CAN ID **`0x0C5`**.
+> [!WARNING]
+> **Status Notice (October 2026) — Trajectory Lines & SAS Decoding Disabled:**  
+> The physical Comfort CAN frame broadcasting steering wheel angle for Peugeot 407 (CAN2004) has not been confirmed. Frame `0x0E6` represents ABS wheel tick pulses (`MSG_IS_DAT_ABR`), while `0x0C5` and `0x21F` require real car log verification. In earlier firmware builds, multiplexed cluster lighting data (`0x128`) erroneously triggered phantom steering angle updates, causing reverse parking trajectory guidelines to erratically twitch and bend. To ensure rock-solid stability, dynamic trajectory guidelines and placeholder SAS decoders have been completely removed from `canbox-core` until live log traces reveal the confirmed CAN frame ID and bit layout.
 
-*(Note: CAN ID `0x0E6` in PSA CAN2004 represents ABS wheel pulse counter ticks `MSG_IS_DAT_ABR` used for dead reckoning navigation, whereas `0x0C5` is the dedicated SAS angle frame).*
+The Peugeot 407 Steering Column Control Module integrates an optical Steering Wheel Angle Sensor (SAS). When a confirmed frame is identified, absolute steering wheel position will be broadcast over the PSA Comfort CAN bus.
 
-When the vehicle is placed in reverse gear, the CAN box translates steering angle telemetry into headunit trajectory frames. The Android infotainment system uses this data to dynamically bend reverse camera parking guidelines in real time.
+*(Note: CAN ID `0x0E6` in PSA CAN2004 represents ABS wheel pulse counter ticks `MSG_IS_DAT_ABR` used for dead reckoning navigation, whereas `0x0C5` or another frame is expected to carry the dedicated SAS angle).*
+
+When the vehicle is placed in reverse gear, the CAN box will translate steering angle telemetry into headunit trajectory frames. The Android infotainment system uses this data to dynamically bend reverse camera parking guidelines in real time.
 
 ```
 +------------------------------------------------------------------------------------+
