@@ -8,6 +8,7 @@ import threading
 import time
 import tempfile
 import serial
+import serial.tools.list_ports
 import select
 import tty
 import termios
@@ -20,26 +21,121 @@ import re
 
 CAN_LINE_RE = re.compile(r"^(?:ID:)?(?:0x)?([0-9A-Fa-f]+)\s+(.+)$")
 
+DEVICE_PROFILES = {
+    "can": {
+        "vid": 0x1A86,
+        "pid": 0x7523,
+        "name": "QinHeng Electronics CH340 serial converter",
+        "role": "CAN (slcan)",
+        "keywords": ["ch340", "qinheng", "1a86"],
+    },
+    "hu": {
+        "vid": 0x067B,
+        "pid": 0x2303,
+        "name": "Prolific Technology, Inc. PL2303 Serial Port / Mobile Phone Data Cable",
+        "role": "Head Unit (default hiworld)",
+        "keywords": ["pl2303", "prolific", "067b"],
+    },
+    "orig": {
+        "vid": 0x0403,
+        "pid": 0x6001,
+        "name": "Future Technology Devices International, Ltd FT232 Serial (UART) IC",
+        "role": "Original Canbox (Optional)",
+        "keywords": ["ft232", "ftdi", "0403"],
+    },
+}
+
+def get_device_info(dev_path):
+    vid = None
+    pid = None
+    desc = ""
+    try:
+        for p in serial.tools.list_ports.comports():
+            if p.device == dev_path:
+                vid = p.vid
+                pid = p.pid
+                parts = [p.description or "", p.product or "", p.manufacturer or ""]
+                desc = " - ".join([x for x in parts if x])
+                break
+    except Exception:
+        pass
+
+    if vid is None or pid is None:
+        try:
+            name = os.path.basename(dev_path)
+            syspath = os.path.realpath(f"/sys/class/tty/{name}/device")
+            p = syspath
+            while p and p != "/":
+                vid_path = os.path.join(p, "idVendor")
+                pid_path = os.path.join(p, "idProduct")
+                if os.path.exists(vid_path) and os.path.exists(pid_path):
+                    with open(vid_path, "r") as f:
+                        vid = int(f.read().strip(), 16)
+                    with open(pid_path, "r") as f:
+                        pid = int(f.read().strip(), 16)
+                    break
+                p = os.path.dirname(p)
+        except Exception:
+            pass
+
+    return vid, pid, desc
+
+def format_port_label(dev_path):
+    vid, pid, desc = get_device_info(dev_path)
+    if vid is not None and pid is not None:
+        vid_pid_hex = f"{vid:04x}:{pid:04x}"
+        for prof in DEVICE_PROFILES.values():
+            if prof["vid"] == vid and prof["pid"] == pid:
+                return f"{dev_path} [ID {vid_pid_hex} {prof['name']}]"
+        extra = f" {desc}" if desc else ""
+        return f"{dev_path} [ID {vid_pid_hex}{extra}]"
+    elif desc:
+        return f"{dev_path} [{desc}]"
+    return dev_path
+
+def find_matching_device(role_key, available_devices):
+    prof = DEVICE_PROFILES.get(role_key)
+    if not prof:
+        return None
+    # 1. Exact VID:PID match
+    for dev in available_devices:
+        vid, pid, _ = get_device_info(dev)
+        if vid == prof["vid"] and pid == prof["pid"]:
+            return dev
+    # 2. Keyword fallback in description
+    for dev in available_devices:
+        _, _, desc = get_device_info(dev)
+        desc_lower = desc.lower()
+        if any(kw in desc_lower for kw in prof["keywords"]):
+            return dev
+    return None
+
 def get_serial_ports():
     return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
 
-def prompt_choice(prompt_text, choices, allow_skip=False):
+def prompt_choice(prompt_text, choices, default_choice=None, allow_skip=False):
     if not choices:
         print("No unassigned serial devices found.")
     else:
         for i, choice in enumerate(choices):
-            print(f"{i+1}) {choice}")
+            print(f"{i+1}) {format_port_label(choice)}")
             
     if allow_skip:
         print("0) Skip")
     print("c) Custom path")
         
-    default_option = choices[0] if choices else ("0" if allow_skip else None)
+    default_str = None
+    if default_choice and default_choice in choices:
+        idx = choices.index(default_choice) + 1
+        default_str = f"{idx} ({default_choice})"
+    elif not default_choice and allow_skip:
+        default_str = "Skip (0)"
+    elif choices and not allow_skip:
+        default_choice = choices[0]
+        default_str = f"1 ({choices[0]})"
     
-    if default_option and default_option != "0":
-        full_prompt = f"{prompt_text} [Default: 1]: "
-    elif default_option == "0":
-        full_prompt = f"{prompt_text} [Default: Skip]: "
+    if default_str:
+        full_prompt = f"{prompt_text} [Default: {default_str}]: "
     else:
         full_prompt = f"{prompt_text}: "
         
@@ -47,10 +143,10 @@ def prompt_choice(prompt_text, choices, allow_skip=False):
         ans = input(full_prompt).strip()
         
         if ans == "":
-            if default_option == "0":
+            if default_choice:
+                return default_choice
+            elif allow_skip:
                 return None
-            elif default_option:
-                return default_option
                 
         if allow_skip and ans == "0":
             return None
@@ -258,48 +354,105 @@ def read_serial(port, baud, logger, source, stats):
         logger.log(source, f"Serial error: {e}")
 
 def main():
+    parser = argparse.ArgumentParser(description="OpenCanbox E2E Test & Logger")
+    parser.add_argument("--can", help="CAN device path (e.g. /dev/ttyUSB0 or socketcan interface like can0/vcan0)")
+    parser.add_argument("--hu", "--serial", dest="hu", help="Head Unit serial device (e.g. /dev/ttyUSB1)")
+    parser.add_argument("--orig", help="Original Canbox serial device (e.g. /dev/ttyUSB2)")
+    parser.add_argument("--baud", type=int, default=38400, help="Head Unit serial baud rate (default: 38400)")
+    parser.add_argument("--protocol", default="hiworld", help="Head Unit protocol (default: hiworld)")
+    parser.add_argument("-y", "--auto", action="store_true", help="Auto-assign devices by detected USB signatures without prompting")
+    args = parser.parse_args()
+
     print("=== OpenCanbox E2E Test & Logger ===")
     ports = get_serial_ports()
-    
-    # 1. Ask CAN device
-    can_dev = prompt_choice("1) Select ttyUSB/ttyACM device for CAN (slcan)", ports)
-    if can_dev in ports:
-        ports.remove(can_dev)
-    
-    # 2. Ask HU device
-    hu_dev = prompt_choice("2) Select ttyUSB/ttyACM device for Head Unit (default hiworld)", ports)
-    if hu_dev in ports:
-        ports.remove(hu_dev)
-    
-    # 4. Ask Original Canbox
-    orig_dev = prompt_choice("3) Select ttyUSB/ttyACM device for Original Canbox (Optional)", ports, allow_skip=True)
-    if orig_dev and orig_dev in ports:
-        ports.remove(orig_dev)
-    
-    setup_slcan(can_dev)
+
+    if args.auto:
+        print("[*] Auto-assigning devices by USB signatures...")
+        can_dev = args.can or find_matching_device("can", ports) or (ports[0] if ports else None)
+        if can_dev and can_dev in ports:
+            ports.remove(can_dev)
+
+        hu_dev = args.hu or find_matching_device("hu", ports) or (ports[0] if ports else None)
+        if hu_dev and hu_dev in ports:
+            ports.remove(hu_dev)
+
+        orig_dev = args.orig or find_matching_device("orig", ports)
+        if orig_dev and orig_dev in ports:
+            ports.remove(orig_dev)
+
+        print(f"[*] CAN device:      {format_port_label(can_dev) if can_dev else 'None'}")
+        print(f"[*] Head Unit:       {format_port_label(hu_dev) if hu_dev else 'None'}")
+        print(f"[*] Original Canbox: {format_port_label(orig_dev) if orig_dev else 'None (Skipped)'}")
+    else:
+        # 1. CAN device
+        if args.can:
+            can_dev = args.can
+            if can_dev in ports:
+                ports.remove(can_dev)
+        else:
+            can_default = find_matching_device("can", ports) or (ports[0] if ports else None)
+            can_dev = prompt_choice("1) Select ttyUSB/ttyACM device for CAN (slcan)", ports, default_choice=can_default)
+            if can_dev in ports:
+                ports.remove(can_dev)
+
+        # 2. HU device
+        if args.hu:
+            hu_dev = args.hu
+            if hu_dev in ports:
+                ports.remove(hu_dev)
+        else:
+            hu_default = find_matching_device("hu", ports) or (ports[0] if ports else None)
+            hu_dev = prompt_choice("2) Select ttyUSB/ttyACM device for Head Unit (default hiworld)", ports, default_choice=hu_default)
+            if hu_dev in ports:
+                ports.remove(hu_dev)
+
+        # 3. Original Canbox
+        if args.orig is not None:
+            orig_dev = args.orig
+            if orig_dev in ports:
+                ports.remove(orig_dev)
+        else:
+            orig_default = find_matching_device("orig", ports)
+            orig_dev = prompt_choice("3) Select ttyUSB/ttyACM device for Original Canbox (Optional)", ports, default_choice=orig_default, allow_skip=True)
+            if orig_dev and orig_dev in ports:
+                ports.remove(orig_dev)
+
+    if not can_dev:
+        print("[!] Error: CAN device is required.")
+        sys.exit(1)
+
+    if not hu_dev:
+        print("[!] Error: Head Unit device is required.")
+        sys.exit(1)
+
+    if can_dev.startswith("/dev/"):
+        setup_slcan(can_dev)
+        can_iface = "can0"
+    else:
+        can_iface = can_dev
+
     app_bin = build_app()
-    
+
     logger = Logger()
     stats = {"APP_LINES": 0, "ORIG_BYTES": 0, "CAN_FRAMES": 0, "HU_TX_BYTES": 0, "HU_RX_BYTES": 0}
-    
-    can_sniffer = CanSniffer("can0", logger, stats)
+
+    can_sniffer = CanSniffer(can_iface, logger, stats)
     can_sniffer.start()
-    
+
     # Start UART proxy for Head Unit connection
-    uart_proxy = UartProxy(hu_dev, 38400, logger, stats)
+    uart_proxy = UartProxy(hu_dev, args.baud, logger, stats)
     uart_proxy.start()
-    
+
     # Start original canbox logger if selected
     if orig_dev:
-        # Assuming 38400 baud for original canbox too
-        t_orig = threading.Thread(target=read_serial, args=(orig_dev, 38400, logger, "ORIG_CANBOX", stats), daemon=True)
+        t_orig = threading.Thread(target=read_serial, args=(orig_dev, args.baud, logger, "ORIG_CANBOX", stats), daemon=True)
         t_orig.start()
-        
-    # 3. Start the app
+
+    # Start the app
     env = os.environ.copy()
-    env["CANBOX_CAN_IFACE"] = "can0"
+    env["CANBOX_CAN_IFACE"] = can_iface
     env["CANBOX_UART_DEVICE"] = uart_proxy.slave_name
-    env["CANBOX_HU_PROTOCOL"] = "hiworld"
+    env["CANBOX_HU_PROTOCOL"] = args.protocol
     
     print("[*] Starting the application...")
     

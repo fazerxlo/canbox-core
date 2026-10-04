@@ -36,12 +36,19 @@ Run the logger:
 
 ### Interface Configuration
 
-When the script starts, it will ask you to map your connected USB adapters:
-1. **CAN Adapter:** The adapter connected to the vehicle bench (slcan).
-2. **Head Unit Adapter:** The adapter connected to the Android Head Unit.
-3. **Original Canbox (Optional):** The adapter connected to a reference OEM Canbox.
+When the script starts, it will ask you to map your connected USB adapters, with intelligent defaults auto-detected from hardware USB signatures:
+1. **CAN Adapter (slcan):** ID `1a86:7523` (QinHeng Electronics CH340 serial converter).
+2. **Head Unit (default hiworld):** ID `067b:2303` (Prolific Technology, Inc. PL2303 Serial Port).
+3. **Original Canbox (Optional):** ID `0403:6001` (Future Technology Devices International, Ltd FT232 Serial (UART) IC).
 
-*Tip: You can just press `Enter` to accept the default available port or hit `c` to enter a custom path manually.*
+*Tip: You can just press `Enter` to accept the recommended default port, enter `0` to skip optional adapters, or hit `c` to specify a custom device path.*
+
+You can also pass arguments directly or use `-y`/`--auto` to accept all detected defaults non-interactively:
+```bash
+./tools/canbox_e2e_logger.py -y
+# Or specify explicit ports:
+./tools/canbox_e2e_logger.py --can /dev/ttyUSB0 --hu /dev/ttyUSB1 --orig /dev/ttyUSB2 --baud 38400
+```
 
 ### Runtime Controls
 
