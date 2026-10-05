@@ -129,7 +129,9 @@ void can_router_process_can(const can_frame_t *frame) {
         s_current_state.alerts.realtime_updated = false;
         if (s_current_state.alerts.realtime_alert.is_active) {
             if (!s_last_sent_state.alerts.realtime_alert.is_active ||
-                s_current_state.alerts.realtime_alert.can_alarm_id != s_last_sent_state.alerts.realtime_alert.can_alarm_id) {
+                s_current_state.alerts.realtime_alert.can_alarm_id != s_last_sent_state.alerts.realtime_alert.can_alarm_id ||
+                s_current_state.alerts.realtime_alert.door_mask != s_last_sent_state.alerts.realtime_alert.door_mask ||
+                s_current_state.alerts.realtime_alert.param_detail != s_last_sent_state.alerts.realtime_alert.param_detail) {
                 hu_protocol_send_alert_single(&s_current_state.alerts.realtime_alert);
             }
             s_last_sent_state.alerts.realtime_alert = s_current_state.alerts.realtime_alert;

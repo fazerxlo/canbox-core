@@ -1,0 +1,209 @@
+alarm_index_hex,alarm_index_dec,can_alarm_id_hex,can_alarm_id_dec,active,severity,pictogram,journal_bits,alert_text,category
+0x00,0,0x000C,12,0,0,0,54;55;56;57,Tyre pressure low.,Tyre Under-Inflation Detection System (TPMS) alert
+0x01,1,0x000B,11,1,1,1,10;11;12;13;14;15;16;125,Door(s) open.,Vehicle body openings & passenger access monitoring
+0x02,2,0x019C,412,1,0,0,,Press the park button and the brake pedal.,Braking system operational warning or hydraulic/wear threshold alert
+0x03,3,0x0008,8,1,2,2,3,Braking system faulty.,"Braking system malfunction / critical brake failure (displayed when door_mask=0x00/0xFF during BSI diagnostic check; if individual door bits set in door_mask, door popup is rendered)"
+0x04,4,0x019B,411,1,0,0,,"To release the parking brake, press the brake pedal.",Braking system operational warning or hydraulic/wear threshold alert
+0x05,5,0x019A,410,1,0,0,,"Place gearbox in position ""N"".",Transmission / automatic gearbox selector & interlock notice
+0x06,6,0x0002,2,1,1,1,,Engine oil temperature too high.,Powertrain / engine management / mechanical fluid level alert
+0x07,7,0x0001,1,1,2,2,1,Engine temperature fault: Stop the vehicle.,Powertrain / engine management / mechanical fluid level alert
+0x08,8,0x000F,15,1,1,1,27,Risk of particle filter clogging: See handbook.,Powertrain / engine management / mechanical fluid level alert
+0x09,9,0x000A,10,1,1,1,,Air suspension OK: vehicle leveled,Active suspension status and height leveling confirmation
+0x0A,10,0x000E,14,0,1,1,,FAP additive level low.,Powertrain / engine management / mechanical fluid level alert
+0x0B,11,,,0,0,0,,,Vehicle body openings & passenger access monitoring
+0x0C,12,0x000D,13,1,2,2,59;60;61;62,Puncture(s) in tyres detected.,Tyre Under-Inflation Detection System (TPMS) alert
+0x0D,13,0x0003,3,1,1,1,6,Top up coolant level.,Powertrain / engine management / mechanical fluid level alert
+0x0E,14,0x0005,5,1,2,2,0,Engine oil pressure fault: Stop the vehicle.,Powertrain / engine management / mechanical fluid level alert
+0x0F,15,0x0004,4,1,1,1,8,Top up engine oil level.,Powertrain / engine management / mechanical fluid level alert
+0x10,16,0x007F,127,1,1,1,25,Depollution system faulty,Engine emissions / depollution anti-pollution system malfunction (exhaust gas treatment / catalytic converter / DPF fault)
+0x11,17,0x0067,103,1,1,1,21,Brake pads worn.,Braking system operational warning or hydraulic/wear threshold alert
+0x12,18,0x0000,0,1,0,0,,Diagnosis OK.,On-board diagnostic system test execution and status
+0x13,19,0x006E,110,1,1,1,30,Gearbox fault: Repair needed.,Transmission / automatic gearbox selector & interlock notice
+0x14,20,0x006B,107,1,1,1,17,ESP/ASR system faulty.,Vehicle status notification / configuration change confirmation
+0x15,21,0x006A,106,1,1,1,26,ABS system faulty.,Vehicle status notification / configuration change confirmation
+0x16,22,0x006C,108,1,1,1,31,Suspension faulty.,Electronic / active suspension damping status or fault
+0x17,23,0x0066,102,0,2,2,,Braking system faulty.,Braking system operational warning or hydraulic/wear threshold alert
+0x18,24,,,0,1,1,,,Passive passenger safety / restraint system status
+0x19,25,,,0,1,1,,,Passive passenger safety / restraint system status
+0x1A,26,0x006F,111,1,1,1,33,Speed control system faulty.,Speed limiter / cruise control / overspeed warning
+0x1B,27,0x007E,126,1,1,1,141,Engine management system faulty,Engine management / depollution system malfunction
+0x1C,28,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x1D,29,0x0073,115,1,1,1,50,Ambient brightness sensor faulty.,Vehicle status notification / configuration change confirmation
+0x1E,30,0x0072,114,0,1,1,,Rain sensor faulty.,Vehicle status notification / configuration change confirmation
+0x1F,31,0x007D,125,1,1,1,20,Presence of water in diesel filter: Repair needed.,Vehicle status notification / configuration change confirmation
+0x20,32,0x0087,135,1,1,1,144,Left-hand sliding side door faulty,Vehicle body openings & passenger access monitoring
+0x21,33,0x0075,117,1,1,1,43,Automatic headlamp adjustment faulty.,Vehicle exterior lighting and bulb failure monitoring
+0x22,34,0x0086,134,1,1,1,143,Right-hand sliding side door faulty,Vehicle body openings & passenger access monitoring
+0x23,35,0x0074,116,1,1,1,,Bulbs blown.,Vehicle exterior lighting and bulb failure monitoring
+0x24,36,0x0085,133,0,1,1,,Battery low.,Electrical power generation & charging circuit status
+0x25,37,0x0084,132,0,1,1,,Battery charge faulty.,Electrical power generation & charging circuit status
+0x26,38,0x0081,129,1,1,1,29,Particle filter additive level too low: Repair needed.,Powertrain / engine management / mechanical fluid level alert
+0x27,39,0x0080,128,0,1,1,24,Depollution system faulty.,Vehicle status notification / configuration change confirmation
+0x28,40,0x00D9,217,1,0,0,9,Handbrake on !,Braking system operational warning or hydraulic/wear threshold alert
+0x29,41,0x00D2,210,1,3,3,101;102,Seat belt(s) not fastened.,Passive passenger safety / restraint system status
+0x2A,42,0x00D0,208,0,0,0,,Passenger airbag switched off.,Passive passenger safety / restraint system status
+0x2B,43,0x00DF,223,1,0,0,46,Screen washer fluid level low.,Visibility / wash-wipe equipment status
+0x2C,44,0x00CB,203,0,0,0,,Current speed too high.,Speed limiter / cruise control / overspeed warning
+0x2D,45,0x00CA,202,0,1,1,,Ignition key left in.,Vehicle status notification / configuration change confirmation
+0x2E,46,0x00C9,201,0,0,0,,Sidelights left on.,Vehicle exterior lighting and bulb failure monitoring
+0x2F,47,,,0,3,3,,,Passive passenger safety / restraint system status
+0x30,48,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x31,49,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x32,50,0x00E4,228,1,0,0,138,Check and re-initialise tyre pressure.,Tyre Under-Inflation Detection System (TPMS) alert
+0x33,51,0x00E3,227,1,0,0,47,Remote control battery spent.,Electrical power generation & charging circuit status
+0x34,52,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x35,53,0x00D7,215,1,0,0,106,"Put automatic gearbox in ""P"" position.",Transmission / automatic gearbox selector & interlock notice
+0x36,54,,,0,0,0,,,Braking system operational warning or hydraulic/wear threshold alert
+0x37,55,0x00E0,224,1,0,0,22,Fuel level low.,Vehicle status notification / configuration change confirmation
+0x38,56,,,0,1,1,,,Internal unmapped index / diagnostic placeholder
+0x39,57,,,0,3,3,126,,Passive passenger safety / restraint system status
+0x3A,58,,,0,3,3,,,Passive passenger safety / restraint system status
+0x3B,59,,,0,3,3,,,Passive passenger safety / restraint system status
+0x3C,60,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x3D,61,0x00E5,229,1,1,1,52;148;149;150;151,Tyre pressure(s) not monitored.,Under-inflation detection system inactive or wheel sensors missing / not communicating
+0x3E,62,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x3F,63,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x40,64,0x0135,309,0,0,0,,Doors locked.,Vehicle body openings & passenger access monitoring
+0x41,65,0x013A,314,0,0,0,,,Vehicle status notification / configuration change confirmation
+0x42,66,0x0137,311,1,0,0,,Child safety activated.,Vehicle status notification / configuration change confirmation
+0x43,67,0x0133,307,1,0,0,,Self locking doors activated.,Vehicle body openings & passenger access monitoring
+0x44,68,0x0131,305,1,0,0,,Automatic headlamp lighting activated,Automatic dusk/darkness headlamp lighting feature enabled
+0x45,69,0x012F,303,1,0,0,,Automatic windscreen wiper activated.,Visibility / wash-wipe equipment status
+0x46,70,0x0083,131,1,1,1,37,Immobiliser faulty.,Transponder key immobiliser / electronic anti-theft system communication error
+0x47,71,0x012E,302,0,0,0,,"""Sport"" suspension mode activated.",Electronic / active suspension damping status or fault
+0x48,72,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x49,73,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x4A,74,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x4B,75,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x4C,76,0x00E2,226,0,1,1,,LPG fuel refused.,Vehicle status notification / configuration change confirmation
+0x4D,77,0x0082,130,0,1,1,,LPG system faulty.,Vehicle status notification / configuration change confirmation
+0x4E,78,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x4F,79,,,0,1,1,,,Internal unmapped index / diagnostic placeholder
+0x50,80,0x0198,408,1,1,1,,Stop & Start system faulty,Powertrain Stop & Start / ECO system fault
+0x51,81,0x0195,405,0,0,0,,Use Stop & Start.,Vehicle exterior lighting and bulb failure monitoring
+0x52,82,0x0194,404,0,0,0,,Stop & Start available.,Vehicle exterior lighting and bulb failure monitoring
+0x53,83,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x54,84,,,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x55,85,0x0193,403,0,0,0,,Stop & Start deferred.,Vehicle exterior lighting and bulb failure monitoring
+0x56,86,0x0192,402,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x57,87,0x0191,401,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x58,88,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x59,89,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x5A,90,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x5B,91,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x5C,92,0x0202,514,1,1,1,154,Anti-rollback system faulty.,Vehicle exterior lighting and bulb failure monitoring
+0x5D,93,0x020B,523,1,1,1,156,Inter-vehicles time measuring impossible: initialisation in progress.,Vehicle exterior lighting and bulb failure monitoring
+0x5E,94,0x020A,522,1,0,0,,Inter-vehicles time measuring impossible: poor visibility.,Vehicle status notification / configuration change confirmation
+0x5F,95,,,0,0,0,,,Braking system operational warning or hydraulic/wear threshold alert
+0x60,96,0x0209,521,1,0,0,,ESP system deactivated.,Vehicle exterior lighting and bulb failure monitoring
+0x61,97,0x0206,518,1,0,0,,Enhanced traction control: Gravel mode.,Vehicle exterior lighting and bulb failure monitoring
+0x62,98,0x0205,517,1,0,0,,Enhanced traction control: Snow mode.,Vehicle status notification / configuration change confirmation
+0x63,99,0x0204,516,1,0,0,,Enhanced traction control: Mud mode,Vehicle status notification / configuration change confirmation
+0x64,100,0x0203,515,1,0,0,,Enhanced traction control : Normal mode.,Vehicle status notification / configuration change confirmation
+0x65,101,,,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x66,102,,,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x67,103,,,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x68,104,0x01FB,507,1,0,0,,Roof operation complete.,Retractable Hardtop (Coupe-Cabriolet)
+0x69,105,0x01FA,506,1,0,0,,Impossible to move roof: screen not deployed.,Retractable Hardtop (Coupe-Cabriolet)
+0x6A,106,0x01F9,505,0,1,1,,Roof mechanism not locked.,Telematic emergency call & road assistance service status
+0x6B,107,0x01F8,504,1,0,0,,Operation of roof impossible : boot open.,Retractable Hardtop (Coupe-Cabriolet)
+0x6C,108,0x01F7,503,1,0,0,,Operation of roof impossible : speed too high.,Retractable Hardtop (Coupe-Cabriolet)
+0x6D,109,0x01F6,502,1,0,0,,Roof operation impossible: external temperature low.,Retractable Hardtop (Coupe-Cabriolet)
+0x6E,110,0x01FE,510,1,1,1,,Folding roof mechanism faulty.,Retractable Hardtop (Coupe-Cabriolet)
+0x6F,111,0x01F5,501,0,1,1,,Boot mechanism not locked.,Retractable Hardtop (Coupe-Cabriolet)
+0x70,112,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x71,113,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0x72,114,,,0,0,0,,,Vehicle body openings & passenger access monitoring
+0x73,115,,,0,0,0,,,Vehicle body openings & passenger access monitoring
+0x74,116,0x007C,124,0,1,1,,Roof frame fault.,Tyre Under-Inflation Detection System (TPMS) alert
+0x75,117,0x01FD,509,1,0,0,,Roof movement impossible: roof locked,Retractable Hardtop (Coupe-Cabriolet)
+0x76,118,,,0,0,0,,,Tyre Under-Inflation Detection System (TPMS) alert
+0x77,119,0x01FC,508,1,0,0,,Roof operation incomplete.,Retractable Hardtop (Coupe-Cabriolet)
+0x78,120,0x0012,18,1,1,1,152,Suspension faulty.,Electronic / active suspension damping status or fault
+0x79,121,0x0068,104,1,1,1,123,Handbrake faulty.,Parking brake mechanism or electric handbrake actuator fault
+0x7A,122,0x0069,105,1,1,1,124,Mobile deflector faulty.,Active aerodynamic spoiler / deflector mechanism fault
+0x7B,123,0x006D,109,1,2,2,5,Power steering faulty.,Hydraulic or electric power steering assistance critical failure
+0x7C,124,0x0013,19,1,1,1,153,Power steering faulty.,Hydraulic or electric power steering assistance service warning
+0x7D,125,0x0078,120,1,1,1,23,Airbag(s) or pretensioner seat belt(s) faulty.,Safety / Airbag and pyrotechnic pretensioner system fault
+0x7E,126,0x0088,136,1,1,1,91,Parking assistance system faulty.,Parking assistance / AAS ultrasonic sensor system fault
+0x7F,127,0x0089,137,1,1,1,92,Space measuring system faulty.,Parking space measurement / lateral slot monitoring fault
+0x80,128,0x008A,138,1,1,1,18,Battery charge faulty.,Electrical power generation and alternator charging circuit
+0x81,129,0x0076,118,1,1,1,34,Directional headlamps faulty,Directional headlamp system fault
+0x82,130,0x008C,140,0,0,0,45,,Vehicle status notification / configuration change confirmation
+0x83,131,0x008D,141,1,1,1,94;95;96;97,Tyre pressure low.,Tyre Under-Inflation Detection System (TPMS) alert
+0x84,132,0x0222,546,1,0,0,51,Disengage the clutch fully.,Powertrain clutch pedal interlock notification
+0x85,133,0x0221,545,1,0,0,,ECO deactivated.,Powertrain Stop & Start / ECO mode status
+0x86,134,0x0220,544,1,0,0,,ECO activated.,Powertrain Stop & Start / ECO mode status
+0x87,135,0x0091,145,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x88,136,0x00CD,205,1,0,0,,No cruise control: speed low.,Cruise control and speed limiter operational inhibit
+0x89,137,0x00D1,209,1,0,0,100,Active bonnet deployed.,Pyrotechnic pedestrian active bonnet safety deployment
+0x8A,138,0x00D4,212,0,3,3,,,Vehicle status notification / configuration change confirmation
+0x8B,139,0x00D8,216,1,0,0,107,Risk of black ice.,Outside temperature and road surface ice hazard notification
+0x8C,140,0x00DE,222,1,1,1,108;109;110;111;112;113;114;115,Front left hand door open,Vehicle body openings & passenger access monitoring
+0x8D,141,0x00E1,225,1,0,0,,Fuel circuit deactivated.,Vehicle status notification / configuration change confirmation
+0x8E,142,0x00E6,230,0,0,0,117,,Vehicle status notification / configuration change confirmation
+0x8F,143,0x00EC,236,1,0,0,130,Prolonged starting in progress.,Vehicle status notification / configuration change confirmation
+0x90,144,0x00ED,237,1,0,0,,Starting impossible : unlock steering.,Vehicle status notification / configuration change confirmation
+0x91,145,0x00EE,238,0,0,0,119,,Electronic / active suspension damping status or fault
+0x92,146,0x00EF,239,1,0,0,131,Remote control not detected.,Braking system operational warning or hydraulic/wear threshold alert
+0x93,147,0x012D,301,0,0,0,,,Vehicle exterior lighting and bulb failure monitoring
+0x94,148,0x0130,304,1,0,0,,Automatic windscreen wiper deactivated.,Visibility / Rain Sensor
+0x95,149,0x0132,306,1,0,0,,Automatic headlights deactivated.,Exterior Lighting / Automatic Headlamps
+0x96,150,0x0136,310,0,0,0,,,Vehicle status notification / configuration change confirmation
+0x97,151,0x0138,312,1,0,0,,Child safety deactivated.,Safety / Child Lock
+0x98,152,0x0139,313,0,0,0,,,Automatic rain-sensing windscreen wiper feature disabled
+0x99,153,0x013B,315,0,0,0,120,,Vehicle status notification / configuration change confirmation
+0x9A,154,0x013C,316,0,0,0,121,,Vehicle status notification / configuration change confirmation
+0x9B,155,0x00DA,218,0,0,0,,,Passive passenger safety / restraint system status
+0x9C,156,0x0079,121,1,1,1,90,Active bonnet faulty,Safety / Pyrotechnics
+0x9D,157,0x00E7,231,1,1,1,118,"High speed, check tyre pressures are suitable.",Passive passenger safety / restraint system status
+0x9E,158,0x00E9,233,0,0,0,127,,Vehicle body openings & passenger access monitoring
+0x9F,159,0x00EA,234,1,1,1,128,Hands free starting system faulty.,Retractable hard-top / cabriolet roof mechanism state
+0xA0,160,0x00EB,235,1,1,1,129,Starting phase has failed (consult handbook).,Retractable hard-top / cabriolet roof mechanism state
+0xA1,161,0x00D3,211,1,3,3,103;104;105,None of rear passenger seat belts fastened,Safety / Seatbelt Monitor
+0xA2,162,0x013D,317,1,0,0,,Parking difficult,Parking Space Measurement (Lateral Slot)
+0xA3,163,0x013E,318,0,0,0,,,Braking system operational warning or hydraulic/wear threshold alert
+0xA4,164,0x00CE,206,1,0,0,,Cruise control activation impossible: enter speed.,Speed Limiter / Cruise Control
+0xA5,165,0x0134,308,1,0,0,,Self locking doors deactivated.,Body / Central Locking
+0xA6,166,0x0064,100,1,1,1,140,Handbrake cable fault auto handbrake activated.,Electric Parking Brake
+0xA7,167,0x007A,122,1,1,1,133,Automatic gearbox faulty,Transmission (Automatic Gearbox)
+0xA8,168,0x0092,146,1,1,1,134,Overtaking assistance system faulty.,Telematic emergency call & road assistance service status
+0xA9,169,0x0095,149,0,0,0,,Lane monitoring system deactivated.,Vehicle status notification / configuration change confirmation
+0xAA,170,0x0096,150,1,0,0,136,Reminder : Lane monitoring inactive.,Telematic emergency call & road assistance service status
+0xAB,171,0x0097,151,1,1,1,137,Anti-wander lane-crossing warning device faulty,AFIL Lane Departure Assist
+0xAC,172,0x009A,154,1,1,1,67;68,Dipped headlamp bulb faulty,Exterior Lighting / Dipped Beam
+0xAD,173,0x009B,155,1,1,1,69;70,Main beam headlamp bulb faulty,Exterior Lighting / Main Beam
+0xAE,174,0x009C,156,1,1,1,71;72,Left hand brake light bulb faulty,Exterior Lighting / Brake Lamp
+0xAF,175,0x009D,157,1,1,1,73;74;75;76,Foglamp bulb faulty,Exterior Lighting / Fog Lamp
+0xB0,176,0x009E,158,1,1,1,77;78;79;80,Direction indicators faulty,Exterior Lighting / Indicators
+0xB1,177,0x009F,159,1,1,1,81;82,Left hand reversing light bulb faulty,Exterior Lighting / Reversing Lamp
+0xB2,178,0x00A0,160,1,1,1,63;64;65;66,Sidelamp bulb faulty,Exterior Lighting / Sidelamp
+0xB3,179,0x00D5,213,0,3,3,,,Telematic emergency call & road assistance service status
+0xB4,180,0x00D6,214,0,3,3,,,Telematic emergency call & road assistance service status
+0xB5,181,0x00E8,232,1,1,1,139,Tyre pressure too low,Tyre Under-Inflation Detection System (TPMS) alert
+0xB6,182,0x013F,319,0,0,0,,,Telematic emergency call & road assistance service status
+0xB7,183,0x0140,320,0,0,0,,,Telematic emergency call & road assistance service status
+0xB8,184,0x0196,406,0,0,0,,,Telematic emergency call & road assistance service status
+0xB9,185,0x0197,407,0,0,0,,,Telematic emergency call & road assistance service status
+0xBA,186,0x0199,409,0,0,0,,,Telematic emergency call & road assistance service status
+0xBB,187,0x0011,17,1,1,1,142,Suspension faulty: Max speed 90 km/h,Electronic / active suspension damping status or fault
+0xBC,188,0x0063,99,1,0,0,,Automatic handbrake deactivated.,Telematic emergency call & road assistance service status
+0xBD,189,0x00A1,161,1,0,0,,Parking lamps activated.,Telematic emergency call & road assistance service status
+0xBE,190,0x00F0,240,1,0,0,,Diagnosis in progress...,BSI full vehicle diagnostic self-test check routine currently running
+0xBF,191,0x00F1,241,1,0,0,,Diagnosis completed,BSI full vehicle diagnostic self-test check routine finished with zero active critical faults
+0xC0,192,0x00F2,242,1,0,0,,,Telematic emergency call & road assistance service status
+0xC1,193,0x00F3,243,1,0,0,,,Telematic emergency call & road assistance service status
+0xC2,194,0x00F4,244,1,0,0,,,Vehicle status notification / configuration change confirmation
+0xC3,195,0x00F5,245,1,0,0,,,Telematic emergency call & road assistance service status
+0xC4,196,0x00F6,246,1,0,0,,,Telematic emergency call & road assistance service status
+0xC5,197,0x00F7,247,1,3,3,145,Rear LH seat belt not fastened,Passive passenger safety / seatbelt status
+0xC6,198,0x00F8,248,1,3,3,146,Rear center seat belt not fastened,Passive passenger safety / seatbelt status
+0xC7,199,0x00F9,249,1,3,3,147,Rear RH seat belt not fastened,Passive passenger safety / seatbelt status
+0xC8,200,0x01FF,511,1,1,1,,Roof operation impossible: rear screen open,Retractable Hardtop (Coupe-Cabriolet)
+0xC9,201,0x0200,512,1,1,1,,Roof movement impossible: luggage cover not locked,Retractable Hardtop (Coupe-Cabriolet)
+0xCA,202,0x0201,513,1,0,0,,Roof operation complete: lock roof,Retractable Hardtop (Coupe-Cabriolet)
+0xCB,203,0x0061,97,1,0,0,,Handbrake on.,Telematic emergency call & road assistance service status
+0xCC,204,0x0062,98,1,0,0,,Handbrake off.,Telematic emergency call & road assistance service status
+0xCD,205,0x007B,123,1,0,0,,"Press footbrake and set gear lever to ""N"".",Telematic emergency call & road assistance service status
+0xCE,206,,,0,0,0,,,Internal unmapped index / diagnostic placeholder
+0xCF,207,,,0,0,0,,,Internal unmapped index / diagnostic placeholder

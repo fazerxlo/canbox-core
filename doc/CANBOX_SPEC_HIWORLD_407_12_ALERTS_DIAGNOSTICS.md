@@ -297,26 +297,36 @@ The Android Head Unit (`PeugeotDataController.getWarningString`) incorporates a 
 | **Bonnet Open** | `0x0083` (131) | `0x0083` | `getPsaAlertString(0x83)` | **Bonnet open** |
 | **Rear Left Door Open** | `0x0084` (132) | `0x0084` | `getPsaAlertString(0x84)` | **Rear left hand door open** |
 | **Front Right Door Open** | `0x0085` (133) | `0x0085` | `getPsaAlertString(0x85)` | **Front right hand door open** |
-| **Immobiliser Faulty** | `0x0086` (134) | `0x0086` | `getPsaAlertString(0x86)` | **Immobiliser faulty** |
-| **Speed Control System Faulty** | `0x0087` (135) | `0x0087` | `getPsaAlertString(0x87)` | **Speed control system faulty** |
-| **More Than One Door Open** | `0x009C` (156) | `0x009C` | `getPsaAlertString(0x9C)` | **More than one door open.** |
-| **Suspension Fault (Max 90 km/h)** | `0x009E` (158) | `0x009E` | `getPsaAlertString(0x9E)` | **Suspension faulty max. speed : 90 km/h.** |
-| **Rain Sensor Faulty** | `0x00CB` (203) | `0x00CB` | `getPsaAlertString(0xCB)` | **Rain sensor faulty** |
-| **Screen Washer Fluid Low** | `0x00D0` (208) | `0x00D0` | `getPsaAlertString(0xD0)` | **Screen washer fluid level low** |
-| **Handbrake Faulty** | `0x00DE` (222) | `0x00DE` | `getPsaAlertString(0xDE)` | **Handbrake faulty.** |
-| **Remote Key Battery Flat** | `0x00DF` (223) | `0x00DF` | `getPsaAlertString(0xDF)` | **Remote control battery flat** |
-| **Sidelights Left On** | `0x00E0` (224) | `0x00E0` | `getPsaAlertString(0xE0)` | **Sidelights left on** |
-| **Parking Assistance Faulty** | `0x00E3` (227) | `0x00E3` | `getPsaAlertString(0xE3)` | **Parking assistance system faulty** |
-| **Ignition Key Left In** | `0x00E5` (229) | `0x00E5` | `getPsaAlertString(0xE5)` | **Ignition key left in** |
-| **ECO Mode Activated** | `0x00EF` (239) | `0x00EF` | `getPsaAlertString(0xEF)` | **ECO activated.** |
-| **Stop Warning** | `0x00F7` (247) | `0x00F7` | `getPsaAlertString(0xF7)` | **Stop** |
-| **Max Speed 40 km/h** | `0x00F8` (248) | `0x00F8` | `getPsaAlertString(0xF8)` | **Max speed : 40 km/h** |
-| **Max Speed 10 km/h** | `0x00F9` (249) | `0x00F9` | `getPsaAlertString(0xF9)` | **Max speed : 10 km/h** |
-| **Stop & Start Activated** | `0x01F5` (501) | `0x01F5` | `getPsaAlertString(0x1F5)` | **Stop & Start activated.** |
-| **Use Stop & Start** | `0x01F6` (502) | `0x01F6` | `getPsaAlertString(0x1F6)` | **Use Stop & Start.** |
-| **Stop & Start Faulty** | `0x01F7` (503) | `0x01F7` | `getPsaAlertString(0x1F7)` | **STOP - START system faulty.** |
-| **Stop & Start Available** | `0x01FE` (510) | `0x01FE` | `getPsaAlertString(0x1F8)` | **Stop & Start available.** |
-| **Roof Speed Too High** | `0x0222` (546) | `0x0222` | `getPsaAlertString(0x222)` | **Operation of roof impossible : speed too high.** |
+| **Immobiliser Faulty** | `0x0083` (131) | `0x0083` | `getAlertText(0x83)` | **Immobiliser faulty** |
+| **Right Rear Sliding Door Faulty** | `0x0086` (134) | `0x0086` | `getAlertText(0x86)` | **Right rear sliding door faulty** |
+| **Left Rear Sliding Door Faulty** | `0x0087` (135) | `0x0087` | `getAlertText(0x87)` | **Left rear sliding door faulty.** |
+| **Speed Control System Faulty** | `0x006F` (111) | `0x006F` | `getAlertText(0x6F)` | **Speed control system faulty.** |
+| **More Than One Door Open** | `0x009C` (156) | `0x009C` | `getAlertText(0x9C)` | **More than one door open.** |
+| **Suspension Fault (Max 90 km/h)** | `0x0011` (17) | `0x0011` | `getAlertText(0x11)` | **Suspension faulty max 90 km/h** |
+| **Rain Sensor Faulty** | `0x00CB` (203) | `0x00CB` | `getAlertText(0xCB)` | **Rain sensor faulty** |
+| **Screen Washer Fluid Low** | `0x00DF` (223) | `0x00DF` | `getAlertText(0xDF)` | **Screen washer fluid level low.** |
+| **Handbrake Faulty** | `0x0068` (104) | `0x0068` | `getAlertText(0x68)` | **Handbrake faulty.** |
+| **Remote Key Battery Spent** | `0x00E3` (227) | `0x00E3` | `getAlertText(0xE3)` | **Remote control battery spent.** |
+| **Sidelights Left On** | `0x00E0` (224) | `0x00E0` | `getAlertText(0xE0)` | **Fuel level low** / **Sidelights left on** |
+| **Parking Assistance Faulty** | `0x0088` (136) | `0x0088` | `getAlertText(0x88)` | **Parking assistance system faulty** |
+| **Diagnosis In Progress** | `0x00F0` (240) | `0x00F0` | `getAlertText(0xF0)` | **Diagnosis in progress...** |
+| **Diagnosis Completed** | `0x00F1` (241) | `0x00F1` | `getAlertText(0xF1)` | **Diagnosis completed** |
+| **Rear LH Seatbelt Not Fastened** | `0x00F7` (247) | `0x00F7` | `getAlertText(0xF7)` | **Rear LH seat belt not fastened** |
+| **Rear Center Seatbelt Not Fastened** | `0x00F8` (248) | `0x00F8` | `getAlertText(0xF8)` | **Rear center seat belt not fastened** |
+| **Rear RH Seatbelt Not Fastened** | `0x00F9` (249) | `0x00F9` | `getAlertText(0xF9)` | **Rear RH seat belt not fastened** |
+| **Stop & Start Faulty** | `0x0198` (408) | `0x0198` | `getAlertText(0x198)` | **Stop & Start system faulty** |
+| **Roof Locked (Interlock)** | `0x01FD` (509) | `0x01FD` | `getAlertText(0x1FD)` | **Roof movement impossible: roof locked.** |
+| **Roof Rear Screen Open (Interlock)** | `0x01FF` (511) | `0x01FF` | `getAlertText(0x1FF)` | **Roof operation impossible: rear screen open.** |
+| **Engine Management Faulty** | `0x007E` (126) | `0x007E` | `getAlertText(0x7E)` | **Engine management system faulty** |
+| **Dipped Headlamp Bulb Faulty** | `0x009A` (154) | `0x009A` | `getAlertText(0x9A)` | **Dipped headlamp bulb faulty** |
+| **Main Beam Headlamp Bulb Faulty** | `0x009B` (155) | `0x009B` | `getAlertText(0x9B)` | **Main beam headlamp bulb faulty** |
+| **Left Hand Brake Light Bulb Faulty** | `0x009C` (156) | `0x009C` | `getAlertText(0x9C)` | **Left hand brake light bulb faulty** |
+| **Foglamp Bulb Faulty** | `0x009D` (157) | `0x009D` | `getAlertText(0x9D)` | **Foglamp bulb faulty** |
+| **Direction Indicators Faulty** | `0x009E` (158) | `0x009E` | `getAlertText(0x9E)` | **Direction indicators faulty** |
+| **Left Hand Reversing Light Faulty** | `0x009F` (159) | `0x009F` | `getAlertText(0x9F)` | **Left hand reversing light bulb faulty** |
+| **Sidelamp Bulb Faulty** | `0x00A0` (160) | `0x00A0` | `getAlertText(0xA0)` | **Sidelamp bulb faulty** |
+| **Parking Difficult** | `0x013D` (317) | `0x013D` | `getAlertText(0x13D)` | **Parking difficult** |
+| **Roof Speed Too High** | `0x01F7` (503) | `0x01F7` | `getAlertText(0x1F7)` | **Operation of roof impossible : speed too high.** |
 
 ---
 

@@ -1498,8 +1498,8 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
         case 0x00D9: return 0;                                    /* Rear screen open - suppressed */
         case 0x0008:                                              /* Door open / Braking system faulty */
             return PSA_HIWORLD_ALERT_HANDBRAKE;                   /* 0x0008: Braking system faulty in Hiworld HU */
-        case 0x000B:                                              /* Door open general / Driver seatbelt */
-            return PSA_HIWORLD_ALERT_SEATBELT_FL;                 /* Driver seatbelt */
+        case 0x000B:                                              /* Door open general */
+            return 0x000B;
         case 0x0004:                                              /* Tyre pressure low */
             if (param == 1) return PSA_HIWORLD_ALERT_TPMS_UNDER_FR;
             if (param == 2) return PSA_HIWORLD_ALERT_TPMS_UNDER_RR;
@@ -1511,24 +1511,14 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
             return PSA_HIWORLD_ALERT_TPMS_PUNCTURE_FL;
         case 0x00C9: return PSA_HIWORLD_ALERT_TPMS_UNDER_FL;      /* Tyre pressure(s) not monitored */
         case 0x00E5: return PSA_HIWORLD_ALERT_TPMS_UNDER_FL;      /* Tyre pressure(s) not monitored */
-        case 0x00D3:
         case 0x00E3: return PSA_HIWORLD_ALERT_BULB_SIDELIGHT;     /* Sidelight bulb */
-        case 0x013D: return PSA_HIWORLD_ALERT_BULB_DIPPED;        /* Dipped beam bulb */
-        case 0x00CE:
-        case 0x0134:
-        case 0x0097:
         case 0x00E7: return PSA_HIWORLD_ALERT_BULB_BRAKE;         /* Brake light bulb */
-        case 0x0092:
-        case 0x0095:
-        case 0x007A:
-        case 0x00E8: return PSA_HIWORLD_ALERT_BULB_REVERSE;       /* Reversing / indicator */
         case 0x0078: return PSA_HIWORLD_ALERT_AIRBAG;             /* Airbag / pretensioner */
         case 0x00F0: return 0x00F0;                               /* Diagnosis in progress... */
         case 0x00F1: return 0x00F1;                               /* Diagnosis complete */
         case 0x012F: return PSA_HIWORLD_ALERT_SEATBELT_FL;        /* Driver seatbelt */
         case 0x013A: return PSA_HIWORLD_ALERT_SEATBELT_FR;        /* Front passenger seatbelt */
         case 0x0130: return PSA_HIWORLD_ALERT_AUTO_LIGHTS;        /* Automatic headlamp lighting activated */
-        case 0x0086:
         case 0x01FA: return PSA_HIWORLD_ALERT_IMMOBILIZER;        /* Electronic immobilizer */
         default:
             return can_alarm_id;
@@ -1551,6 +1541,7 @@ uint8_t psa_can_alarm_id_get_severity(uint16_t can_alarm_id) {
         case 0x0003: /* Top up engine oil level */
         case 0x0004: /* Tyre pressure(s) low */
         case 0x000E: /* Power steering faulty */
+        case 0x0011: /* Suspension faulty: Max speed 90 km/h */
         case 0x0064: /* Particle filter clogging risk */
         case 0x0067: /* Brake pads worn / Gearbox */
         case 0x0068: /* Depollution system faulty */
@@ -1561,14 +1552,29 @@ uint8_t psa_can_alarm_id_get_severity(uint16_t can_alarm_id) {
         case 0x006F: /* Risk of particle filter clogging */
         case 0x0072: /* Suspension faulty: Max speed 90 km/h */
         case 0x0073: /* Automatic gearbox faulty */
+        case 0x0076: /* Directional headlamps faulty */
         case 0x0078: /* Airbag(s) or pretensioner faulty */
+        case 0x0079: /* Active bonnet faulty */
+        case 0x007A: /* Automatic gearbox faulty */
         case 0x007E: /* ABS / ESP system faulty */
         case 0x007F: /* Depollution system faulty */
         case 0x0083: /* Electronic anti-theft faulty */
-        case 0x0088: /* Tyre pressure system fault */
+        case 0x0086: /* Right-hand sliding side door faulty */
+        case 0x0087: /* Left-hand sliding side door faulty */
+        case 0x0088: /* Parking assistance system faulty */
+        case 0x0097: /* Anti-wander lane-crossing warning device faulty */
+        case 0x009A: /* Dipped headlamp bulb faulty */
+        case 0x009B: /* Main beam headlamp bulb faulty */
+        case 0x009C: /* Left hand brake light bulb faulty */
+        case 0x009D: /* Foglamp bulb faulty */
+        case 0x009E: /* Direction indicators faulty */
+        case 0x009F: /* Left hand reversing light bulb faulty */
+        case 0x00A0: /* Sidelamp bulb faulty */
         case 0x00E0: /* Fuel level low / TPMS */
         case 0x00E5: /* Tyre pressure(s) not monitored */
+        case 0x00E8: /* Tyre pressure too low */
         case 0x0195: /* Directional headlamps faulty */
+        case 0x0198: /* Stop & Start system faulty */
         case 0x0202: /* Automatic gearbox faulty */
             return 1;
 
