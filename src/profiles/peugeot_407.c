@@ -1390,7 +1390,7 @@ static const uint16_t Alarm_IndexToPointer_Tab[TOTAL_ALARM_ENTRIES] = {
     [0x04] = 0x019B, [0x05] = 0x019A, [0x06] = 0x0002, [0x07] = 0x0001,
     [0x08] = 0x000F, [0x09] = 0x000A, [0x0A] = 0x000E, [0x0B] = 0xFFFF,
     [0x0C] = 0x000D, [0x0D] = 0x0003, [0x0E] = 0x0005, [0x0F] = 0x0004,
-    [0x10] = 0x007F, [0x11] = 0x0067, [0x12] = 0xFFFF, [0x13] = 0x006E,
+    [0x10] = 0x007F, [0x11] = 0x0067, [0x12] = 0x0000, [0x13] = 0x006E,
     [0x14] = 0x006B, [0x15] = 0x006A, [0x16] = 0x006C, [0x17] = 0x0066,
     [0x18] = 0xFFFF, [0x19] = 0xFFFF, [0x1A] = 0x006F, [0x1B] = 0x007E,
     [0x1C] = 0xFFFF, [0x1D] = 0x0073, [0x1E] = 0x0072, [0x1F] = 0x007D,
@@ -1444,8 +1444,8 @@ static const uint16_t Alarm_BitToIndex_Tab[PSA_JOURNAL_TOTAL_BITS] = {
     0x0E, 0x07, 0xFFFF, 0x03, 0xFFFF, 0x7B, 0x0D, 0xFFFF, 0x0F, 0x28, 0x01, 0x01,
     0x01, 0x01, 0x01, 0x01, 0x01, 0x14, 0x80, 0xFFFF, 0x1F, 0x11, 0x37, 0x7D,
     0x27, 0x10, 0x15, 0x08, 0xFFFF, 0x29, 0x26, 0x13, 0x16, 0x1A, 0x81, 0x1B,
-    0x1D, 0x1E, 0x2C, 0x20, 0x21, 0x22, 0x8C, 0x8C, 0x8C, 0x82, 0x8C, 0x8C,
-    0x8C, 0x8C, 0x8C, 0x84, 0x8C, 0x8C, 0x8C, 0x2D, 0x2E, 0x2E, 0x2E, 0x2E,
+    0x1D, 0x46, 0x2C, 0x20, 0x21, 0x22, 0x8C, 0x8C, 0x8C, 0x82, 0x8C, 0x8C,
+    0x8C, 0x8C, 0x8C, 0x84, 0x10, 0x8C, 0x8C, 0x2D, 0x2E, 0x2E, 0x2E, 0x2E,
     0x32, 0x33, 0x35, 0xB2, 0xB2, 0xB2, 0xB2, 0xAC, 0xAC, 0xAD, 0xAD, 0xAE,
     0xAE, 0xAF, 0xAF, 0xAF, 0xAF, 0xB0, 0xB0, 0xB0, 0xB0, 0xB1, 0xB1, 0x47,
     0x4C, 0x4D, 0x50, 0x46, 0x51, 0x52, 0x9C, 0x7E, 0x7F, 0x55, 0x83, 0x83,
@@ -1453,11 +1453,12 @@ static const uint16_t Alarm_BitToIndex_Tab[PSA_JOURNAL_TOTAL_BITS] = {
     0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x60, 0x8E, 0x9D, 0x91,
     0x99, 0x9A, 0x61, 0x79, 0x7A, 0x62, 0x63, 0x9E, 0x9F, 0xA0, 0x8F, 0x92,
     0x64, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0x6B, 0xB5, 0xA6, 0x68, 0xBB, 0x69,
-    0x6A, 0xC5, 0xC6, 0xC7, 0x6C, 0x6D, 0x6E, 0x6F, 0x78, 0x7C, 0x74, 0x75,
+    0x6A, 0xC5, 0xC6, 0xC7, 0x94, 0x44, 0x3D, 0x97, 0x78, 0x7C, 0x74, 0x75,
     0x77, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF
 };
 
 uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_mask, uint8_t param) {
+    (void)door_mask;
     switch (can_alarm_id) {
         case 0x000D: return PSA_HIWORLD_ALERT_LOW_FUEL;           /* Low fuel */
         case 0x0001: return PSA_HIWORLD_ALERT_ENGINE_TEMP;        /* Engine temp too high */
@@ -1484,30 +1485,20 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
         case 0x0072:
         case 0x00D8:
         case 0x00E2: return PSA_HIWORLD_ALERT_SUSPENSION_SYSTEM;  /* Suspension system error */
-        case 0x007F: return PSA_HIWORLD_ALERT_AUTO_LIGHTS;        /* Automatic headlights */
+        case 0x007F: return PSA_HIWORLD_ALERT_ANTIPOLLUTION;      /* Depollution system faulty */
         case 0x0081: return PSA_HIWORLD_ALERT_AUTO_LIGHTS;        /* Auto lights code */
         case 0x00CB: return PSA_HIWORLD_ALERT_AUTO_WIPERS;        /* Automatic wipers */
-        case 0x0083: return PSA_HIWORLD_ALERT_AUTO_WIPERS;        /* Auto wipers code */
+        case 0x0083: return PSA_HIWORLD_ALERT_IMMOBILIZER;        /* Electronic anti-theft faulty */
         case 0x0139: return PSA_HIWORLD_ALERT_AUTO_WIPERS;        /* Auto wipers deactivated */
-        case 0x0074: return PSA_HIWORLD_ALERT_DOOR_FL;            /* FL door open */
-        case 0x0085: return PSA_HIWORLD_ALERT_DOOR_FR;            /* FR door open */
-        case 0x0084: return PSA_HIWORLD_ALERT_DOOR_REAR;          /* Rear door open */
-        case 0x0080: return PSA_HIWORLD_ALERT_BOOT;               /* Boot open */
+        case 0x0138: return PSA_HIWORLD_ALERT_LOW_FUEL;          /* Fuel level too low */
+        case 0x0074: return 0;                                    /* FL door open - suppressed */
+        case 0x0085: return 0;                                    /* FR door open - suppressed */
+        case 0x0084: return 0;                                    /* Rear door open - suppressed */
+        case 0x0080: return 0;                                    /* Boot open - suppressed */
+        case 0x00D9: return 0;                                    /* Rear screen open - suppressed */
         case 0x0008:                                              /* Door open / Braking system faulty */
-            if (door_mask != 0 && door_mask != 0xFF) {
-                if (door_mask & 0x01) return PSA_HIWORLD_ALERT_DOOR_FL;
-                if (door_mask & 0x02) return PSA_HIWORLD_ALERT_DOOR_FR;
-                if (door_mask & 0x0C) return PSA_HIWORLD_ALERT_DOOR_REAR;
-                if (door_mask & 0x10) return PSA_HIWORLD_ALERT_BOOT;
-            }
             return PSA_HIWORLD_ALERT_HANDBRAKE;                   /* 0x0008: Braking system faulty in Hiworld HU */
         case 0x000B:                                              /* Door open general / Driver seatbelt */
-            if (door_mask != 0 && door_mask != 0xFF) {
-                if (door_mask & 0x01) return PSA_HIWORLD_ALERT_DOOR_FL;
-                if (door_mask & 0x02) return PSA_HIWORLD_ALERT_DOOR_FR;
-                if (door_mask & 0x0C) return PSA_HIWORLD_ALERT_DOOR_REAR;
-                if (door_mask & 0x10) return PSA_HIWORLD_ALERT_BOOT;
-            }
             return PSA_HIWORLD_ALERT_SEATBELT_FL;                 /* Driver seatbelt */
         case 0x0004:                                              /* Tyre pressure low */
             if (param == 1) return PSA_HIWORLD_ALERT_TPMS_UNDER_FR;
@@ -1519,10 +1510,10 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
             if (param == 2 || param == 3) return PSA_HIWORLD_ALERT_TPMS_PUNCTURE_REAR;
             return PSA_HIWORLD_ALERT_TPMS_PUNCTURE_FL;
         case 0x00C9: return PSA_HIWORLD_ALERT_TPMS_UNDER_FL;      /* Tyre pressure(s) not monitored */
+        case 0x00E5: return PSA_HIWORLD_ALERT_TPMS_UNDER_FL;      /* Tyre pressure(s) not monitored */
         case 0x00D3:
         case 0x00E3: return PSA_HIWORLD_ALERT_BULB_SIDELIGHT;     /* Sidelight bulb */
-        case 0x013D:
-        case 0x00E5: return PSA_HIWORLD_ALERT_BULB_DIPPED;        /* Dipped beam bulb */
+        case 0x013D: return PSA_HIWORLD_ALERT_BULB_DIPPED;        /* Dipped beam bulb */
         case 0x00CE:
         case 0x0134:
         case 0x0097:
@@ -1531,11 +1522,12 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
         case 0x0095:
         case 0x007A:
         case 0x00E8: return PSA_HIWORLD_ALERT_BULB_REVERSE;       /* Reversing / indicator */
-        case 0x0078:
-        case 0x00F0: return PSA_HIWORLD_ALERT_AIRBAG;             /* Airbag / pretensioner */
+        case 0x0078: return PSA_HIWORLD_ALERT_AIRBAG;             /* Airbag / pretensioner */
+        case 0x00F0: return 0x00F0;                               /* Diagnosis in progress... */
+        case 0x00F1: return 0x00F1;                               /* Diagnosis complete */
         case 0x012F: return PSA_HIWORLD_ALERT_SEATBELT_FL;        /* Driver seatbelt */
-        case 0x013A:
-        case 0x0130: return PSA_HIWORLD_ALERT_SEATBELT_FR;        /* Front passenger seatbelt */
+        case 0x013A: return PSA_HIWORLD_ALERT_SEATBELT_FR;        /* Front passenger seatbelt */
+        case 0x0130: return PSA_HIWORLD_ALERT_AUTO_LIGHTS;        /* Automatic headlamp lighting activated */
         case 0x0086:
         case 0x01FA: return PSA_HIWORLD_ALERT_IMMOBILIZER;        /* Electronic immobilizer */
         default:
@@ -1543,11 +1535,55 @@ uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_ma
     }
 }
 
+uint8_t psa_can_alarm_id_get_severity(uint16_t can_alarm_id) {
+    switch (can_alarm_id) {
+        /* STOP (2) - Critical alerts requiring immediate stop */
+        case 0x0001: /* Engine temperature fault: Stop vehicle */
+        case 0x0002: /* Warning, engine oil pressure */
+        case 0x0005: /* Tyre puncture(s) detected */
+        case 0x0008: /* Braking system faulty */
+        case 0x000D: /* Puncture(s) in tyres detected */
+        case 0x000F: /* Brake system faulty: Stop vehicle */
+        case 0x0066: /* Braking system faulty */
+            return 2;
+
+        /* SERVICE (1) - Minor/major vehicle faults requiring service */
+        case 0x0003: /* Top up engine oil level */
+        case 0x0004: /* Tyre pressure(s) low */
+        case 0x000E: /* Power steering faulty */
+        case 0x0064: /* Particle filter clogging risk */
+        case 0x0067: /* Brake pads worn / Gearbox */
+        case 0x0068: /* Depollution system faulty */
+        case 0x006A: /* ABS system faulty */
+        case 0x006B: /* Battery charge faulty */
+        case 0x006C: /* Suspension faulty */
+        case 0x006E: /* Gearbox fault: Repair needed */
+        case 0x006F: /* Risk of particle filter clogging */
+        case 0x0072: /* Suspension faulty: Max speed 90 km/h */
+        case 0x0073: /* Automatic gearbox faulty */
+        case 0x0078: /* Airbag(s) or pretensioner faulty */
+        case 0x007E: /* ABS / ESP system faulty */
+        case 0x007F: /* Depollution system faulty */
+        case 0x0083: /* Electronic anti-theft faulty */
+        case 0x0088: /* Tyre pressure system fault */
+        case 0x00E0: /* Fuel level low / TPMS */
+        case 0x00E5: /* Tyre pressure(s) not monitored */
+        case 0x0195: /* Directional headlamps faulty */
+        case 0x0202: /* Automatic gearbox faulty */
+            return 1;
+
+        /* INFO (0) - Confirmations, reminders, statuses, all other codes */
+        default:
+            return 0;
+    }
+}
+
 void psa_decode_alert_message_0x1a1(const uint8_t *data, uint8_t dlc, vehicle_alert_item_t *alert) {
     if (!data || !alert || dlc < 4) {
         return;
     }
-    bool popup_active = (data[0] & 0x80) != 0;
+    bool toggle_bit = (data[0] & 0x80) != 0;
+    (void)toggle_bit; /* Sequence toggle bit (1, 0, 1, 0...); not dismissal flag */
     uint16_t can_alarm_id = ((uint16_t)(data[0] & 0x7F) << 8) | (uint16_t)data[1];
     bool display_req = (data[2] & 0x80) != 0;
     uint8_t priority = (data[2] >> 4) & 0x07;
@@ -1559,12 +1595,23 @@ void psa_decode_alert_message_0x1a1(const uint8_t *data, uint8_t dlc, vehicle_al
         alert->is_active = true;
         alert->can_alarm_id = can_alarm_id;
         alert->display_req = true;
-        alert->severity = priority;
-        alert->chime_id = sound_id;
-        alert->door_mask = door_mask;
-        alert->param_detail = param;
+        bool is_diag_sys = (can_alarm_id == 0x00F0 || can_alarm_id == 0x00F1);
+        alert->severity = is_diag_sys ? 0 : priority;
+        alert->chime_id = is_diag_sys ? 0 : sound_id;
+        alert->door_mask = is_diag_sys ? 0 : door_mask;
+        alert->param_detail = is_diag_sys ? 0 : param;
         alert->alert_code = psa_can_alarm_id_to_hiworld_code(can_alarm_id, door_mask, param);
-    } else if (!display_req || !popup_active || can_alarm_id == 0) {
+    } else if (can_alarm_id == 0 && (display_req || data[2] != 0)) {
+        /* Cockpit CHECK sequence inter-alert blanking (Section 4.1 Step 3) */
+        alert->is_active = true;
+        alert->can_alarm_id = 0x0000;
+        alert->display_req = true;
+        alert->severity = 0;
+        alert->chime_id = 0;
+        alert->door_mask = 0;
+        alert->param_detail = 0;
+        alert->alert_code = 0;
+    } else if (!display_req || can_alarm_id == 0) {
         alert->is_active = false;
         alert->display_req = false;
         alert->can_alarm_id = 0;
@@ -1577,7 +1624,7 @@ void psa_journal_iso_tp_init(psa_journal_iso_tp_t *ctx) {
     memset(ctx, 0, sizeof(*ctx));
 }
 
-static uint8_t psa_journal_extract_codes(const uint8_t *buffer, uint16_t *out_codes, uint8_t max_out) {
+static uint8_t psa_journal_extract_codes(const uint8_t *buffer, vehicle_alert_item_t *out_items, uint8_t max_out) {
     uint8_t count = 0;
     for (uint16_t bit = 0; bit < PSA_JOURNAL_TOTAL_BITS && count < max_out; bit++) {
         uint8_t b_idx = (uint8_t)(bit >> 3);
@@ -1590,13 +1637,19 @@ static uint8_t psa_journal_extract_codes(const uint8_t *buffer, uint16_t *out_co
 
                 bool already_present = false;
                 for (uint8_t i = 0; i < count; i++) {
-                    if (out_codes[i] == hw_code) {
+                    if (out_items[i].can_alarm_id == can_id) {
                         already_present = true;
                         break;
                     }
                 }
                 if (!already_present) {
-                    out_codes[count++] = hw_code;
+                    memset(&out_items[count], 0, sizeof(vehicle_alert_item_t));
+                    out_items[count].can_alarm_id = can_id;
+                    out_items[count].alert_code = hw_code;
+                    out_items[count].is_active = true;
+                    out_items[count].display_req = true;
+                    out_items[count].severity = psa_can_alarm_id_get_severity(can_id);
+                    count++;
                 }
             }
         }
@@ -1605,8 +1658,8 @@ static uint8_t psa_journal_extract_codes(const uint8_t *buffer, uint16_t *out_co
 }
 
 bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, uint8_t dlc,
-                               uint16_t *out_codes, uint8_t *out_count) {
-    if (!ctx || !data || !out_codes || !out_count || dlc < 2) {
+                               vehicle_alert_item_t *out_items, uint8_t *out_count) {
+    if (!ctx || !data || !out_items || !out_count || dlc < 2) {
         return false;
     }
 
@@ -1622,7 +1675,7 @@ bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, u
         ctx->blocks_received |= (uint8_t)(1 << (block_id - 1));
 
         if ((ctx->blocks_received & 0x07) == 0x07) {
-            *out_count = psa_journal_extract_codes(ctx->buffer, out_codes, CANBOX_MAX_ACTIVE_ALERTS);
+            *out_count = psa_journal_extract_codes(ctx->buffer, out_items, CANBOX_MAX_ACTIVE_ALERTS);
             return true;
         }
         return false;
@@ -1660,7 +1713,7 @@ bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, u
 
             if (ctx->bytes_rx >= PSA_JOURNAL_PAYLOAD_BYTES) {
                 ctx->in_progress = false;
-                *out_count = psa_journal_extract_codes(ctx->buffer, out_codes, CANBOX_MAX_ACTIVE_ALERTS);
+                *out_count = psa_journal_extract_codes(ctx->buffer, out_items, CANBOX_MAX_ACTIVE_ALERTS);
                 return true;
             }
         } else {
@@ -1672,53 +1725,59 @@ bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, u
     return false;
 }
 
-size_t build_hiworld_alert_single(uint16_t alert_code, uint8_t *out, size_t max_len) {
-    if (!out || max_len < 7) {
+size_t build_hiworld_alert_single(const vehicle_alert_item_t *alert, uint8_t *out, size_t max_len) {
+    if (!alert || !out || max_len < 10) {
         return 0;
     }
     out[0] = 0x5A;
     out[1] = 0xA5;
-    out[2] = 0x02; /* Len = 2 */
-    out[3] = HIWORLD_CMD_WARNING_INFO; /* 0x42 */
-    out[4] = (uint8_t)(alert_code >> 8);
-    out[5] = (uint8_t)(alert_code & 0xFF);
-
-    uint8_t sum = (uint8_t)(out[2] + out[3] + out[4] + out[5]);
-    out[6] = (uint8_t)((sum - 1) & 0xFF);
-    return 7;
+    out[2] = 0x05; /* Len = 5 */
+    out[3] = 0xEA; /* Custom Ext Cmd */
+    out[4] = (uint8_t)(alert->can_alarm_id >> 8);
+    out[5] = (uint8_t)(alert->can_alarm_id & 0xFF);
+    out[6] = alert->is_active ? (uint8_t)(0xC0 | ((alert->severity & 0x03) << 4) | (alert->chime_id & 0x0F)) : 0x00;
+    out[7] = alert->door_mask;
+    out[8] = alert->param_detail;
+    
+    uint16_t sum = out[2] + out[3] + out[4] + out[5] + out[6] + out[7] + out[8];
+    out[9] = (uint8_t)((sum - 1) & 0xFF);
+    return 10;
 }
 
-size_t build_hiworld_alerts_summary(const uint16_t *codes, uint8_t count, uint8_t *out, size_t max_len) {
-    if (!out || max_len < 29) {
+size_t build_hiworld_alerts_summary(const vehicle_alert_item_t *items, uint8_t count, uint8_t *out, size_t max_len) {
+    if (!out || max_len < 70) {
         return 0;
     }
     if (count > CANBOX_MAX_ACTIVE_ALERTS) {
         count = CANBOX_MAX_ACTIVE_ALERTS;
     }
-
-    memset(out, 0, 29);
+    
+    uint8_t payload_len = 4 + (count * 5);
+    memset(out, 0, payload_len + 5);
     out[0] = 0x5A;
     out[1] = 0xA5;
-    out[2] = 0x18; /* Len = 24 (0x18) */
-    out[3] = HIWORLD_CMD_WARNING_INFO; /* 0x42 */
-    /* D0..D2: Category flags / reserved = 0x00 */
-    out[4] = 0x00;
-    out[5] = 0x00;
-    out[6] = 0x00;
-    /* D3: mNumber = count */
+    out[2] = payload_len;
+    out[3] = 0xEA;
+    out[4] = 0;
+    out[5] = 0;
+    out[6] = 0;
     out[7] = count;
-
+    
     for (uint8_t i = 0; i < count; i++) {
-        uint8_t offset = (uint8_t)(8 + (i * 2));
-        out[offset]     = (uint8_t)(codes[i] >> 8);
-        out[offset + 1] = (uint8_t)(codes[i] & 0xFF);
+        uint8_t offset = 8 + (i * 5);
+        out[offset] = (uint8_t)(items[i].can_alarm_id >> 8);
+        out[offset + 1] = (uint8_t)(items[i].can_alarm_id & 0xFF);
+        out[offset + 2] = (uint8_t)(0xC0 | ((items[i].severity & 0x03) << 4) | (items[i].chime_id & 0x0F));
+        out[offset + 3] = items[i].door_mask;
+        out[offset + 4] = items[i].param_detail;
     }
-
-    uint8_t sum = (uint8_t)(out[2] + out[3]);
-    for (size_t i = 4; i < 28; i++) {
-        sum = (uint8_t)(sum + out[i]);
+    
+    uint16_t sum = out[2] + out[3];
+    for(uint8_t i = 0; i < payload_len; i++) {
+        sum += out[4 + i];
     }
-    out[28] = (uint8_t)((sum - 1) & 0xFF);
-    return 29;
+    out[4 + payload_len] = (uint8_t)((sum - 1) & 0xFF);
+    
+    return payload_len + 5;
 }
 

@@ -338,47 +338,76 @@ static void hiworld_send_radar(const vehicle_radar_t *radar) {
     }
 }
 
-static uint16_t s_cached_alert_codes[CANBOX_MAX_ACTIVE_ALERTS];
+static vehicle_alert_item_t s_cached_alerts[CANBOX_MAX_ACTIVE_ALERTS];
 static uint8_t  s_cached_alert_count = 0;
 
-static void hiworld_send_alert_single(uint16_t alert_code) {
-    uint8_t payload[2];
-    payload[0] = (uint8_t)(alert_code >> 8);
-    payload[1] = (uint8_t)(alert_code & 0xFF);
+static void hiworld_send_alert_single(const vehicle_alert_item_t *alert) {
+    if (!alert) return;
 
-    uint8_t tx_buf[16];
-    size_t len = proto_hiworld_serialize(HIWORLD_CMD_WARNING_INFO, payload, sizeof(payload),
-                                         tx_buf, sizeof(tx_buf));
-    if (len > 0) {
-        hal_uart_write(tx_buf, len);
+#if (HIWORLD_ENABLE_ALERT_0X42 != 0)
+    /* 1. Original backward-compatible Hiworld alert (if mapped and enabled) */
+    if (alert->alert_code != 0) {
+        uint8_t payload[2];
+        payload[0] = (uint8_t)(alert->alert_code >> 8);
+        payload[1] = (uint8_t)(alert->alert_code & 0xFF);
+
+        uint8_t tx_buf[16];
+        size_t len = proto_hiworld_serialize(HIWORLD_CMD_WARNING_INFO, payload, sizeof(payload),
+                                             tx_buf, sizeof(tx_buf));
+        if (len > 0) {
+            hal_uart_write(tx_buf, len);
+        }
     }
+#endif
+
+#if (HIWORLD_ENABLE_ALERT_0XEA != 0)
+    /* 2. New extended CAN alert (Cmd 0xEA) */
+    uint8_t ext_payload[5];
+    ext_payload[0] = (uint8_t)(alert->can_alarm_id >> 8);
+    ext_payload[1] = (uint8_t)(alert->can_alarm_id & 0xFF);
+    ext_payload[2] = alert->is_active ? (uint8_t)(0xC0 | ((alert->severity & 0x03) << 4) | (alert->chime_id & 0x0F)) : 0x00;
+    ext_payload[3] = alert->door_mask;
+    ext_payload[4] = alert->param_detail;
+
+    uint8_t ext_tx_buf[16];
+    size_t ext_len = proto_hiworld_serialize(HIWORLD_CMD_EXTENDED_ALERT, ext_payload, sizeof(ext_payload),
+                                         ext_tx_buf, sizeof(ext_tx_buf));
+    if (ext_len > 0) {
+        hal_uart_write(ext_tx_buf, ext_len);
+    }
+#endif
 }
 
-static void hiworld_send_alerts_summary(const uint16_t *alert_codes, uint8_t count) {
-    if (alert_codes != NULL) {
+static void hiworld_send_alerts_summary(const vehicle_alert_item_t *alerts, uint8_t count) {
+    if (alerts != NULL) {
         if (count > CANBOX_MAX_ACTIVE_ALERTS) {
             count = CANBOX_MAX_ACTIVE_ALERTS;
         }
         s_cached_alert_count = count;
         if (count > 0) {
-            memcpy(s_cached_alert_codes, alert_codes, count * sizeof(uint16_t));
+            memcpy(s_cached_alerts, alerts, count * sizeof(vehicle_alert_item_t));
         }
     } else {
         /* Retransmit cached summary */
         count = s_cached_alert_count;
-        alert_codes = s_cached_alert_codes;
+        alerts = s_cached_alerts;
     }
 
+#if (HIWORLD_ENABLE_ALERT_0X42 != 0)
+    /* 1. Original backward-compatible Hiworld alert journal (if enabled) */
     uint8_t payload[24] = {0};
     /* D0..D2: Reserved = 0x00 */
     /* D3: mNumber = count */
-    payload[3] = count;
-
+    uint8_t hiworld_count = 0;
     for (uint8_t i = 0; i < count; i++) {
-        uint8_t offset = (uint8_t)(4 + (i * 2));
-        payload[offset]     = (uint8_t)(alert_codes[i] >> 8);
-        payload[offset + 1] = (uint8_t)(alert_codes[i] & 0xFF);
+        if (alerts[i].alert_code != 0 && hiworld_count < 10) {
+            uint8_t offset = (uint8_t)(4 + (hiworld_count * 2));
+            payload[offset]     = (uint8_t)(alerts[i].alert_code >> 8);
+            payload[offset + 1] = (uint8_t)(alerts[i].alert_code & 0xFF);
+            hiworld_count++;
+        }
     }
+    payload[3] = hiworld_count;
 
     uint8_t tx_buf[36];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_WARNING_INFO, payload, sizeof(payload),
@@ -386,6 +415,28 @@ static void hiworld_send_alerts_summary(const uint16_t *alert_codes, uint8_t cou
     if (len > 0) {
         hal_uart_write(tx_buf, len);
     }
+#endif
+
+#if (HIWORLD_ENABLE_ALERT_0XEA != 0)
+    /* 2. New extended CAN alert journal (Cmd 0xEA) */
+    uint8_t ext_payload[54] = {0};
+    ext_payload[3] = count;
+    for (uint8_t i = 0; i < count; i++) {
+        uint8_t offset = 4 + (i * 5);
+        ext_payload[offset] = (uint8_t)(alerts[i].can_alarm_id >> 8);
+        ext_payload[offset + 1] = (uint8_t)(alerts[i].can_alarm_id & 0xFF);
+        ext_payload[offset + 2] = (uint8_t)(0xC0 | ((alerts[i].severity & 0x03) << 4) | (alerts[i].chime_id & 0x0F));
+        ext_payload[offset + 3] = alerts[i].door_mask;
+        ext_payload[offset + 4] = alerts[i].param_detail;
+    }
+
+    uint8_t ext_tx_buf[70];
+    size_t ext_len = proto_hiworld_serialize(HIWORLD_CMD_EXTENDED_ALERT, ext_payload, 4 + (count * 5),
+                                         ext_tx_buf, sizeof(ext_tx_buf));
+    if (ext_len > 0) {
+        hal_uart_write(ext_tx_buf, ext_len);
+    }
+#endif
 }
 
 const hu_protocol_driver_t g_hu_protocol_hiworld = {

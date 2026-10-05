@@ -23,8 +23,8 @@ void hu_protocol_send_trip1(const vehicle_trip_t *trip);
 void hu_protocol_send_trip2(const vehicle_trip_t *trip);
 void hu_protocol_send_radar(const vehicle_radar_t *radar);
 void hu_protocol_send_reverse(bool reverse_active);
-void hu_protocol_send_alert_single(uint16_t alert_code);
-void hu_protocol_send_alerts_summary(const uint16_t *alert_codes, uint8_t count);
+void hu_protocol_send_alert_single(const vehicle_alert_item_t *alert);
+void hu_protocol_send_alerts_summary(const vehicle_alert_item_t *alerts, uint8_t count);
 
 #ifdef __cplusplus
 }

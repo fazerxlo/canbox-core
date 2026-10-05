@@ -454,11 +454,12 @@ typedef struct {
 
 void psa_journal_iso_tp_init(psa_journal_iso_tp_t *ctx);
 uint16_t psa_can_alarm_id_to_hiworld_code(uint16_t can_alarm_id, uint8_t door_mask, uint8_t param);
+uint8_t psa_can_alarm_id_get_severity(uint16_t can_alarm_id);
 void psa_decode_alert_message_0x1a1(const uint8_t *data, uint8_t dlc, vehicle_alert_item_t *alert);
 bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, uint8_t dlc,
-                               uint16_t *out_codes, uint8_t *out_count);
-size_t build_hiworld_alert_single(uint16_t alert_code, uint8_t *out, size_t max_len);
-size_t build_hiworld_alerts_summary(const uint16_t *codes, uint8_t count, uint8_t *out, size_t max_len);
+                               vehicle_alert_item_t *out_items, uint8_t *out_count);
+size_t build_hiworld_alert_single(const vehicle_alert_item_t *alert, uint8_t *out, size_t max_len);
+size_t build_hiworld_alerts_summary(const vehicle_alert_item_t *items, uint8_t count, uint8_t *out, size_t max_len);
 
 #ifdef __cplusplus
 }

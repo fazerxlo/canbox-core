@@ -12,7 +12,7 @@ static uint8_t         s_doors_periodic_timer = 0;
 static bool            s_initial_alerts_scanned = false;
 static bool            s_bsi_alert_query_pending = false;
 static uint8_t         s_bsi_alert_query_timeout_ticks = 0;
-static uint16_t        s_prev_alert_codes[CANBOX_MAX_ACTIVE_ALERTS];
+static vehicle_alert_item_t s_prev_alert_items[CANBOX_MAX_ACTIVE_ALERTS];
 static uint8_t         s_prev_alert_count = 0;
 
 void can_router_init(void) {
@@ -24,7 +24,7 @@ void can_router_init(void) {
     s_bsi_alert_query_pending = false;
     s_bsi_alert_query_timeout_ticks = 0;
     s_prev_alert_count = 0;
-    memset(s_prev_alert_codes, 0, sizeof(s_prev_alert_codes));
+    memset(s_prev_alert_items, 0, sizeof(s_prev_alert_items));
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
     vehicle_profile_init();
     hu_protocol_init();
@@ -129,13 +129,19 @@ void can_router_process_can(const can_frame_t *frame) {
         s_current_state.alerts.realtime_updated = false;
         if (s_current_state.alerts.realtime_alert.is_active) {
             if (!s_last_sent_state.alerts.realtime_alert.is_active ||
-                s_current_state.alerts.realtime_alert.alert_code != s_last_sent_state.alerts.realtime_alert.alert_code) {
-                hu_protocol_send_alert_single(s_current_state.alerts.realtime_alert.alert_code);
+                s_current_state.alerts.realtime_alert.can_alarm_id != s_last_sent_state.alerts.realtime_alert.can_alarm_id) {
+                hu_protocol_send_alert_single(&s_current_state.alerts.realtime_alert);
             }
             s_last_sent_state.alerts.realtime_alert = s_current_state.alerts.realtime_alert;
         } else if (s_last_sent_state.alerts.realtime_alert.is_active) {
+            /* Alert was previously active and is now cleared: send dismissal single frame */
+            vehicle_alert_item_t dismiss_alert = s_last_sent_state.alerts.realtime_alert;
+            dismiss_alert.is_active = false;
+            dismiss_alert.display_req = false;
+            hu_protocol_send_alert_single(&dismiss_alert);
+
             s_last_sent_state.alerts.realtime_alert = s_current_state.alerts.realtime_alert;
-            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+            hu_protocol_send_alerts_summary(s_current_state.alerts.active_items, s_current_state.alerts.active_count);
         }
     }
 
@@ -147,8 +153,8 @@ void can_router_process_can(const can_frame_t *frame) {
             /* Startup / first scan: transmit full 24-byte table once; no popup toasts */
             s_initial_alerts_scanned = true;
             s_prev_alert_count = s_current_state.alerts.active_count;
-            memcpy(s_prev_alert_codes, s_current_state.alerts.active_codes, sizeof(s_prev_alert_codes));
-            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+            memcpy(s_prev_alert_items, s_current_state.alerts.active_items, sizeof(s_prev_alert_items));
+            hu_protocol_send_alerts_summary(s_current_state.alerts.active_items, s_current_state.alerts.active_count);
             s_bsi_alert_query_pending = false;
         } else {
             bool has_new = false;
@@ -156,27 +162,27 @@ void can_router_process_can(const can_frame_t *frame) {
 
             /* Check for newly active alerts (0 -> 1 transition) */
             for (uint8_t i = 0; i < s_current_state.alerts.active_count; i++) {
-                uint16_t code = s_current_state.alerts.active_codes[i];
+                const vehicle_alert_item_t *item = &s_current_state.alerts.active_items[i];
                 bool found = false;
                 for (uint8_t j = 0; j < s_prev_alert_count; j++) {
-                    if (s_prev_alert_codes[j] == code) {
+                    if (s_prev_alert_items[j].can_alarm_id == item->can_alarm_id) {
                         found = true;
                         break;
                     }
                 }
                 if (!found) {
                     /* Edge-triggered new alert event: emit single alert frame (Len = 0x02) */
-                    hu_protocol_send_alert_single(code);
+                    hu_protocol_send_alert_single(item);
                     has_new = true;
                 }
             }
 
             /* Check for cleared alerts (1 -> 0 transition) */
             for (uint8_t i = 0; i < s_prev_alert_count; i++) {
-                uint16_t code = s_prev_alert_codes[i];
+                const vehicle_alert_item_t *item = &s_prev_alert_items[i];
                 bool found = false;
                 for (uint8_t j = 0; j < s_current_state.alerts.active_count; j++) {
-                    if (s_current_state.alerts.active_codes[j] == code) {
+                    if (s_current_state.alerts.active_items[j].can_alarm_id == item->can_alarm_id) {
                         found = true;
                         break;
                     }
@@ -190,12 +196,12 @@ void can_router_process_can(const can_frame_t *frame) {
 
             /* Transmit full 24-byte table ONLY on table change or active query pending */
             if (table_changed || s_bsi_alert_query_pending) {
-                hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+                hu_protocol_send_alerts_summary(s_current_state.alerts.active_items, s_current_state.alerts.active_count);
                 s_bsi_alert_query_pending = false;
             }
 
             s_prev_alert_count = s_current_state.alerts.active_count;
-            memcpy(s_prev_alert_codes, s_current_state.alerts.active_codes, sizeof(s_prev_alert_codes));
+            memcpy(s_prev_alert_items, s_current_state.alerts.active_items, sizeof(s_prev_alert_items));
         }
 
         s_last_sent_state.alerts = s_current_state.alerts;
@@ -252,7 +258,7 @@ void can_router_periodic_100ms(void) {
         }
         if (s_bsi_alert_query_timeout_ticks == 0) {
             s_bsi_alert_query_pending = false;
-            hu_protocol_send_alerts_summary(s_current_state.alerts.active_codes, s_current_state.alerts.active_count);
+            hu_protocol_send_alerts_summary(s_current_state.alerts.active_items, s_current_state.alerts.active_count);
         }
     }
 
@@ -269,6 +275,8 @@ bool can_router_reset_trip(uint8_t trip_index) {
 }
 
 bool can_router_query_alert_journal(void) {
+    /* Immediately respond with cached summary / empty clearance frame per Section 8 */
+    hu_protocol_send_alerts_summary(s_current_state.alerts.active_items, s_current_state.alerts.active_count);
     s_bsi_alert_query_pending = true;
     s_bsi_alert_query_timeout_ticks = 5; /* 5 * 100ms = 500ms */
     return vehicle_profile_query_alerts();

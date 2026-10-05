@@ -284,10 +284,10 @@ static void psa_decode_alert_message_0x1a1_profile(const can_frame_t *frame, veh
 
 static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
-    uint16_t codes[CANBOX_MAX_ACTIVE_ALERTS] = {0};
+    vehicle_alert_item_t items[CANBOX_MAX_ACTIVE_ALERTS] = {0};
     uint8_t count = 0;
-    if (psa_process_journal_0x120(&s_journal_ctx, frame->data, frame->dlc, codes, &count)) {
-        memcpy(state->alerts.active_codes, codes, sizeof(codes));
+    if (psa_process_journal_0x120(&s_journal_ctx, frame->data, frame->dlc, items, &count)) {
+        memcpy(state->alerts.active_items, items, sizeof(items));
         state->alerts.active_count = count;
         state->alerts.journal_updated = true;
     }

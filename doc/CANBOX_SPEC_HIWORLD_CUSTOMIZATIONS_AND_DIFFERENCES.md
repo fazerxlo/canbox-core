@@ -44,6 +44,7 @@ This document formally records all customizations, bug fixes, architectural enha
 | Subsystem | Commercial Hiworld Adapter | OpenCanbox Core Implementation |
 |---|---|---|
 | **Alert IDs (`0x42`)** | Raw byte passthrough without context; collisions on `0x0008` (Door vs Brake), false door triggers on padding `0xFF` | Context-aware translation to canonical Hiworld codes (`PSA_HIWORLD_ALERT_*`); `door_mask != 0 && door_mask != 0xFF` guards against false door alerts on diagnostic frames |
+| **Custom Alerts (`0xEA`)** | Not supported | Full concurrent transmission of Custom Extended Protocol `Cmd 0xEA` (15-bit native CAN IDs, status byte $D2$, 5-byte records, empty clearance `5A A5 04 EA 00 00 00 00 ED`, CHECK debounce reset via `0x0000`) |
 | **Alert Journal (`0x120`)** | Often omitted or imperfectly decoded | Full Mode A 3-block multiplexed reassembly (`0x7C`, `0xBC`, `0xFC`) + Mode B fallback ISO-TP; 168-bit zero-heap bitmap extractor |
 | **Alert UI Flooding** | Periodic broadcast of 24-byte table triggers continuous floating overlay toasts on Android | Strict edge-triggered single alerts (0 &rarr; 1 transitions only); 24-byte summary sent only on change or `0x2F` query |
 | **HVAC Air Quality (`0x31`)** | Frame `0x1E3` bit 4 mistaken for AC compressor; overrides `aqs_auto = false` on manual fan change | Proper bit separation between AQS auto-intake (`0x1E3` bit 4) and AC compressor status; independent AQS state machine |
@@ -57,7 +58,7 @@ This document formally records all customizations, bug fixes, architectural enha
 
 ## 3. Subsystem Customizations & Differences
 
-### 3.1 Vehicle Health Alerts & Diagnostic Journal (`0x42` / `0x2F`)
+### 3.1 Vehicle Health Alerts & Diagnostic Journal (`0x42` / `0xEA` / `0x2F`)
 
 #### A. Diagnostic Cycle & Real-Time Alert Disambiguation (`0x1A1`)
 - **Original Adapter & Android HU Limitation:**
@@ -81,6 +82,21 @@ This document formally records all customizations, bug fixes, architectural enha
   - Block 2 (`(data[0] >> 6) == 2`, `0xBC`): Bytes 7..13 of 21-byte alert bitfield.
   - Block 3 (`(data[0] >> 6) == 3`, `0xFC`): Bytes 14..20 of 21-byte alert bitfield.
   - Reverse-lookup mapping from bit index to CAN alarm ID via `Alarm_BitToIndex_Tab` and `Alarm_IndexToPointer_Tab`.
+
+#### C. Custom Extended Alert Protocol (`Cmd 0xEA`) & Independent Transmission Architecture
+- **Motivation:**
+  Stock Hiworld `Cmd 0x42` uses a compressed 16-bit code space that forces compromises (e.g. mapping different vehicle faults to the same sparse code) and mixes real-time popup toasts with persistent diagnostic lists. In a modified Android Head Unit app (`com.qf.vehicle` with `PsaExtendedAlertManager`), `Cmd 0xEA` provides native 15-bit PSA CAN alert identification, explicit severity categorization, and decoupling between floating popups and the diagnostic journal.
+- **Buffer Separation & Compilation Parameter:**
+  Transmitting both `0x42` and `0xEA` in the same tick causes both frames to be concatenated back-to-back in a single UART write buffer (`5A A5 02 42 ... 5A A5 05 EA ...`), which can overflow 32/64-byte receiver FIFOs on Android MCUs or cause UI toast collision.
+  Therefore, alert frame transmission is controlled by compile-time configuration parameters:
+  - `HIWORLD_ENABLE_ALERT_0XEA` (default: `1`): Transmits Custom Extended Protocol `Cmd 0xEA`.
+  - `HIWORLD_ENABLE_ALERT_0X42` (default: `0`): Disabled by default so that only `0xEA` is transmitted without buffer concatenation. Set `-DHIWORLD_ENABLE_ALERT_0X42=1` when compiling for legacy head units requiring `0x42`.
+- **Custom Extended `Cmd 0xEA` Features:**
+  - **Single Toast Popups (`Len = 0x05`):** Carries the 15-bit PSA CAN alarm ID with control byte $D2$. $D2$ formats both Bit 7 (`0x80` Active) and Bit 6 (`0x40` Info / Confirmation requirement `mInfo`), ensuring the toast popup displays without polluting `activeAlerts`.
+  - **Summary Tables (`Len = 4 + 5*N`):** Synthesized from CAN `0x120` with 5-byte records containing alert ID, severity (`STOP` 2, `SERVICE` 1, `INFO` 0), category, and detail parameters.
+  - **Empty Clearance (`5A A5 04 EA 00 00 00 00 ED`):** Transmitted when all faults clear to blank the diagnostic journal.
+  - **Cockpit CHECK Sequence:** Streams Step 1 (`0x00F0` start), rolling faults, Step 3 (`0x0000` inter-alert blanking to reset the Head Unit's debounce filter), and Step 4 (`0x00F1` completion).
+  - **Downlink Query `Cmd 0x2F`:** Immediately replies with the cached summary table upon receiving `5A A5 01 2F 00 2F`.
 
 ---
 

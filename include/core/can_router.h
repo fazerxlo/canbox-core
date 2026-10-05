@@ -142,7 +142,7 @@ typedef struct {
 
 typedef struct {
     vehicle_alert_item_t realtime_alert;
-    uint16_t             active_codes[CANBOX_MAX_ACTIVE_ALERTS];
+    vehicle_alert_item_t active_items[CANBOX_MAX_ACTIVE_ALERTS];
     uint8_t              active_count;     /* 0..10 */
     bool                 realtime_updated; /* Single alert state changed */
     bool                 journal_updated;  /* Summary list changed */

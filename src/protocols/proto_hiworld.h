@@ -24,9 +24,23 @@ extern "C" {
 #define HIWORLD_CMD_DIAGNOSTIC_QUERY 0x2F
 #define HIWORLD_CMD_AIR_CON       0x31
 #define HIWORLD_CMD_RADAR         0x41
-#define HIWORLD_CMD_WARNING_INFO  0x42
-#define HIWORLD_CMD_TPMS_NUMERIC  0x66
-#define HIWORLD_CMD_HEARTBEAT     0xFF
+#define HIWORLD_CMD_WARNING_INFO      0x42
+#define HIWORLD_CMD_EXTENDED_ALERT    0xEA
+#define HIWORLD_CMD_TPMS_NUMERIC      0x66
+#define HIWORLD_CMD_HEARTBEAT         0xFF
+
+/* Alert transmission compilation parameters:
+ * By default, only Cmd 0xEA is transmitted to prevent gluing 0x42 and 0xEA
+ * into a single UART write buffer and to prevent UI race conditions on Android.
+ * Define HIWORLD_ENABLE_ALERT_0X42=1 to enable legacy Cmd 0x42 transmission.
+ */
+#ifndef HIWORLD_ENABLE_ALERT_0X42
+#define HIWORLD_ENABLE_ALERT_0X42     0
+#endif
+
+#ifndef HIWORLD_ENABLE_ALERT_0XEA
+#define HIWORLD_ENABLE_ALERT_0XEA     1
+#endif
 
 typedef struct {
     uint8_t cmd;

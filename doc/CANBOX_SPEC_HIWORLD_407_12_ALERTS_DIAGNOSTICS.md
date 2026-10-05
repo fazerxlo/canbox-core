@@ -121,7 +121,7 @@ Used when broadcasting the active fault list or in response to Android UI resume
 ---
 
 ### 3.2 Format B: Single Real-Time Alert (`Len = 0x02`)
-Used when a single fault or warning triggers while driving:
+Used when a single fault or warning triggers while driving in standard Hiworld firmware:
 
 ```
 [0x5A, 0xA5, 0x02, 0x42, (code >> 8) & 0xFF, code & 0xFF, Checksum]
@@ -130,6 +130,128 @@ Used when a single fault or warning triggers while driving:
 - **Byte 3 (`CmdID`):** `0x42`
 - **Bytes 4..5 (`D0..D1`):** 16-bit Big-Endian alert code (`mOriginalType`)
 - **Byte 6 (`Checksum`):** `((0x02 + 0x42 + D0 + D1 - 1) & 0xFF)`
+
+---
+
+### 3.3 Format C: Custom Extended Single Alert & Popup Toast Frame (`Cmd 0xEA`, `Len = 0x05`)
+Transmitted for real-time driver notifications, toast popups, alert dismissals, and during the cockpit CHECK sequence. Used exclusively by modified Android Head Unit firmware (`PsaExtendedAlertManager` in `com.qf.vehicle`):
+
+```
+[ 5A  A5  05  EA  D0  D1  D2  D3  D4  CHK ]
+```
+
+| Offset | Byte | Description |
+|:---:|:---:|:---|
+| `0` | `0x5A` | SOF 1 |
+| `1` | `0xA5` | SOF 2 |
+| `2` | `0x05` | Payload length (5 data bytes: `CmdID` + 4 data bytes) |
+| `3` | `0xEA` | Custom extended alert command opcode |
+| `4` | `D0` | **Alert ID High Byte:** `(CAN_Alert_ID >> 8) & 0x7F` (15-bit native PSA CAN ID) |
+| `5` | `D1` | **Alert ID Low Byte:** `CAN_Alert_ID & 0xFF` |
+| `6` | `D2` | **Status / Control Byte:** (Bitfield details below) |
+| `7` | `D3` | **Door Mask:** `PARAM_DOOR_MASK` (or `0x00` if unused) |
+| `8` | `D4` | **Parameter Detail:** Wheel or bulb index (or `0x00` if unused) |
+| `9` | `CHK` | Additive checksum: `(Len + CmdID + sum(D0..D4) - 1) & 0xFF` |
+
+#### Control Byte (`D2`) Bitfield Breakdown:
+```
+ Bit 7        Bit 6        Bits 5..4      Bits 3..0
+┌──────────┬────────────┬──────────────┬──────────────┐
+│  ACTIVE  │    INFO    │   SEVERITY   │   SOUND_ID   │
+└──────────┴────────────┴──────────────┴──────────────┘
+```
+
+- **Bit 7 (`0x80`) — ACTIVE:**
+  - `1` = **Alert Active / Triggered:** Displays modal floating toast popup (`WindowTextWarning`).
+  - `0` = **Alert Cleared / Inactive:** Dismisses active toast popup if it matches `Alert ID`.
+- **Bit 6 (`0x40`) — INFO / Display Confirmation Flag:**
+  - Mandatory requirement in `PsaExtendedAlertManager` (`mInfo = (D2 & 0x40) != 0`). If Bit 6 is 0, the Head Unit ignores the popup.
+  - Active single alerts set both Bit 7 and Bit 6: `0xC0 | ((severity & 0x03) << 4) | (chime_id & 0x0F)`.
+- **Bits 5..4 (`0x30`) — SEVERITY Level:**
+  - `00` (`0x00`): **INFO** (Informational notifications, reminders, cockpit CHECK steps).
+  - `01` (`0x10`): **SERVICE** (Minor/major vehicle faults with dashboard SERVICE LED).
+  - `10` (`0x20`): **STOP** (Critical major faults with dashboard STOP LED).
+- **Bits 3..0 (`0x0F`) — SOUND_ID:**
+  - Acoustic chime index requested from vehicle BSI (0..15).
+
+---
+
+### 3.4 Format D: Custom Extended Multi-Alert Summary Table Frame (`Cmd 0xEA`, `Len = 4 + 5*N`)
+Transmitted to populate the persistent diagnostic log in **Car Info &rarr; Diagnostic information** (`DignosticFrgment`). Synthesized directly from the 21-byte bitfield on CAN `0x120`:
+
+```
+[ 5A  A5  Len  EA  00  00  00  N  (Fault_0 ... Fault_N-1)  CHK ]
+```
+
+- **Byte 2 (`Len`):** `4 + 5 * N` (e.g. `0x1D` = 29 bytes for 5 active faults).
+- **Byte 3 (`CmdID`):** `0xEA`.
+- **Bytes 4..6 (`D0..D2`):** Header padding (`0x00, 0x00, 0x00`).
+- **Byte 7 (`D3`):** Active fault count `N` (`0` to `10`).
+- **Bytes 8..8+5*N-1:** Sequential 5-byte records for each active fault $k \in [0 .. N-1]$:
+  - `+0`: `Code_Hi` — `(CAN_Alert_ID >> 8) & 0xFF`
+  - `+1`: `Code_Lo` — `CAN_Alert_ID & 0xFF`
+  - `+2`: `Status` — `0xC0 | ((severity & 0x03) << 4) | (chime_id & 0x0F)`
+  - `+3`: `Category` — Category icon index (`0x00`)
+  - `+4`: `SubDetail` — Sub-detail parameter (`0x00`)
+- **Last Byte (`CHK`):** `(Len + CmdID + sum(payload) - 1) & 0xFF`.
+
+---
+
+### 3.5 Format E: Custom Extended Empty Clearance Frame (`Cmd 0xEA`, `Len = 0x04`)
+Transmitted when all faults in the BSI journal are cleared ($N = 0$):
+
+```text
+5A A5 04 EA 00 00 00 00 ED
+```
+- **HU Action:** Clears `activeAlerts`, resets `diagnosticLock`, blanks `DignosticFrgment` UI list.
+
+---
+
+### 3.6 Cockpit CHECK Sequence Protocol Walkthrough
+When the driver initiates the dashboard **CHECK** diagnostic routine via button or wiper stalk, `canbox-core` coordinates the rolling status messages and diagnostic log update:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Car as PSA CAN (0x1A1 / 0x167)
+    participant Core as canbox-core
+    participant HU as Android HU (com.qf.vehicle)
+
+    Car->>Core: 0x1A1 ID 0x00F0 ("Diagnosis in progress")
+    Core->>HU: 5A A5 05 EA 00 F0 C0 00 00 9E
+    Note over HU: Clears activeAlerts, diagnosticLock = false,<br/>Shows "Diagnosis in progress..." Toast
+
+    loop For each active vehicle fault
+        Car->>Core: 0x1A1 ID 0x0008 (Fault Active)
+        Core->>HU: 5A A5 05 EA 00 08 C0 00 00 B6
+        Note over HU: Shows "Braking system faulty" Toast (3.5s timeout)
+        
+        Car->>Core: 0x1A1 ID 0x0000 (Inter-Alert Blanking)
+        Core->>HU: 5A A5 05 EA 00 00 C0 00 00 AE
+        Note over HU: Resets lastSingleAlertCode = 0 (Debounce reset)
+    end
+
+    Car->>Core: 0x1A1 ID 0x00F1 ("Diagnosis completed")
+    Core->>HU: 5A A5 05 EA 00 F1 C0 00 00 9F
+    Note over HU: Sets diagnosticLock = true,<br/>Shows "Diagnosis complete" Toast
+
+    Car->>Core: CAN 0x120 21-byte bitfield active
+    Core->>HU: Cmd 0xEA Summary Table (Len 4+5*N)
+    Note over HU: Populates DignosticFrgment with clean numbered list!
+```
+
+- **Step 1: Start of Diagnosis (`0x00F0`):** `5A A5 05 EA 00 F0 C0 00 00 9E` (Resets journal, shows status toast).
+- **Step 2: Single Rolling Alerts (e.g. `0x0008`):** `5A A5 05 EA 00 08 C0 00 00 B6` (Shows modal toast without polluting journal).
+- **Step 3: Inter-Alert Blanking (`0x0000`):** `5A A5 05 EA 00 00 C0 00 00 AE` (Resets `lastSingleAlertCode = 0` debounce filter).
+- **Step 4: End of Diagnosis (`0x00F1`):** `5A A5 05 EA 00 F1 C0 00 00 9F` (Locks session, shows completion toast).
+
+---
+
+### 3.7 Downlink Query from Head Unit (`Cmd 0x2F`)
+When the user opens the **Diagnostic information** screen (`DignosticFrgment.onResume()`), the Head Unit transmits query packet `5A A5 01 2F 00 2F`:
+
+- **Immediate Response:** `canbox-core` immediately transmits the cached **Multi-Alert Summary Table Frame** (`Cmd 0xEA`, Len `4 + 5*N`) or the **Empty Clearance Frame** (`5A A5 04 EA 00 00 00 00 ED`).
+- **CAN Query Uplink:** Concurrently, `canbox-core` sends diagnostic query frame `0x39B` (DLC 8, `{0x01, 0x01, ...}`) to the BSI to trigger a fresh CAN `0x120` journal broadcast.
 
 ---
 
@@ -227,19 +349,24 @@ typedef struct {
 ### 5.2 CAN Profile Decoder (`src/profiles/peugeot_407.c`)
 - Unpacks immediate alert messages from `0x1A1` into `vehicle_alert_item_t`.
 - Maps native CAN Alarm IDs to canonical Hiworld codes through `psa_can_alarm_id_to_hiworld_code()`.
+- Computes vehicle alert severity levels (STOP=2, SERVICE=1, INFO=0) using `psa_can_alarm_id_get_severity()`.
 - Implements lock-free, zero-heap ISO-TP multi-frame reassembler `psa_process_journal_0x120()` with the 168-bit `Alarm_BitToIndex_Tab` reverse-lookup table.
+- Serializes custom extended frames via `build_hiworld_alert_single()` (10 bytes) and `build_hiworld_alerts_summary()` (Len $4 + 5 \times N$).
 
 ### 5.3 Protocol Driver Interface & Adapter (`src/protocols/proto_hiworld_adapter.c`)
-- Implements `hiworld_send_alert_single()` using Command `0x42` with 2-byte payload.
-- Implements `hiworld_send_alerts_summary()` using Command `0x42` with 24-byte payload.
+- **Dual Serialization Strategy:** Emits both legacy Hiworld frames (`Cmd 0x42`) for stock Android apps and custom extended frames (`Cmd 0xEA`) for modified Head Unit firmware (`com.qf.vehicle`):
+  - `hiworld_send_alert_single()`: Transmits 2-byte `Cmd 0x42` **and** 5-byte `Cmd 0xEA`.
+  - `hiworld_send_alerts_summary()`: Transmits 24-byte `Cmd 0x42` **and** `4 + 5*N` byte `Cmd 0xEA` table (or 9-byte empty clearance frame `5A A5 04 EA 00 00 00 00 ED`).
 - Dispatches active CAN query to car's BSI via `can_router_query_alert_journal()` upon receiving `HIWORLD_CMD_DIAGNOSTIC_QUERY` (`0x2F`).
-- Accepts both standard checksum `(sum - 1) & 0xFF`, sync2 variant `(sum + 0xA5 - 1) & 0xFF`, and `0xD4` from Android APK `forwardType(0x2F)`.
+- Accepts standard checksum `(sum - 1) & 0xFF`, sync2 variant `(sum + 0xA5 - 1) & 0xFF`, and `0xD4` from Android APK `forwardType(0x2F)`.
 
 ### 5.4 CAN Router Dispatch & Rate Limiting (`src/core/can_router.c`)
-- **Stop Periodic Spam:** Periodic broadcast of 24-byte `0x42` table is disabled to eliminate non-stop floating popup banners on Android HU.
-- **Edge-Triggered Real-Time Popups (`Len = 0x02`):** When a fault code transition (0 &rarr; 1) is detected (new alert chime/fault), emits a single 2-byte Hiworld event frame `5A A5 02 42 <HI> <LO> <CHK>`.
-- **Full Table Transmission (`Len = 0x18`):** Emitted strictly on:
-  1. Response to HU `0x2F` query (once BSI alert journal collected, or upon 500ms timeout fallback).
+- **Stop Periodic Spam:** Periodic broadcast of `0x42` table is disabled to eliminate non-stop floating popup banners on Android HU.
+- **Edge-Triggered Real-Time Popups:** When a fault code transition (0 &rarr; 1) is detected, emits single alert frames on both `0x42` and `0xEA`.
+- **Active Alert Dismissal:** When an alert clears, sends a dismissal frame with $D2 = 0\text{x00}$ (`is_active = false`), causing the Head Unit to dismiss matching floating popups.
+- **Immediate Response to Downlink `Cmd 0x2F`:** Upon receiving `5A A5 01 2F 00 2F`, immediately transmits the cached summary table (or empty clearance frame) before triggering the CAN `0x39B` BSI query.
+- **Full Table Transmission:** Emitted strictly on:
+  1. Immediate response to HU `0x2F` query.
   2. Once on firmware startup / first CAN scan.
   3. When an alert is added or cleared from the active alert set.
 - **BSI Alert Log CAN Uplink:** Sends Comfort CAN diagnostic frame `0x39B` (DLC 8, `{0x01, 0x01, ...}`) to BSI when the HU queries the alert journal.
@@ -262,3 +389,8 @@ Automated unit tests in `test/test_protocol_parser/test_peugeot_407.c`:
    - Freedom from periodic spam across 600 periodic ticks.
 7. `test_peugeot_407_alert_boundary_and_malformed`: Verifies NULL safety, truncated DLC, and corrupted ISO-TP sequence handling.
 8. `test_peugeot_407_alert_journal_block_multiplexed_real_log`: Verifies block-multiplexed transport on `0x120` parsed from real vehicle log.
+9. `test_peugeot_407_custom_alert_severities_lookup`: Verifies severity lookup table (`psa_can_alarm_id_get_severity`) across STOP (2), SERVICE (1), and INFO (0) classifications.
+10. `test_peugeot_407_custom_cockpit_check_sequence`: Verifies exact byte-for-byte serialization of Step 1 (`0x00F0`), Step 2 (`0x0008`), Step 3 (`0x0000` blanking), and Step 4 (`0x00F1`) frames.
+11. `test_peugeot_407_custom_summary_table_and_empty_clearance`: Verifies empty clearance frame (`5A A5 04 EA 00 00 00 00 ED`) and 5-fault summary table.
+12. `test_peugeot_407_custom_downlink_0x2f_response`: Verifies immediate summary response to standard downlink `Cmd 0x2F` query (`5A A5 01 2F 00 2F`).
+13. `test_peugeot_407_csv_alerts_iteration`: Iterates through all 208 alert entries from ground-truth CSV table verifying decoding and dismissal.

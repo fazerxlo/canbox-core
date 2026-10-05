@@ -94,6 +94,12 @@ void test_peugeot_407_alert_journal_clear(void);
 void test_peugeot_407_alert_router_pipeline_and_query(void);
 void test_peugeot_407_alert_boundary_and_malformed(void);
 void test_peugeot_407_alert_journal_block_multiplexed_real_log(void);
+void test_peugeot_407_alert_diagnostic_cycle_and_toggle_bit(void);
+void test_peugeot_407_csv_alerts_iteration(void);
+void test_peugeot_407_custom_alert_severities_lookup(void);
+void test_peugeot_407_custom_cockpit_check_sequence(void);
+void test_peugeot_407_custom_summary_table_and_empty_clearance(void);
+void test_peugeot_407_custom_downlink_0x2f_response(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -208,6 +214,12 @@ int main(void) {
     RUN_TEST(test_peugeot_407_alert_router_pipeline_and_query);
     RUN_TEST(test_peugeot_407_alert_boundary_and_malformed);
     RUN_TEST(test_peugeot_407_alert_journal_block_multiplexed_real_log);
+    RUN_TEST(test_peugeot_407_alert_diagnostic_cycle_and_toggle_bit);
+    RUN_TEST(test_peugeot_407_csv_alerts_iteration);
+    RUN_TEST(test_peugeot_407_custom_alert_severities_lookup);
+    RUN_TEST(test_peugeot_407_custom_cockpit_check_sequence);
+    RUN_TEST(test_peugeot_407_custom_summary_table_and_empty_clearance);
+    RUN_TEST(test_peugeot_407_custom_downlink_0x2f_response);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);
