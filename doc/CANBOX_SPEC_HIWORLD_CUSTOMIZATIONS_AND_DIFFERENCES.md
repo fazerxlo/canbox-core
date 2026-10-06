@@ -106,9 +106,10 @@ This document formally records all customizations, bug fixes, architectural enha
 - **Original Adapter Bug:**
   In the commercial firmware, frame `0x1E3` byte 0 bit 4 was mistakenly parsed as the Air Conditioning compressor flag (`ac_on`). Whenever the driver adjusted the blower speed manually, frame `0x1E3` was received with bit 4 cleared, causing the firmware to forcefully overwrite `aqs_auto = false` (Auto Air Recirculation turned off).
 - **OpenCanbox Core Fix:**
-  - `0x1D0` byte 1 bit 4 correctly represents manual Recirculation.
+  - `0x1D0` byte 4 bit 4 correctly represents manual Recirculation, and bit 5 represents forced fresh air.
   - `0x1E3` byte 0 bit 4 correctly represents Auto Air Intake (AQS - Air Quality System).
-  - OpenCanbox keeps these states strictly decoupled in `vehicle_climate_t`: adjusting fan speed or temperature never alters the AQS intake setting.
+  - **Front Defrost (`0x19` / `UNFROST_FRONT`) Decoupling:** When front defrost is selected, `0x1D0` reports `0x19` in Byte 0 and `0x20` in Byte 4 (physical flap opening to outside air). OpenCanbox decodes `front_max_defrost = true` while preserving the driver's active AQS Auto Intake setting (`aqs_auto = true` as broadcast by `0x1E3` byte 0 bit 4), matching OEM Canbox ground truth and preventing rapid cycling between auto and fresh air.
+  - OpenCanbox keeps these states strictly decoupled in `vehicle_climate_t`: adjusting fan speed, temperature, or activating front defrost never causes intake state chatter.
 
 ---
 

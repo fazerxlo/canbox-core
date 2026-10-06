@@ -1406,6 +1406,39 @@ void test_peugeot_407_hvac_hiworld(void) {
     TEST_ASSERT_FALSE(climate.recirculate);
     TEST_ASSERT_TRUE(climate.ac_on);
     TEST_ASSERT_TRUE(climate.dual_mode);
+
+    // Vector 10: Issue 3 Provenance scenario from dump_2026-10-05_21-28-30.log
+    // and dump_2026-10-06_14-44-27.log: Front defrost active with AQS intake.
+    // 0x1E3 arrives: Byte 0 = 0x14 (AQS active), Byte 1 = 0xB0 (Bit 7 = Front Demist active)
+    const uint8_t can_1e3_v10[] = { 0x14, 0xB0, 0x0B, 0x0B, 0x00, 0x00, 0x01, 0x00 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v10, 8);
+    TEST_ASSERT_TRUE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+
+    // 0x1D0 arrives: Byte 0 = 0x19 (Front Demist active), Byte 4 = 0x20 (Forced Fresh Air physical flap)
+    const uint8_t can_1d0_v10[] = { 0x19, 0x00, 0x01, 0x00, 0x20, 0x0B, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_v10, 8);
+    TEST_ASSERT_TRUE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+
+    // Re-feed 0x1E3: verify zero state jitter / oscillation
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v10, 8);
+    TEST_ASSERT_TRUE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+
+    // Turn off Front Demist back to Auto:
+    const uint8_t can_1d0_auto[] = { 0x08, 0x00, 0x02, 0x00, 0x00, 0x0B, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_auto, 8);
+    TEST_ASSERT_FALSE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+
+    const uint8_t can_1e3_auto[] = { 0x1C, 0x30, 0x0B, 0x0B, 0x00, 0x00, 0x02 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_auto, 7);
+    TEST_ASSERT_FALSE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
 }
 
 void test_peugeot_407_trip_reset_frames(void) {

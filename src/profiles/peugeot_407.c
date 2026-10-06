@@ -193,6 +193,7 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
 
     climate->power_on = (data[0] != 0xA8);
     climate->ac_on = climate->power_on;
+    climate->front_max_defrost = (data[0] == 0x19);
 
     uint8_t fan = data[2] & 0x0F;
     if (fan == 0x0F) {
@@ -208,7 +209,11 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
     climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
     climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
 
-    if ((data[4] & 0x10) != 0) {
+    if (data[0] == 0x19) {
+        /* When front defrost is active, Byte 4 (0x20) reflects physical forced fresh air flaps.
+         * Do not overwrite aqs_auto from Byte 4; preserve aqs_auto as decoded by 0x1E3. */
+        climate->recirculate = false;
+    } else if ((data[4] & 0x10) != 0) {
         climate->recirculate = true;
         climate->aqs_auto = false;
     } else if ((data[4] & 0x20) != 0) {
@@ -231,8 +236,12 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
 
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
+    climate->front_max_defrost = (data[1] & 0x80) != 0;
 
-    if ((data[0] & 0x80) != 0) {
+    if (climate->front_max_defrost) {
+        climate->recirculate = false;
+        climate->aqs_auto = ((data[0] & 0x10) != 0);
+    } else if ((data[0] & 0x80) != 0) {
         climate->recirculate = true;
         climate->aqs_auto = false;
     } else if ((data[0] & 0x10) != 0) {
@@ -242,8 +251,6 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
         climate->recirculate = false;
         climate->aqs_auto = false;
     }
-
-    climate->front_max_defrost = (data[1] & 0x80) != 0;
 
     if (dlc >= 6) {
         /* Air distribution: Byte 4 upper nibble is Left (Driver), Byte 5 upper nibble is Right (Passenger) */
