@@ -1,331 +1,670 @@
 # OpenCanbox Core
 
-Portable, pure C99 firmware for custom CAN bus adapters interfacing vehicle CAN networks with Chinese Android head units (**Hiworld**, **Raise**, **Bagoo**, **Simple Soft**).
+**Portable, deterministic C99 firmware for CAN-to-Android automotive protocol translation and reverse engineering.**
 
-Designed to compile without modification across multiple microcontroller architectures (**STM32F103**, **ESP32**, **Arduino/AVR**, **Nuvoton NUC131**) and run natively on **Linux** using SocketCAN and pseudo-terminals (`pty`) for lightning-fast desktop simulation, bench testing, and CI/CD validation.
+![C99](https://img.shields.io/badge/C99-Strict-blue)
+![PlatformIO](https://img.shields.io/badge/PlatformIO-Multi--Platform-orange)
+![Linux](https://img.shields.io/badge/Linux-SocketCAN-green)
+![STM32](https://img.shields.io/badge/STM32F103-Supported-red)
+![ESP32](https://img.shields.io/badge/ESP32--TWAI-Supported-red)
+![License](https://img.shields.io/badge/License-MIT%2FApache%202.0-green)
+
+---
+
+## Project Summary
+
+OpenCanbox Core is a production-grade firmware platform enabling seamless integration between vehicle CAN bus networks and Android head units from major manufacturers (Hiworld, Raise, Bagoo, Simple Soft). The codebase provides a complete, portable implementation of CAN protocol translation, reverse engineering, and automotive telemetry synthesis without dynamic memory allocation, achieving deterministic real-time operation across diverse microcontroller architectures.
+
+The project serves three primary use cases:
+
+1. **CAN Reverse Engineering:** Documented, verified CAN2004/CAN2010 protocol decoders for Peugeot/PSA, VAG, Toyota, and other platforms.
+2. **Embedded Integration:** Portable firmware deployable across Linux hosts, STM32F103, ESP32, AVR, and Nuvoton architectures without code modification.
+3. **Automotive Protocol Research:** Complete bidirectional Android head unit protocol implementations (Hiworld, Raise, Bagoo) with verifiable state machines and handshake protocols.
+
+---
+
+## Design Goals & Core Principles
+
+### Architectural Pillars
+
+**Portability without Compromise**
+: All vehicle decoders and protocol parsers compile to standard C99 (`-std=c99 -Wall -Wextra -Werror`). Microcontroller-specific logic is isolated to hardware abstraction layers (`include/hal/`), allowing identical core firmware to run on Linux, STM32, ESP32, and other platforms without source modification.
+
+**Deterministic Real-Time Operation**
+: Zero heap allocation (`malloc` / `calloc` / `free` strictly prohibited throughout core layers) guarantees predictable memory footprint and interrupt safety. Lock-free, power-of-two ring buffers enable safe producer-consumer execution between hardware ISRs and main event loops without mutexes or RTOS primitives.
+
+**CAN2004 Ground Truth Only**
+: All vehicle profiles strictly implement verified, documented CAN specifications. Speculative or unconfirmed signal decoders are explicitly prohibited; unimplemented frames are tracked in `doc/TODO_PROGRESS.md` until user-provided verification is available. This prevents the common reverse-engineering pitfall of mixing CAN2004 (Peugeot 407 @ 125 kbps) with CAN2010 definitions.
+
+**Hardware Abstraction Discipline**
+: Vehicle decoders (`src/profiles/`), protocol parsers (`src/protocols/`), and the central router (`src/core/`) never import hardware-specific headers. Device drivers are capsulized in `include/hal/*.h`, maintaining complete MCU independence.
+
+**Bandwidth-Aware Throttling**
+: State-caching delta filter preserves > 85% idle margin on 38,400 baud serial links by classifying telemetry into frequency tiers (Event-Driven < 10 ms, Dynamic 5–10 Hz, Periodic 1 Hz, Infrequent 30 s).
+
+---
+
+## Why OpenCanbox Core?
+
+### Differentiators
+
+**Verified CAN Reverse Engineering**
+Extensive documented CAN2004 protocol mappings for Peugeot 407 and PSA platforms, produced through systematic bus analysis and cross-validated against factory specifications. No guesswork; every signal has a known source and scale factor.
+
+**Multi-Protocol Automotive Support**
+Production implementations of Hiworld, Raise, and Bagoo Android head unit protocols with complete uplink (vehicle → head unit) and downlink (head unit → vehicle) command handling, including climate control, steering wheel controls, and trip computer reset sequences.
+
+**Genuinely Portable Firmware**
+Most CAN-to-Android adapters are fork-and-modify projects hardcoded to a specific MCU and head unit protocol. OpenCanbox Core compiles identically across Linux (SocketCAN), STM32F103 (bxCAN), ESP32 (TWAI), AVR (MCP2515), and Nuvoton (Bosch C_CAN), with vehicle profiles and protocol drivers unchanged.
+
+**Simulation-First Development**
+Full desktop simulation on Linux using virtual CAN (`vcan0`) and POSIX pseudo-terminals enables rapid protocol development, test automation, and verification without hardware. Identical code paths run in simulation and on hardware.
+
+**Automotive Determinism**
+Strict C99, zero dynamic allocation, and lock-free queues provide predictable interrupt latencies and memory behavior required for safety-critical automotive applications.
+
+**Research-Grade Documentation**
+Complete reverse-engineering notes, protocol specifications, and hardware wiring guides enable reproducible research and collaborative protocol discovery.
 
 ---
 
 ## Architecture Overview
 
-```
-+-----------------------------------------------------------------------------+
-|                Android Head Unit Protocol Engine (Pure C99)                 |
-|  - Dynamic protocol dispatch (Hiworld, Raise, Bagoo)                        |
-|  - Bidirectional packet framer, streaming parser, and checksum engines      |
-|  - Uplink telemetry serializers & Downlink control command decoders         |
-+-----------------------------------------------------------------------------+
-                                       ▲
-                                       │ (Canonical Vehicle State Structs)
-                                       ▼
-+-----------------------------------------------------------------------------+
-|                     CAN Router & State Cache Engine                         |
-|  - Vehicle matrix decoders (Peugeot/PSA CAN2004, VAG, Toyota, etc.)         |
-|  - Normalized vehicle state tracking & differential change-detection (delta)|
-|  - Rate-limited dispatch tiers preserving 38,400 baud serial bandwidth     |
-+-----------------------------------------------------------------------------+
-                    │                                      │
-                    ▼                                      ▼
-+--------------------------------------+ +------------------------------------+
-| Hardware Abstraction Layer (HAL API) | |      Hardware GPIO Line Drivers    |
-|   hal_can.h  |  hal_uart.h           | | - ACC (12V Switched Wakeup)        |
-|   hal_system.h  |  hal_gpio.h        | | - ILL (Nighttime Illumination)     |
-+--------------------------------------+ | - REVERSE (Instant Camera Switch)  |
-        │                 │              +------------------------------------+
-        ▼                 ▼                                │
-+---------------+ +---------------+                        │
-|  Linux Host   | |   STM32 LL    | ◄──────────────────────┘
-| (SocketCAN /  | | (bxCAN /      |
-|    pty)       | |  USART / GPIO)|
-+---------------+ +---------------+
-        │                 │
-        ▼                 ▼
-+---------------+ +---------------+
-|  ESP32 TWAI   | | Nuvoton C_CAN |
-| (ESP-IDF /    | | (NuMicro /    |
-|  UART / GPIO) | |  UART)        |
-+---------------+ +---------------+
-```
+### 5-Layer Processing Pipeline
 
----
-
-## 5-Layer Processing Pipeline
-
-To guarantee complete vehicle and protocol portability, all features strictly traverse the 5-layer pipeline:
+All features traverse a strictly layered architecture, ensuring protocol and vehicle independence:
 
 ```mermaid
 flowchart TD
-    A["Layer 1: CAN Hardware Rx<br>(include/hal/hal_can.h)"] --> B["Layer 2: Vehicle Profile Decoder<br>(src/profiles/profile_*.c)"]
-    B --> C["Layer 3: CAN Router & State Cache<br>(src/core/can_router.c)"]
-    C --> D["Layer 4: Protocol Driver Interface<br>(include/protocols/hu_protocol_driver.h)"]
-    D --> E["Layer 5: Head Unit Protocol Adapter<br>(src/protocols/proto_*_adapter.c)"]
-    E --> F["UART Hardware Tx<br>(include/hal/hal_uart.h)"]
-    C -.-> G["Physical GPIO Synthesis<br>(ACC / ILL / REVERSE)"]
+    A["Layer 1: CAN Hardware Rx<br/>(HAL: hal_can.h)"] --> B["Layer 2: Vehicle Profile Decoder<br/>(src/profiles/profile_*.c)"]
+    B --> C["Layer 3: CAN Router & State Cache<br/>(src/core/can_router.c)"]
+    C --> D["Layer 4: Protocol Driver Vtable<br/>(hu_protocol_driver_t)"]
+    D --> E["Layer 5: Head Unit Protocol Adapter<br/>(src/protocols/proto_*_adapter.c)"]
+    E --> F["UART Hardware Tx<br/>(HAL: hal_uart.h)"]
+    C -.-> G["GPIO Synthesis<br/>(ACC / ILL / REVERSE)"]
 ```
 
-1. **Layer 1: CAN Hardware Rx** — Microcontroller or Linux host CAN driver ingests raw arbitration IDs and payloads into a lock-free SPSC ring buffer.
-2. **Layer 2: Vehicle Profile Decoder** — Decodes raw manufacturer-specific bitfields and endianness (`read_be16`, `read_le16`) into a normalized vehicle state structure ([`vehicle_state_t`](include/core/can_router.h)).
-3. **Layer 3: CAN Router & State Cache** — Caches current vehicle state and compares it against previous state (`s_last_sent_state`). Dispatches events based on frequency classes to avoid saturating the 38,400 baud serial bus.
-4. **Layer 4: Protocol Driver Interface** — Vtable-driven protocol abstraction ([`hu_protocol_driver_t`](include/protocols/hu_protocol_driver.h)) decoupling car profiles from head unit protocols.
-5. **Layer 5: Head Unit Protocol Adapter** — Serializes canonical data into target protocol binary frames (Hiworld, Raise, Bagoo) and transmits via HAL UART.
-6. **Physical GPIO Line Synthesis** — Decodes real-time CAN messages to drive physical $+12\text{V}$ output circuits (ACC, ILL, REVERSE) for head units lacking CAN-driven wake-up.
+**Layer 1: CAN Reception**
+Hardware drivers (`hal_stm32/`, `hal_esp32/`, `hal_native/`) ingest raw CAN frames and deposit them into lock-free SPSC ring buffers, decoupling ISR timing from main-loop processing.
+
+**Layer 2: Vehicle Profile Decoding**
+Profile-specific decoders (`src/profiles/profile_peugeot_407.c`, `profile_psa_generic.c`) translate manufacturer bitfields and endianness into a normalized `vehicle_state_t` canonical structure. All multi-byte reads use safe helpers (`read_be16`, `read_le16`, `read_be32`, `read_le32`) with boundary checking.
+
+**Layer 3: CAN Router & State Cache**
+Central state machine (`src/core/can_router.c`) maintains cumulative vehicle state, performs differential change detection, and dispatches events according to frequency classification (Class A: immediate < 10 ms; Class B: throttled 5–10 Hz; Class C: periodic 1 Hz; Class D: infrequent 30 s).
+
+**Layer 4: Protocol Driver Interface**
+Dynamic vtable dispatch (`hu_protocol_driver_t`) decouples vehicle profiles from Android head unit protocols, enabling identical profiles to emit Hiworld, Raise, or Bagoo packets without modification.
+
+**Layer 5: Protocol Adaptation & Transmission**
+Protocol-specific serializers (`src/protocols/proto_hiworld_adapter.c`, `proto_raise_adapter.c`) convert canonical state into target protocol frames with checksums, framing, and escape sequences. Frames transmit via HAL UART.
+
+**Physical GPIO Synthesis**
+Parallel event dispatch synthesizes dedicated $+12\text{V}$ output lines (REVERSE: instant camera trigger, ILL: illumination dimming, ACC: switched accessory wake) for head units lacking native CAN output capability.
 
 ---
 
-## Key Features & Supported Telemetry
+### System Diagram
 
-* **Zero MCU Lock-In:** Core translation and state-machine logic contain no platform-specific headers.
-* **Strict C99 & Zero Dynamic Memory Allocation:** Absolutely no `malloc`, `calloc`, or `free`; safe for bare-metal interrupts, deterministic execution, and automotive safety.
-* **Lock-Free SPSC Queues:** Power-of-two bitwise-masked ring buffers ([`ring_buffer_t`](include/core/ring_buffer.h)) for non-blocking producer-consumer execution between ISRs and the main loop.
-* **Intelligent Bandwidth Throttling:** State-caching delta filter maintaining $> 85\%$ idle margin on 38,400 baud serial links:
-  * **Class A (Event-Driven / Immediate, $< 10\text{ ms}$):** Reverse gear, SWC keys, door state changes, climate adjustments, handbrake, emergency TPMS alarms.
-  * **Class B (Throttled Dynamic, 5–10 Hz):** Steering wheel angle for trajectory guidelines, vehicle speed, engine RPM.
-  * **Class C (Periodic Keepalive, 1 Hz):** Open door status repetition, connection heartbeat, BSI settings sync.
-  * **Class D (Infrequent Telemetry, on-change / 30 s):** Numeric tire pressures (bar/psi), ambient temperatures, extended trip metrics.
-* **Comprehensive Automotive Telemetry Supported:**
-  * **Steering Wheel Controls (SWC):** Volume Up/Down, Seek/Track Next/Prev, Source/Mode, Mute, Rollers, Trip/Menu navigation.
-  * **Dual-Zone Climate (HVAC):** Fan speed, driver/passenger setpoint temperatures, blow direction modes (windshield, face, feet), AC, auto, recirculation, defrost, and downlink touchscreen control.
-  * **Doors & Body Status:** 4 doors (FL, FR, RL, RR), trunk, hood, handbrake status with immediate change-detection and 1 Hz open-door keepalive repetition.
-  * **Trip Computer & Fuel Telemetry:** Instantaneous fuel consumption, historical Trip 1 & Trip 2 (average speed, fuel consumption, distance traversed), cruising range (distance-to-empty), target destination distance, and downlink trip reset command dispatch.
-  * **Tire Pressure Monitoring (TPMS):** Independent 4-wheel numeric pressures (bar / psi) and status alarms (nominal, low pressure, puncture).
-  * **Parking Radar (AAS):** Front and rear 4-zone obstacle distance sensors and acoustic buzzer warning state.
-  * **Steering Angle Sensor (SAS):** Real-time trajectory angle up to 10 Hz for dynamic reverse parking guide lines.
-  * **Hardware GPIO Synthesis:** Synthesizes dedicated physical $+12\text{V}$ lines: **REVERSE** (instant camera trigger), **ILL** (headlight/illumination dimming), and **ACC** (switched accessory wake power) for vehicles where factory radio harnesses omit analog triggers.
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│       Android Head Unit Protocol Engine                                 │
+│  - Dynamic protocol dispatch (Hiworld / Raise / Bagoo)                  │
+│  - Bidirectional packet framing & checksum synthesis                    │
+│  - Downlink command parsing & uplink telemetry serialization            │
+└─────────────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ (Canonical vehicle_state_t)
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│       CAN Router & State Cache Engine                                   │
+│  - Vehicle matrix decoders (PSA, VAG, Toyota profiles)                  │
+│  - Normalized state tracking & differential change detection            │
+│  - Rate-limited dispatch (38,400 baud preservation)                     │
+└─────────────────────────────────────────────────────────────────────────┘
+            │                                            │
+            ▼                                            ▼
+  ┌──────────────────────┐              ┌──────────────────────────┐
+  │  Hardware Abstraction │              │  GPIO Output Drivers     │
+  │  - CAN (hal_can.h)    │              │  - ACC (12V Wake-up)     │
+  │  - UART (hal_uart.h)  │              │  - ILL (Illumination)    │
+  │  - GPIO (hal_gpio.h)  │              │  - REVERSE (Camera)      │
+  │  - System (hal_sys.h) │              └──────────────────────────┘
+  └──────────────────────┘
+          │          │
+          ▼          ▼
+  ┌─────────┐  ┌─────────┐    ┌─────────┐    ┌──────────┐
+  │ Linux   │  │ STM32   │    │ ESP32   │    │ Nuvoton  │
+  │SocketCAN   bxCAN/LL   TWAI/ESP-IDF  C_CAN/Custom
+  │ pty     │  │ USART   │    │ UART    │    │ UART     │
+  │ GPIO    │  │ GPIO    │    │ GPIO    │    │ GPIO     │
+  └─────────┘  └─────────┘    └─────────┘    └──────────┘
+```
 
 ---
 
-## Supported Protocols & Profiles
+## Supported Protocols & Vehicle Profiles
 
-### Head Unit Protocols
+### Android Head Unit Protocols
 
-| Protocol | Sync Framing | Baud Rate | Directionality | Status |
+| Protocol | Framing | Baud Rate | Capability | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Hiworld** | `0x5A 0xA5` | 38,400 / 115,200 | Bidirectional (Uplink + Downlink) | Full (Handshake `0x24`, Versions `0xF0`, Clima `0x31`/`0x32`, Trip `0x33`/`0x34`/`0x35`, Radar `0x22`/`0x23`/`0x24`, Doors `0x02`/`0x25`, TPMS `0x38`/`0x39`, SAS `0x26`, SWC `0x11`) |
-| **Raise** | `0x2E` | 38,400 | Bidirectional | Complete (SWC, Doors, Wheel Angle, Speed/RPM, BSI Settings, Trip Reset) |
-| **Bagoo** | `0xFD` / `0xD5` | 38,400 | Bidirectional | Baseline (SWC, Doors, Version query) |
-| **Simple Soft** | `0xAA 0x55` | 38,400 | Bidirectional | Planned / Architecture Ready |
+| **Hiworld** | `0x5A 0xA5` | 38,400 / 115,200 | Full bidirectional | Production (SWC, Climate, Trip, Radar, Doors, Mileage) |
+| **Raise** | `0x2E` | 38,400 | Full bidirectional | Production (SWC, Doors, Steering Angle, Speed/RPM, Settings) |
+| **Bagoo** | `0xFD` / `0xD5` | 38,400 | Bidirectional | Baseline (SWC, Doors, Version Query) |
+| **Simple Soft** | `0xAA 0x55` | 38,400 | Bidirectional | Planned |
 
 ### Vehicle Profiles
 
-| Profile ID | Vehicle Model / Generation | Supported Buses | CAN IDs Decoded |
+| Profile | Vehicle / Generation | Bus Architecture | Coverage |
 | :--- | :--- | :--- | :--- |
-| `VEHICLE_PROFILE_PEUGEOT_407` | Peugeot 407 (2004–2011) | PSA CAN2004 Comfort (125 kbps) / Body | `0x036`, `0x0F6`, `0x128`, `0x0B6`, `0x1E1`, `0x228`, `0x268`, `0x3A1`, `0x348` |
-| `VEHICLE_PROFILE_PSA_GENERIC` | Peugeot 307 / 308 / Citroen C4 / C5 | PSA CAN2004 & CAN2010 | Full standard PSA Comfort matrix |
-| `VEHICLE_PROFILE_VAG_PQ` | VW Golf 5/6, Passat B6, Octavia 2 | VAG PQ35 / PQ46 (100 / 500 kbps) | Steering wheel, door status, ignition |
+| `VEHICLE_PROFILE_PEUGEOT_407` | Peugeot 407 (2004–2011) | PSA CAN2004 @ 125 kbps | Engine, Climate, Doors, HVAC, Steering, Trip, Parking, TPMS |
+| `VEHICLE_PROFILE_PSA_GENERIC` | Peugeot 307/308, Citroen C4/C5 | CAN2004 & CAN2010 | Extended PSA Comfort + Powertrain matrix |
+| `VEHICLE_PROFILE_VAG_PQ` | VW Golf 5/6, Passat B6, Octavia 2 | VAG PQ35/46 @ 100/500 kbps | Steering wheel, door state, ignition, door unlock |
 
 ---
 
-## Project Structure
+## Telemetry Coverage
 
-```text
-canbox-core/
-├── platformio.ini                  # Multi-target configuration (Native, STM32, ESP32)
-├── Makefile.nuc131                 # Standalone GCC build for Nuvoton NUC131
-├── development_guidelines.md       # Engineering standards, frequency tiers, 5-layer rules
-├── AGENTS.md                       # AI agent workflow constraints and guidelines
-├── doc/                            # Comprehensive protocol, hardware, and reverse engineering specs
-│   ├── TODO_PROGRESS.md                           # Implementation progress vs QF Canbus system HU spec
-│   ├── HARDWARE_GPIO_REVERSE_ILL_ACC.md           # Dedicated GPIO output driver specification
-│   ├── MANUAL_TESTING_WITH_HEADUNIT.md            # Hardware workbench and wiring guide
-│   ├── CANBOX_SPEC_HIWORLD_407_01..11_*.md        # Reverse-engineered Hiworld Peugeot specs
-│   ├── PEUGEOT_RT4_TRIP_RESET.md                  # Downlink trip computer reset protocol
-│   └── PEUGEOT_RT4_CAR_CONFIG.md                  # Car personalization & BSI settings spec
-├── include/
-│   ├── core/
-│   │   ├── can_router.h            # Canonical vehicle state & change-detection engine
-│   │   ├── ring_buffer.h           # Lock-free SPSC circular queue
-│   │   └── vehicle_profile.h       # Vehicle profile registry & interface
-│   ├── hal/
-│   │   ├── hal_can.h               # CAN bus driver API
-│   │   ├── hal_uart.h              # Serial UART driver API
-│   │   ├── hal_gpio.h              # GPIO, LED, ACC/ILL/REVERSE pin API
-│   │   └── hal_system.h            # High-resolution monotonic timers & delays
-│   ├── profiles/
-│   │   └── peugeot_407.h           # Peugeot 407 specific CAN matrix definitions
-│   └── protocols/
-│       ├── hu_protocol.h           # Public serializer & dispatcher interface
-│       ├── hu_protocol_driver.h    # Dynamic protocol vtable
-│       ├── canbox_parser.h         # Streaming byte parser
-│       ├── proto_hiworld.h         # Hiworld framing & packet serializers
-│       ├── proto_raise.h           # Raise framing & packet serializers
-│       ├── proto_bagoo.h           # Bagoo framing & packet serializers
-│       ├── hiworld_car_mapping.h   # Hiworld model index mappings
-│       └── raise_car_mapping.h     # Raise model index mappings
-├── src/
-│   ├── main.c                      # Main loop for Desktop (Linux) & STM32 targets
-│   ├── main_esp32.c                # ESP-IDF FreeRTOS main entry
-│   ├── core/                       # can_router, ring_buffer, vehicle_profile
-│   ├── profiles/                   # Peugeot 407, Generic PSA, VAG profile implementations
-│   ├── protocols/                  # Protocol parsers and adapters (Raise, Hiworld, Bagoo)
-│   └── hal/
-│       ├── hal_native/             # Linux SocketCAN & POSIX pty drivers
-│       ├── hal_stm32/              # STM32F103 LL bxCAN & USART1 drivers
-│       └── hal_esp32/              # ESP32 TWAI & UART drivers
-├── test/
-│   ├── test_protocol_parser/       # Unit tests (protocol framing, checksums, profile decoders)
-│   └── test_integration/           # End-to-end integration tests & recorded CAN scenario tests
-├── test_data/                      # Real vehicle CAN bus dumps for offline scenario tests
-└── tools/                          # Bench testing and verification toolchain
-    ├── canbox_e2e_logger.py        # Live bidirectional logger and protocol validator
-    ├── canbox_bench_e2e.py         # Automated CAN-to-UART bench scenario runner
-    ├── diff_canbox_frames.py       # Differential CAN and serial packet comparison
-    ├── canbox_manual_test.py       # Interactive terminal frame injector
-    └── replay_serial.py            # Serial packet replayer
-```
+The platform captures comprehensive automotive telemetry across multiple functional domains:
+
+### Input (Vehicle → Head Unit)
+
+**Steering Wheel Controls (SWC)**
+Volume (up/down), seek/track (next/previous), source/mode selection, mute, roller inputs, trip/menu navigation.
+
+**Climate Control (HVAC)**
+Driver/passenger setpoint temperatures, fan speed, blow direction modes (windshield, face, feet), AC enable, auto mode, recirculation, defrost status, and full downlink touchscreen control.
+
+**Vehicle Status**
+Four-door status (FL, FR, RL, RR), trunk, hood, handbrake, seatbelt, ignition state, battery voltage with immediate change detection.
+
+**Powertrain Telemetry**
+Engine RPM, vehicle speed, throttle position, gear selection (Park/Reverse/Neutral/Drive), transmission mode.
+
+**Trip Computer & Fuel**
+Instantaneous and average fuel consumption (L/100km), trip distance, average speed, cruising range (distance-to-empty), fuel tank level and range.
+
+**Tire Pressure Monitoring (TPMS)**
+Four-wheel independent numeric pressures (bar/psi), status indication (nominal/low/puncture), with event-driven alarm dispatch.
+
+**Parking Assistance**
+Front/rear 4-zone obstacle distances (cm), buzzer warning state, synthesized reverse camera trigger output.
+
+**Environmental**
+Ambient air temperature, interior cabin temperature, solar radiation (where available).
+
+**Steering Angle Sensor (SAS)**
+Real-time steering wheel angle (−720° to +720°) up to 10 Hz for dynamic reverse parking guides.
+
+### Output (Head Unit → Vehicle)
+
+**Climate Control Commands**
+Setpoint adjustments (driver/passenger), fan speed control, mode switching, AC/recirculation toggle.
+
+**Trip Computer Management**
+Trip reset commands (Trip 1 / Trip 2), consumption averaging restart.
+
+**Vehicle Settings Sync**
+BSI user profiles, language selection, display preferences, lighting modes.
 
 ---
 
-## Getting Started: Linux Desktop Simulation
+## Development Workflow
 
-You can compile, run, and test the entire stack on Linux without any hardware connected.
+### Desktop Simulation (Linux + SocketCAN)
 
-### 1. Prerequisites
+1. **Configure virtual CAN interface:**
+   ```bash
+   sudo modprobe vcan
+   sudo ip link add dev vcan0 type vcan
+   sudo ip link set up vcan0
+   ```
 
-Install CAN utilities and PlatformIO Core:
+2. **Build and run the native simulator:**
+   ```bash
+   CANBOX_CAN_IFACE="vcan0" pio run -e native_test -t exec
+   ```
 
+3. **Monitor simulated head unit UART output:**
+   ```bash
+   xxd -c 16 < /tmp/ttyCanbox
+   ```
+
+4. **Inject test CAN frames from a third terminal:**
+   ```bash
+   # Steering wheel volume up (Peugeot 407, ID 0x128)
+   cansend vcan0 128#0100
+   
+   # Driver door open + handbrake engaged (ID 0x036)
+   cansend vcan0 036#0100000000000000
+   
+   # Reverse gear engaged (ID 0x0F6)
+   cansend vcan0 0F6#0000000000000080
+   ```
+
+### Automated Testing
+
+**Unit Tests (Protocol Parsers, Vehicle Decoders)**
 ```bash
-sudo apt update
-sudo apt install can-utils build-essential picocom
-pip install platformio
+pio test -e native_test_runner
 ```
 
-### 2. Configure Virtual CAN & Start Simulation
-
-Create a virtual CAN interface (`vcan0`):
-
+**Integration Tests (CAN-to-UART End-to-End + Recorded Scenarios)**
 ```bash
-sudo modprobe vcan
-sudo ip link add dev vcan0 type vcan
-sudo ip link set up vcan0
+pio test -e integration_test
 ```
 
-Start the interactive simulation binary:
+### Hardware Deployment
 
+**STM32F103 Target:**
 ```bash
-CANBOX_CAN_IFACE="vcan0" pio run -e native_test -t exec
+pio run -e stm32_cbox
 ```
 
-Output:
-
-```text
-[SYS] Linux monotonic clock initialized.
-[CAN] Initialized on vcan0
-[UART] Head unit UART simulated on: /dev/pts/3
-[UART] Access port symlink available at: /tmp/ttyCanbox
+**ESP32 Target:**
+```bash
+pio run -e esp32_cbox
 ```
 
-### 3. Interactive Testing
-
-Open two additional terminals:
-
-**Terminal 2 — Head Unit UART Monitor:**
-
+**Standalone Nuvoton NUC131:**
 ```bash
-# Monitor raw bytes from the simulated Android Head Unit port
-xxd -c 16 < /tmp/ttyCanbox
-```
-
-**Terminal 3 — Inject Vehicle CAN Frames:**
-
-```bash
-# Steering Wheel Volume Up press (Peugeot 407, CAN ID 0x128)
-cansend vcan0 128#0100
-
-# Door status: Driver door open + Handbrake engaged (CAN ID 0x036)
-cansend vcan0 036#0100000000000000
-
-# Reverse gear engaged (CAN ID 0x0F6)
-cansend vcan0 0F6#0000000000000080
+make -f Makefile.nuc131
 ```
 
 ---
 
-## Python Bench Tools & Automated E2E Testing
+## Bench Testing Tools
 
-The [`tools/`](tools/) directory contains specialized Python utilities for bench testing with real head units or simulated desktop targets:
+The `tools/` directory provides Python utilities for automated protocol validation and live debugging:
 
-### Live E2E Protocol Logger (`canbox_e2e_logger.py`)
+### Live E2E Logger (`canbox_e2e_logger.py`)
 
-Listens to both the CAN bus (`vcan0` or `can0`) and the serial UART port (`/tmp/ttyCanbox` or `/dev/ttyUSB0`), formats decoded packets in real time, and writes timestamped session logs:
+Captures bidirectional CAN and serial UART traffic, decodes protocol frames in real time, and generates timestamped session logs:
 
 ```bash
-# Run against local desktop simulation
+# Desktop simulation
 python3 tools/canbox_e2e_logger.py --can vcan0 --serial /tmp/ttyCanbox
 
-# Run against hardware workbench at 38,400 baud
+# Hardware at standard baud rate
 python3 tools/canbox_e2e_logger.py --can can0 --serial /dev/ttyUSB0 --baud 38400
 ```
 
-### Automated Bench Test Suite (`canbox_bench_e2e.py`)
+### Automated Scenario Testing (`canbox_bench_e2e.py`)
 
-Injects predefined sequences of CAN frames and verifies that the correct protocol bytes are emitted on UART:
+Executes predefined CAN frame sequences and verifies correct protocol output on UART:
 
 ```bash
 python3 tools/canbox_bench_e2e.py --can vcan0 --serial /tmp/ttyCanbox
 ```
 
----
+### Protocol Frame Analyzer (`diff_canbox_frames.py`)
 
-## Running Automated Tests
-
-All unit and integration tests compile and run natively on Linux using the Unity test framework:
+Compares differential CAN and serial traffic for regression detection:
 
 ```bash
-# Run protocol parser, checksum, and profile decoder unit tests
-pio test -e native_test_runner
-
-# Run end-to-end multi-driver CAN-to-UART integration and CAN capture scenario tests
-pio test -e integration_test
+python3 tools/diff_canbox_frames.py session_baseline.log session_current.log
 ```
 
-### Building Embedded Targets
+### Manual Frame Injection (`canbox_manual_test.py`)
 
-Verify that embedded microcontroller firmware targets compile cleanly with zero warnings or errors:
+Interactive terminal for real-time CAN frame injection and UART monitoring.
 
-```bash
-# Build STM32F103 target (STM32Cube LL framework)
-pio run -e stm32_cbox
+### Serial Packet Replay (`replay_serial.py`)
 
-# Build ESP32 target (ESP-IDF framework)
-pio run -e esp32_cbox
-```
+Replays recorded UART sessions for protocol validation and debugging.
 
 ---
 
-## Target Build Matrix
+## Project Structure
 
-| Platform | Environment | Hardware Controller | HAL Drivers | Build Command |
+```
+canbox-core/
+├── platformio.ini                           # Multi-target build configuration
+├── Makefile.nuc131                          # Standalone Nuvoton NUC131 build
+├── development_guidelines.md                # Engineering standards & frequency classification
+├── AGENTS.md                                # AI agent workflow constraints
+├── README.md                                # This file
+│
+├── doc/                                     # Complete reverse-engineering & protocol specs
+│   ├── TODO_PROGRESS.md                     # Implementation roadmap
+│   ├── HARDWARE_GPIO_REVERSE_ILL_ACC.md     # GPIO output driver specification
+│   ├── MANUAL_TESTING_WITH_HEADUNIT.md      # Hardware workbench guide
+│   ├── CANBOX_SPEC_HIWORLD_*.md             # Hiworld protocol specifications
+│   ├── PEUGEOT_RT4_TRIP_RESET.md            # Downlink trip computer protocol
+│   └── PEUGEOT_RT4_CAR_CONFIG.md            # BSI settings & car personalization
+│
+├── include/
+│   ├── core/
+│   │   ├── can_router.h                     # State machine & change detection
+│   │   ├── ring_buffer.h                    # Lock-free SPSC queue
+│   │   └── vehicle_profile.h                # Profile registry & dispatcher
+│   │
+│   ├── hal/
+│   │   ├── hal_can.h                        # CAN bus abstraction
+│   │   ├── hal_uart.h                       # Serial UART abstraction
+│   │   ├── hal_gpio.h                       # GPIO & output line control
+│   │   └── hal_system.h                     # Timers & system utilities
+│   │
+│   ├── profiles/
+│   │   └── peugeot_407.h                    # Peugeot 407 CAN matrix definitions
+│   │
+│   └── protocols/
+│       ├── hu_protocol.h                    # Protocol serializer dispatcher
+│       ├── hu_protocol_driver.h             # Dynamic protocol vtable
+│       ├── canbox_parser.h                  # Streaming binary parser
+│       ├── proto_hiworld.h                  # Hiworld packet serializers
+│       ├── proto_raise.h                    # Raise packet serializers
+│       ├── proto_bagoo.h                    # Bagoo packet serializers
+│       ├── hiworld_car_mapping.h            # Hiworld model index mappings
+│       └── raise_car_mapping.h              # Raise model index mappings
+│
+├── src/
+│   ├── main.c                               # Main entry (Linux + STM32)
+│   ├── main_esp32.c                         # ESP32/FreeRTOS main entry
+│   │
+│   ├── core/
+│   │   ├── can_router.c                     # State cache & change detection
+│   │   ├── ring_buffer.c                    # SPSC queue implementation
+│   │   └── vehicle_profile_manager.c        # Profile registration
+│   │
+│   ├── profiles/
+│   │   ├── profile_peugeot_407.c            # Peugeot 407 decoder
+│   │   ├── profile_psa_generic.c            # Generic PSA CAN2004/2010 decoders
+│   │   └── profile_vag_pq.c                 # VAG PQ35/46 decoders
+│   │
+│   ├── protocols/
+│   │   ├── hu_protocol.c                    # Protocol dispatcher
+│   │   ├── proto_hiworld_adapter.c          # Hiworld uplink/downlink
+│   │   ├── proto_raise_adapter.c            # Raise uplink/downlink
+│   │   ├── proto_bagoo_adapter.c            # Bagoo uplink/downlink
+│   │   ├── hiworld_car_mapping.c            # Hiworld model database
+│   │   └── raise_car_mapping.c              # Raise model database
+│   │
+│   └── hal/
+│       ├── hal_native/                      # Linux SocketCAN + POSIX pty
+│       │   ├── hal_can_native.c
+│       │   ├── hal_uart_native.c
+│       │   ├── hal_gpio_native.c
+│       │   └── hal_system_native.c
+│       │
+│       ├── hal_stm32/                       # STM32F103 bxCAN + LL drivers
+│       │   ├── hal_can_stm32.c
+│       │   ├── hal_uart_stm32.c
+│       │   ├── hal_gpio_stm32.c
+│       │   └── hal_system_stm32.c
+│       │
+│       ├── hal_esp32/                       # ESP32 TWAI + ESP-IDF
+│       │   ├── hal_can_esp32.c
+│       │   ├── hal_uart_esp32.c
+│       │   ├── hal_gpio_esp32.c
+│       │   └── hal_system_esp32.c
+│       │
+│       └── hal_avr/                         # AVR + MCP2515 SPI CAN
+│           └── (AVR HAL drivers)
+│
+├── test/
+│   ├── test_protocol_parser/                # Protocol framing & checksum unit tests
+│   │   ├── test_hiworld_framing.c
+│   │   ├── test_raise_framing.c
+│   │   └── test_checksum_algorithms.c
+│   │
+│   └── test_integration/                    # End-to-end CAN-to-UART tests
+│       ├── test_peugeot_407_decoder.c
+│       ├── test_canbusscenarios.c
+│       └── test_hiworld_roundtrip.c
+│
+├── test_data/                               # Real vehicle CAN dumps & replay files
+│   ├── peugeot_407_idle.candump
+│   ├── peugeot_407_driving.candump
+│   └── hiworld_protocol_capture.log
+│
+└── tools/                                   # Bench testing & protocol validation
+    ├── canbox_e2e_logger.py                 # Live bidirectional logger
+    ├── canbox_bench_e2e.py                  # Automated scenario testing
+    ├── diff_canbox_frames.py                # Differential analysis
+    ├── canbox_manual_test.py                # Interactive frame injector
+    └── replay_serial.py                     # Serial packet replayer
+```
+
+---
+
+## Build Matrix
+
+| Platform | Environment | Controller | HAL | Build Command |
 | :--- | :--- | :--- | :--- | :--- |
-| **Linux Host** | `native_test` | SocketCAN (`vcan0`) + POSIX `pty` | `hal_native` | `pio run -e native_test` |
-| **STM32** | `stm32_cbox` | STM32F103 (bxCAN + USART1 + GPIOs) | `hal_stm32` | `pio run -e stm32_cbox` |
-| **ESP32** | `esp32_cbox` | ESP32-WROOM-32 (TWAI + UART1 + GPIOs) | `hal_esp32` | `pio run -e esp32_cbox` |
-| **Arduino AVR** | `avr_cbox` | ATmega328P + MCP2515 SPI CAN | `hal_avr` | `pio run -e avr_cbox` |
-| **Nuvoton NUC131**| Standalone Makefile | Bosch C_CAN + UART0 | `hal_nuc131` | `make -f Makefile.nuc131` |
+| **Linux** | `native_test` | SocketCAN + POSIX pty | `hal_native` | `pio run -e native_test` |
+| **STM32F103** | `stm32_cbox` | bxCAN + USART1 + GPIO | `hal_stm32` | `pio run -e stm32_cbox` |
+| **ESP32** | `esp32_cbox` | TWAI + UART1 + GPIO | `hal_esp32` | `pio run -e esp32_cbox` |
+| **ATmega328P** | `avr_cbox` | MCP2515 SPI CAN | `hal_avr` | `pio run -e avr_cbox` |
+| **Nuvoton NUC131** | Makefile | Bosch C_CAN + UART | `hal_nuc131` | `make -f Makefile.nuc131` |
 
 ---
 
 ## Adding a New Vehicle Profile
 
-Follow the 5-Layer workflow documented in [development_guidelines.md](development_guidelines.md):
+Implement a new vehicle profile following the 5-layer architecture:
 
-1. **Create Profile Header and Decoder:** Add `include/profiles/<vehicle>.h` and `src/profiles/profile_<vehicle>.c`.
-2. **Define CAN Matrix Rules:** Map arbitration IDs and bitfields into [`vehicle_state_t`](include/core/can_router.h):
-   ```c
-   static void decode_speed(const can_frame_t *frame, vehicle_state_t *state) {
-       if (frame->dlc < 4) return;
-       state->speed_kmh = (uint16_t)((read_be16(&frame->data[2])) / 100);
-   }
+### 1. Define the CAN Matrix
 
-   static const profile_can_rule_t s_rules[] = {
-       { 0x348, decode_speed }
-   };
-   ```
-3. **Register Profile:** Add profile enum in `include/core/vehicle_profile.h` and register in `src/core/vehicle_profile_manager.c`.
-4. **Wire Model IDs:** Map the head unit car selection indexes in `src/protocols/hiworld_car_mapping.c` and `src/protocols/raise_car_mapping.c`.
-5. **Verify with Tests:** Add unit tests in `test/test_protocol_parser/` and integration tests in `test/test_integration/`.
+Create `include/profiles/vehicle_name.h`:
+
+```c
+#ifndef PROFILE_VEHICLE_NAME_H
+#define PROFILE_VEHICLE_NAME_H
+
+#include "core/vehicle_profile.h"
+
+// CAN IDs for your vehicle
+#define VNAME_ID_ENGINE_STATUS    0x0B6
+#define VNAME_ID_CLIMATE          0x1E1
+#define VNAME_ID_DOORS            0x036
+
+// Decoder functions
+void decode_engine_status(const can_frame_t *frame, vehicle_state_t *state);
+void decode_climate(const can_frame_t *frame, vehicle_state_t *state);
+void decode_doors(const can_frame_t *frame, vehicle_state_t *state);
+
+#endif
+```
+
+### 2. Implement Decoders
+
+Create `src/profiles/profile_vehicle_name.c`:
+
+```c
+#include "profiles/vehicle_name.h"
+#include "core/can_router.h"
+#include "hal/hal_can.h"
+
+static void decode_engine_status(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 3) return;
+    
+    // Use safe multi-byte readers
+    state->rpm = (read_be16(&frame->data[0]) >> 3) * 0.25;
+    state->throttle_pct = frame->data[2];
+}
+
+static void decode_climate(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 4) return;
+    
+    state->climate.driver_setpoint = frame->data[0] - 40;
+    state->climate.passenger_setpoint = frame->data[1] - 40;
+    state->climate.fan_speed = frame->data[2] & 0x0F;
+    state->climate.ac_enabled = (frame->data[3] & 0x80) != 0;
+}
+
+// Register all decoders
+static const profile_can_rule_t s_vname_rules[] = {
+    {VNAME_ID_ENGINE_STATUS, decode_engine_status},
+    {VNAME_ID_CLIMATE, decode_climate},
+    {VNAME_ID_DOORS, decode_doors},
+    {0, NULL}  // Sentinel
+};
+
+const vehicle_profile_t profile_vehicle_name = {
+    .profile_id = VEHICLE_PROFILE_VEHICLE_NAME,
+    .name = "Vehicle Name (Year Range)",
+    .rules = s_vname_rules,
+};
+```
+
+### 3. Register the Profile
+
+Add to `include/core/vehicle_profile.h`:
+
+```c
+typedef enum {
+    VEHICLE_PROFILE_PEUGEOT_407,
+    VEHICLE_PROFILE_PSA_GENERIC,
+    VEHICLE_PROFILE_VAG_PQ,
+    VEHICLE_PROFILE_VEHICLE_NAME,  // Add here
+    VEHICLE_PROFILE_COUNT
+} vehicle_profile_id_t;
+```
+
+### 4. Wire Head Unit Mappings
+
+Update `src/protocols/hiworld_car_mapping.c` and `src/protocols/raise_car_mapping.c` to map the new profile to head unit model indices.
+
+### 5. Add Tests
+
+Create unit tests in `test/test_protocol_parser/test_vehicle_name_decoder.c`:
+
+```c
+#include <unity.h>
+#include "profiles/vehicle_name.h"
+
+void test_engine_status_decode(void) {
+    can_frame_t frame = {
+        .id = VNAME_ID_ENGINE_STATUS,
+        .dlc = 3,
+        .data = {0x18, 0x00, 0x42}
+    };
+    
+    vehicle_state_t state = {0};
+    decode_engine_status(&frame, &state);
+    
+    TEST_ASSERT_EQUAL_FLOAT(1500.0, state.rpm);
+    TEST_ASSERT_EQUAL_UINT8(66, state.throttle_pct);
+}
+```
+
+### 6. Verify Compilation
+
+```bash
+pio test -e native_test_runner
+pio run -e native_test
+pio run -e stm32_cbox
+```
+
+---
+
+## Contributing & Reverse Engineering Standards
+
+This project welcomes contributions, particularly verified CAN protocol documentation, new vehicle profiles, and protocol implementations.
+
+### CAN Reverse Engineering Requirements
+
+Before submitting a new vehicle profile or CAN frame decoder:
+
+1. **Document the signal source:** Provide OEM frame timing, DLC, and bit-level offset.
+2. **Verify scale factors:** Measure at least three known states (e.g., RPM at idle, 2000, 4000) to confirm scale and offset.
+3. **Validate endianness:** Confirm Motorola vs Intel byte order through multi-byte signal measurement.
+4. **Mark unconfirmed signals:** Place speculative frame definitions in `doc/TODO_PROGRESS.md` with "PENDING VERIFICATION" status.
+5. **Provide test data:** Include a CAN dump (`candump` format) containing the newly documented signals.
+
+### Code Submission Checklist
+
+- [ ] Passes `pio test -e native_test_runner` without warnings.
+- [ ] Passes `pio test -e integration_test`.
+- [ ] Compiles cleanly on `stm32_cbox` and `esp32_cbox` with `-Wall -Wextra -Werror`.
+- [ ] All multi-byte reads use `read_be16()`, `read_le16()`, `read_be32()`, or `read_le32()`.
+- [ ] All CAN frame indexing includes `dlc` boundary checks.
+- [ ] No `malloc`, `calloc`, `free`, or `static` mutable state in core layers.
+- [ ] Vehicle profiles use only `vehicle_state_t` canonical structures.
+- [ ] HAL implementations are isolated to `include/hal/*.h` and `src/hal/`.
+- [ ] Documentation updated in `doc/TODO_PROGRESS.md` and function headers.
+
+---
+
+## Compilation & Verification
+
+### Prerequisites
+
+```bash
+sudo apt update
+sudo apt install build-essential can-utils picocom
+pip install platformio
+```
+
+### Standard Build Verification
+
+**Unit Tests:**
+```bash
+pio test -e native_test_runner
+```
+
+**Integration Tests:**
+```bash
+pio test -e integration_test
+```
+
+**STM32F103 Firmware:**
+```bash
+pio run -e stm32_cbox
+```
+
+**ESP32 Firmware:**
+```bash
+pio run -e esp32_cbox
+```
+
+**Native Linux Simulation:**
+```bash
+CANBOX_CAN_IFACE="vcan0" pio run -e native_test -t exec
+```
+
+All builds must complete with zero warnings and zero errors.
+
+---
+
+## Implementation Status
+
+Current implementation coverage is documented in `doc/TODO_PROGRESS.md`:
+
+- ✅ **Complete:** Peugeot 407 CAN2004 decoder (Engine, Climate, Doors, HVAC, TPMS, Parking Radar)
+- ✅ **Complete:** Hiworld, Raise, Bagoo protocol bidirectional implementations
+- ✅ **Complete:** STM32F103, ESP32, Linux native HAL implementations
+- ⏳ **In Progress:** Generic PSA CAN2010 multi-brand profiles (307, 308, C4, C5)
+- ⏳ **In Progress:** VAG PQ35/46 profiles (Golf, Passat, Octavia)
+- ⏳ **Pending:** Simple Soft protocol implementation
+- ⏳ **Pending:** Toyota CAN profiles
+- ⏳ **Pending:** Hyundai/Kia CAN profiles
 
 ---
 
 ## License
 
-OpenCanbox Core is released under the MIT / Apache 2.0 open-source license.
+OpenCanbox Core is released under the dual **MIT / Apache 2.0** open-source license. See LICENSE files for details.
+
+---
+
+## References
+
+- **PlatformIO:** https://platformio.org
+- **Linux SocketCAN:** https://github.com/torvalds/linux/tree/master/drivers/net/can
+- **STM32F1xx HAL:** https://github.com/STMicroelectronics/STM32CubeF1
+- **ESP-IDF:** https://github.com/espressif/esp-idf
+- **CAN 2.0 Specification:** ISO 11898-1
+- **Peugeot/PSA Reverse Engineering Resources:** See `doc/` directory
+
+---
+
+## Support & Community
+
+- **Issue Tracker:** GitHub Issues
+- **Documentation:** See `doc/` directory for comprehensive protocol and hardware specifications
+- **Hardware Testing Guide:** `doc/MANUAL_TESTING_WITH_HEADUNIT.md`
+- **Protocol Specifications:** `doc/CANBOX_SPEC_*.md`
+```
