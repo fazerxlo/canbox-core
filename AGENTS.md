@@ -13,6 +13,10 @@ You are acting as an embedded systems software engineer specializing in automoti
 * **Boundary & Arithmetic Safety:** Always boundary-check `frame->dlc` prior to array indexing. Unpack multi-byte integers using `read_be16()`, `read_le16()`, `read_be32()`, or `read_le32()` helpers; never cast byte pointers directly to multi-byte structures.
 * **Strict CAN2004 Proven Data Only (Zero Guesses / Zero Unverified Placeholders):** The primary target vehicle architecture is Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps). The AI must strictly use verified, documented CAN2004 data provided by the user. The user provides verified documentation before implementation. Never guess signals, never implement speculative placeholder decoders, and never import or mix CAN2010 / AEE2010 signal definitions (such as radar on `0x260`/`0x270` or unconfirmed SAS frames). If a CAN frame or signal mapping is not explicitly proven or provided by the user, mark it as pending in `doc/TODO_PROGRESS.md` and DO NOT write decoder code for it.
 * **Path Privacy in Documentation:** Never include absolute system paths (e.g. `/home/...` or `file:///home/...`) in documentation files (`doc/*.md` or markdown files). Use relative repository paths for internal files. For external files outside the workspace, only reference the filename or class name without local paths or links.
+* **Mandatory Progress Table Updates (`doc/TODO_PROGRESS.md`):** Whenever an agent implements, refactors, verifies, or modifies any feature, decoder, serializer, downlink handler, test, or protocol command, the agent **MUST** update `doc/TODO_PROGRESS.md` before concluding the task. Specifically:
+  - Update the feature row in Section 3 (Master Command Implementation Matrix) and Section 4 (Subsystem Deep-Dive) with current status (`[x]`, `[-]`, or `[ ]`), implemented C functions, CAN IDs, and test cases.
+  - Recalculate and update the High-Level Progress Overview counts and completion percentages in Section 2.
+  - Ensure the tracker stays strictly Hiworld PSA Peugeot 407 specific (no Raise, Bagoo, VAG, or unverified CAN2010 definitions).
 
 ---
 
@@ -138,9 +142,9 @@ Implement the Uplink path strictly traversing the 5 layers:
    ```
 3. Ensure zero compilation warnings (`-Wall -Wextra -Werror`) on desktop, STM32, and ESP32 targets.
 
-### Phase 5: Documentation & Specification Tracking
-1. Create or update the detailed topic specification document in `doc/CANBOX_SPEC_<PROTO>_<CAR>_<TOPIC>.md` documenting bitfields, wire frames, and APK mappings.
-2. Update `doc/TODO_PROGRESS.md` reflecting feature status: mark completed features `[x]` with references to implemented functions.
+### Phase 5: Documentation & Specification Tracking (MANDATORY)
+1. **Always Update `doc/TODO_PROGRESS.md`:** Never conclude a task or feature implementation without updating `doc/TODO_PROGRESS.md`: mark completed features `[x]`, in-progress features `[-]`, update the counts and completion percentages in Section 2, and link implemented functions, CAN IDs, and test cases.
+2. Create or update the detailed topic specification document in `doc/CANBOX_SPEC_HIWORLD_407_<TOPIC>.md` documenting bitfields, wire frames, and APK mappings.
 
 ### Phase 6: Downlink Progression
 Once the Uplink path is fully implemented, verified with tests, and documented:
