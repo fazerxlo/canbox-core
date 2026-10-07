@@ -7,6 +7,7 @@
 ![Linux](https://img.shields.io/badge/Linux-SocketCAN-green)
 ![STM32](https://img.shields.io/badge/STM32F103-Supported-red)
 ![ESP32](https://img.shields.io/badge/ESP32--TWAI-Supported-red)
+![Nuvoton](https://img.shields.io/badge/NUC131-Supported-red)
 ![License](https://img.shields.io/badge/License-MIT%2FApache%202.0-green)
 
 ---
@@ -267,9 +268,9 @@ pio run -e stm32_cbox
 pio run -e esp32_cbox
 ```
 
-**Standalone Nuvoton NUC131:**
+**Nuvoton NUC131 Target:**
 ```bash
-make -f Makefile.nuc131
+pio run -e nuc131_cbox
 ```
 
 ---
@@ -437,7 +438,7 @@ canbox-core/
 | **STM32F103** | `stm32_cbox` | bxCAN + USART1 + GPIO | `hal_stm32` | `pio run -e stm32_cbox` |
 | **ESP32** | `esp32_cbox` | TWAI + UART1 + GPIO | `hal_esp32` | `pio run -e esp32_cbox` |
 | **ATmega328P** | `avr_cbox` | MCP2515 SPI CAN | `hal_avr` | `pio run -e avr_cbox` |
-| **Nuvoton NUC131** | Makefile | Bosch C_CAN + UART | `hal_nuc131` | `make -f Makefile.nuc131` |
+| **Nuvoton NUC131** | `nuc131_cbox` | Bosch C_CAN + UART | `hal_nuc131` | `pio run -e nuc131_cbox` |
 
 ---
 
@@ -656,6 +657,8 @@ OpenCanbox Core is released under the dual **MIT / Apache 2.0** open-source lice
 - **Linux SocketCAN:** https://github.com/torvalds/linux/tree/master/drivers/net/can
 - **STM32F1xx HAL:** https://github.com/STMicroelectronics/STM32CubeF1
 - **ESP-IDF:** https://github.com/espressif/esp-idf
+- **Nuvoton NUC131 Platform:** [https://github.com/fazerxlo/nuvoton_nuc131](https://github.com/fazerxlo/nuvoton_nuc131)
+- **NUC131 Support Notes:** `doc/NUC131_SUPPORT.md`
 - **CAN 2.0 Specification:** ISO 11898-1
 - **Peugeot/PSA Reverse Engineering Resources:** See `doc/` directory
 

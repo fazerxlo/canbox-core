@@ -12,26 +12,27 @@ hal_status_t hal_system_init(void) {
     SYS_UnlockReg();
 
     // Enable internal 22.1184 MHz high-speed oscillator (HIRC)
-    CLK->PWRCON |= CLK_PWRCON_IRC22M_EN_Msk;
-    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_IRC22M_STB_Msk));
+    CLK_EnableXtalRC(CLK_PWRCON_OSC22M_EN_Msk);
+    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_OSC22M_STB_Msk));
 
-    // Configure PLL to 50 MHz: FIN = HIRC, FOUT = 50 MHz
-    // PLLCON settings: OUT_DV = 0, IN_DV = 1, FB_DV = 31 (standard BSP macro)
-    CLK->PLLCON = CLK_PLLCON_50MHz_HIRC;
-    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_PLL_STB_Msk));
+    // Set HCLK source to HIRC (22.1184 MHz) with divider 1
+    CLK_SetHCLK(CLK_CLKSEL0_HCLK_S_HIRC, CLK_CLKDIV_HCLK(1));
 
-    // Switch HCLK to PLL
-    CLK->CLKSEL0 = (CLK->CLKSEL0 & ~CLK_CLKSEL0_HCLK_S_Msk) | CLK_CLKSEL0_HCLK_S_PLL;
-    CLK->CLKDIV &= ~CLK_CLKDIV_HCLK_N_Msk;
+    // Configure PLL to 48 MHz: FIN = HIRC, FOUT = 48 MHz
+    // Uses CLK_SetCoreClock() which internally sets up PLL
+    CLK_SetCoreClock(48000000);
 
     // Update SystemCoreClock CMSIS global
-    SystemCoreClock = 50000000;
+    SystemCoreClock = 48000000;
 
     // Relock registers
     SYS_LockReg();
 
     // Configure SysTick for 1ms
-    SysTick_Config(SystemCoreClock / 1000);
+    // SysTick counter value = (core_clock / 8) / tick_frequency
+    // For 48 MHz / 8 = 6 MHz, tick at 1 kHz => counter = 6000
+    uint32_t counter = SystemCoreClock / 8 / 1000;
+    CLK_EnableSysTick(CLK_CLKSEL0_STCLK_S_HIRC_DIV2, counter);
 
     return HAL_STATUS_OK;
 }
@@ -47,5 +48,5 @@ void hal_delay_ms(uint32_t ms) {
 
 void hal_system_reboot(void) {
     SYS_UnlockReg();
-    SYS->IPRSTC1 |= SYS_IPRSTC1_CHIP_RST_Msk;
+    SYS_ResetChip();
 }
