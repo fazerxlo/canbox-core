@@ -21,7 +21,10 @@ typedef enum {
     WHEEL_KEY_VOICE,
     WHEEL_KEY_PHONE_ACCEPT,
     WHEEL_KEY_PHONE_HANGUP,
-    WHEEL_KEY_PHONE_REJECT = WHEEL_KEY_PHONE_HANGUP
+    WHEEL_KEY_PHONE_REJECT = WHEEL_KEY_PHONE_HANGUP,
+    WHEEL_KEY_SCROLL_UP,
+    WHEEL_KEY_SCROLL_DOWN,
+    WHEEL_KEY_TRIP
 } wheel_key_t;
 
 typedef wheel_key_t steering_key_t;
@@ -32,6 +35,13 @@ typedef struct {
 } vehicle_wheel_t;
 
 typedef vehicle_wheel_t wheel_state_t;
+
+typedef struct {
+    uint8_t key_code;    // Fascia / Console panel key code (0x00 when idle/released)
+    uint8_t press_state; // 0: Released, 1: Pressed
+} vehicle_panel_key_t;
+
+typedef vehicle_panel_key_t panel_key_state_t;
 
 typedef struct {
     bool door_driver;
@@ -153,6 +163,7 @@ typedef vehicle_alerts_t alerts_state_t;
 typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
+    vehicle_panel_key_t      panel_key;
     vehicle_climate_t        climate;
     vehicle_lights_t         lights;
     vehicle_tpms_t           tpms;

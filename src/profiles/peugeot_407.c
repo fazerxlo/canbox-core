@@ -82,6 +82,178 @@ size_t build_raise_stalk_key(uint8_t key_id, uint8_t state, uint8_t *out_buf, si
     return 6;
 }
 
+void psa_decode_stalk_0x21f_ex(psa_stalk_state_t *st, const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key) {
+    if (!st || !data || !send_key || dlc < 1) {
+        return;
+    }
+
+    uint8_t b0 = data[0];
+    uint8_t prev0 = st->prev_b0;
+
+    /* Check chorded Mute first (Vol+ and Vol- simultaneously: 0x08 | 0x04 = 0x0C) */
+    bool curr_mute = ((b0 & 0x0C) == 0x0C);
+    bool prev_mute = ((prev0 & 0x0C) == 0x0C);
+
+    if (curr_mute && !prev_mute) {
+        send_key(PSA_STALK_KEY_MUTE, 1);
+    } else if (!curr_mute && prev_mute) {
+        send_key(PSA_STALK_KEY_MUTE, 0);
+    }
+
+    /* If not mute, check Vol+ and Vol- independently */
+    if (!curr_mute && !prev_mute) {
+        if ((b0 & 0x08) && !(prev0 & 0x08)) send_key(PSA_STALK_KEY_VOL_UP, 1);
+        if (!(b0 & 0x08) && (prev0 & 0x08)) send_key(PSA_STALK_KEY_VOL_UP, 0);
+
+        if ((b0 & 0x04) && !(prev0 & 0x04)) send_key(PSA_STALK_KEY_VOL_DOWN, 1);
+        if (!(b0 & 0x04) && (prev0 & 0x04)) send_key(PSA_STALK_KEY_VOL_DOWN, 0);
+    }
+
+    /* Next Track (Seek+) on bit 7 (0x80) */
+    if ((b0 & 0x80) && !(prev0 & 0x80)) send_key(PSA_STALK_KEY_NEXT, 1);
+    if (!(b0 & 0x80) && (prev0 & 0x80)) send_key(PSA_STALK_KEY_NEXT, 0);
+
+    /* Prev Track (Seek-) on bit 6 (0x40) */
+    if ((b0 & 0x40) && !(prev0 & 0x40)) send_key(PSA_STALK_KEY_PREV, 1);
+    if (!(b0 & 0x40) && (prev0 & 0x40)) send_key(PSA_STALK_KEY_PREV, 0);
+
+    /* Source (SRC) on bit 1 (0x02) */
+    if ((b0 & 0x02) && !(prev0 & 0x02)) send_key(PSA_STALK_KEY_SRC, 1);
+    if (!(b0 & 0x02) && (prev0 & 0x02)) send_key(PSA_STALK_KEY_SRC, 0);
+
+    /* Rotary Encoder (molette) counter on Byte 1 */
+    if (dlc >= 2) {
+        uint8_t b1 = data[1];
+        if (st->rotary_init) {
+            int8_t delta = (int8_t)(b1 - st->prev_rotary);
+            if (delta > 0) {
+                send_key(PSA_STALK_KEY_SCROLL_UP, 1);
+                send_key(PSA_STALK_KEY_SCROLL_UP, 0);
+            } else if (delta < 0) {
+                send_key(PSA_STALK_KEY_SCROLL_DOWN, 1);
+                send_key(PSA_STALK_KEY_SCROLL_DOWN, 0);
+            }
+        }
+        st->prev_rotary = b1;
+        st->rotary_init = true;
+    }
+
+    st->prev_b0 = b0;
+}
+
+void psa_decode_stalk_0x21f(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key) {
+    psa_decode_stalk_0x21f_ex(&g_stalk_state, data, dlc, send_key);
+}
+
+void psa_decode_stalk_tip_0x221_ex(psa_stalk_state_t *st, const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key) {
+    if (!st || !data || !send_key || dlc < 1) {
+        return;
+    }
+
+    /* Stalk Tip Trip button on Byte 0 Bit 3 (0x08).
+     * Idle: 0xC0 (bit 3 = 0), Pressed: 0xC8 (bit 3 = 1).
+     * Proven in vehicle dump dump_2026-10-06_20-27-16.log and dump_2026-10-06_20-45-34.log.
+     */
+    bool curr_trip = (data[0] & 0x08) != 0;
+    bool prev_trip = (st->prev_trip_tip != 0);
+
+    if (curr_trip && !prev_trip) {
+        send_key(PSA_STALK_KEY_TRIP, 1);
+    } else if (!curr_trip && prev_trip) {
+        send_key(PSA_STALK_KEY_TRIP, 0);
+    }
+
+    st->prev_trip_tip = curr_trip ? 1 : 0;
+}
+
+void psa_decode_stalk_tip_0x221(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key) {
+    psa_decode_stalk_tip_0x221_ex(&g_stalk_state, data, dlc, send_key);
+}
+
+/* --------------------------------------------------------------------------
+ * 1.1b RD4 Center Console & Fascia Buttons (0x3E5 only)
+ * -------------------------------------------------------------------------- */
+static psa_console_state_t g_console_state;
+
+void psa_console_init(psa_console_state_t *st) {
+    if (st) {
+        memset(st, 0, sizeof(*st));
+    } else {
+        memset(&g_console_state, 0, sizeof(g_console_state));
+    }
+}
+
+/* RD4 / RD5 Center Console Physical Buttons (CAN ID 0x3E5, DLC 6).
+ * Every button is a 2-bit field; a non-zero field means pressed (observed value 01).
+ *   Byte 0: MENU[7:6]  TEL[5:4] (bit position from simulator doc, not yet captured)  CLIM[1:0]
+ *   Byte 1: TRIP[7:6]  MODE[5:4] (pending, not decoded) AUDIO[1:0]
+ *   Byte 2: OK[7:6]    ESC[5:4]  DARK[3:2]
+ *   Byte 5: UP[7:6]    DOWN[5:4] RIGHT[3:2] LEFT[1:0]
+ * Verified in can_log_buttons.log / can_log_buttons1.log / can_log_buttons2.log
+ * and doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md section 3.3.
+ * 0x167 and 0x0DF are NOT key sources.
+ */
+typedef struct {
+    uint8_t byte_idx;
+    uint8_t mask;
+    uint8_t key;
+} psa_console_map_t;
+
+static const psa_console_map_t k_console_map[] = {
+    { 0, 0xC0, PSA_PANEL_KEY_MENU  },
+    { 0, 0x30, PSA_PANEL_KEY_TEL   },
+    { 0, 0x03, PSA_PANEL_KEY_CLIM  },
+    { 1, 0xC0, PSA_PANEL_KEY_TRIP  },
+    { 1, 0x03, PSA_PANEL_KEY_AUDIO },
+    { 2, 0xC0, PSA_PANEL_KEY_OK    },
+    { 2, 0x30, PSA_PANEL_KEY_ESC   },
+    { 2, 0x0C, PSA_PANEL_KEY_DARK  },
+    { 5, 0xC0, PSA_PANEL_KEY_UP    },
+    { 5, 0x30, PSA_PANEL_KEY_DOWN  },
+    { 5, 0x0C, PSA_PANEL_KEY_RIGHT },
+    { 5, 0x03, PSA_PANEL_KEY_LEFT  },
+};
+
+void psa_decode_console_0x3e5_ex(psa_console_state_t *st, const uint8_t *data, uint8_t dlc, psa_panel_key_callback_t send_key) {
+    if (!st || !data || !send_key || dlc < 6) {
+        return;
+    }
+
+    uint8_t key = PSA_PANEL_KEY_NONE;
+    bool active_still_held = false;
+
+    for (size_t i = 0; i < sizeof(k_console_map) / sizeof(k_console_map[0]); i++) {
+        const psa_console_map_t *m = &k_console_map[i];
+        if ((data[m->byte_idx] & m->mask) == 0) {
+            continue;
+        }
+        if (m->key == st->active_key) {
+            active_still_held = true;
+        } else if (key == PSA_PANEL_KEY_NONE) {
+            key = m->key;
+        }
+    }
+
+    /* Keep the currently reported key while it is still held */
+    if (active_still_held) {
+        return;
+    }
+
+    if (key != st->active_key) {
+        if (st->active_key != PSA_PANEL_KEY_NONE) {
+            send_key(st->active_key, 0);
+        }
+        if (key != PSA_PANEL_KEY_NONE) {
+            send_key(key, 1);
+        }
+        st->active_key = key;
+    }
+}
+
+void psa_decode_console_0x3e5(const uint8_t *data, uint8_t dlc, psa_panel_key_callback_t send_key) {
+    psa_decode_console_0x3e5_ex(&g_console_state, data, dlc, send_key);
+}
+
 /* --------------------------------------------------------------------------
  * 1.2 Dual-Zone Climate Control (HVAC)
  * -------------------------------------------------------------------------- */

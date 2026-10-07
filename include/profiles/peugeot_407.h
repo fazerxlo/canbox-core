@@ -21,12 +21,14 @@ extern "C" {
 #define PSA_CAN_ID_ALERT_QUERY      0x39B
 #define PSA_CAN_ID_BSI_GAUGES       0x161
 #define PSA_CAN_ID_FUEL_RANGE_TEMP  0x165
+#define PSA_CAN_ID_CONSOLE_3E5      0x3E5
 #define PSA_CAN_ID_ALERTS_INDICATORS 0x168
 #define PSA_CAN_ID_JBL_AMPLIFIER    0x1A0
 #define PSA_CAN_ID_ALERT_MESSAGE    0x1A1
 #define PSA_CAN_ID_TRIP1            0x1A5
 #define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
+#define PSA_CAN_ID_STALK_21F        0x21F
 #define PSA_CAN_ID_DOORS_BODY_220   0x220
 #define PSA_CAN_ID_DOORS_BODY       0x220
 #define PSA_CAN_ID_TRIP_INSTANT     0x221
@@ -47,6 +49,7 @@ extern "C" {
 typedef enum {
     PSA_STALK_KEY_VOL_UP       = 0x14,
     PSA_STALK_KEY_VOL_DOWN     = 0x15,
+    PSA_STALK_KEY_MUTE         = 0x12,
     PSA_STALK_KEY_PREV         = 0x17,
     PSA_STALK_KEY_NEXT         = 0x18,
     PSA_STALK_KEY_SRC          = 0x11,
@@ -57,13 +60,17 @@ typedef enum {
     PSA_STALK_KEY_SCROLL_UP    = 0x42,
     PSA_STALK_KEY_SCROLL_DOWN  = 0x43,
     PSA_STALK_KEY_MENU         = 0x54,
-    PSA_STALK_KEY_ESC          = 0x60
+    PSA_STALK_KEY_ESC          = 0x60,
+    PSA_STALK_KEY_TRIP         = 0x07
 } psa_stalk_key_id_t;
 
 typedef struct {
     uint8_t prev_b0;
     uint8_t prev_b1;
     uint8_t prev_b2;
+    uint8_t prev_rotary;
+    bool    rotary_init;
+    uint8_t prev_trip_tip;
 } psa_stalk_state_t;
 
 typedef void (*psa_stalk_key_callback_t)(uint8_t key_id, uint8_t state);
@@ -71,7 +78,40 @@ typedef void (*psa_stalk_key_callback_t)(uint8_t key_id, uint8_t state);
 void psa_stalk_init(psa_stalk_state_t *st);
 void psa_stalk_process_can_ex(psa_stalk_state_t *st, const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
 void psa_stalk_process_can(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
+void psa_decode_stalk_0x21f_ex(psa_stalk_state_t *st, const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
+void psa_decode_stalk_0x21f(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
+void psa_decode_stalk_tip_0x221_ex(psa_stalk_state_t *st, const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
+void psa_decode_stalk_tip_0x221(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
 size_t build_raise_stalk_key(uint8_t key_id, uint8_t state, uint8_t *out_buf, size_t max_len);
+
+/* --------------------------------------------------------------------------
+ * 1.1b RD4 Center Console & Fascia Buttons (0x3E5 only)
+ * -------------------------------------------------------------------------- */
+typedef enum {
+    PSA_PANEL_KEY_NONE     = 0x00,
+    PSA_PANEL_KEY_TEL      = 0x05,  /* TEL / PHONE (HU table: 0x05 PHONE); CAN bit from simulator doc, not yet captured */
+    PSA_PANEL_KEY_DARK     = 0x07,  /* DARK  (screen off / dim)  CMD 0x21 key 0x07 */
+    PSA_PANEL_KEY_UP       = 0x17,
+    PSA_PANEL_KEY_DOWN     = 0x18,
+    PSA_PANEL_KEY_LEFT     = 0x19,
+    PSA_PANEL_KEY_RIGHT    = 0x1A,
+    PSA_PANEL_KEY_OK       = 0x24,
+    PSA_PANEL_KEY_ESC      = 0x25,
+    PSA_PANEL_KEY_CLIM     = 0x28,  /* CLIM  key 0x28 */
+    PSA_PANEL_KEY_MENU     = 0x2E,
+    PSA_PANEL_KEY_AUDIO    = 0x31,  /* AUDIO key 0x31 */
+    PSA_PANEL_KEY_TRIP     = 0x40   /* TRIP  key 0x40 */
+} psa_panel_key_id_t;
+
+typedef struct {
+    uint8_t active_key;
+} psa_console_state_t;
+
+typedef void (*psa_panel_key_callback_t)(uint8_t key_id, uint8_t state);
+
+void psa_console_init(psa_console_state_t *st);
+void psa_decode_console_0x3e5_ex(psa_console_state_t *st, const uint8_t *data, uint8_t dlc, psa_panel_key_callback_t send_key);
+void psa_decode_console_0x3e5(const uint8_t *data, uint8_t dlc, psa_panel_key_callback_t send_key);
 
 /* --------------------------------------------------------------------------
  * 1.2 Dual-Zone Climate Control (HVAC)

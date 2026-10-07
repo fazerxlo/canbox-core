@@ -12,6 +12,7 @@ void hu_protocol_init(void);
 void hu_protocol_feed_byte(uint8_t byte);
 void hu_protocol_send_heartbeat(void);
 void hu_protocol_send_wheel_key(const vehicle_wheel_t *wheel);
+void hu_protocol_send_panel_key(const vehicle_panel_key_t *panel_key);
 void hu_protocol_send_doors(const vehicle_doors_t *doors);
 void hu_protocol_send_climate(const vehicle_climate_t *climate);
 void hu_protocol_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle);

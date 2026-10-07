@@ -66,7 +66,7 @@ flowchart LR
 | Functional Subsystem | Total Features | Completed `[x]` | In Progress `[-]` | Planned `[ ]` | N/A | Completion % |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **1. Protocol Connection & Handshake** | 6 | 6 | 0 | 0 | 0 | **100%** |
-| **2. Steering Wheel Controls & Keys** | 3 | 2 | 1 | 0 | 0 | **67%** |
+| **2. Steering Wheel Controls & Keys** | 3 | 3 | 0 | 0 | 0 | **100%** |
 | **3. Dual-Zone Climate Control (HVAC)** | 3 | 2 | 1 | 0 | 0 | **67%** |
 | **4. Doors, Body & Apertures** | 2 | 2 | 0 | 0 | 0 | **100%** |
 | **5. Trip Computer & Telemetry** | 5 | 5 | 0 | 0 | 0 | **100%** |
@@ -78,7 +78,7 @@ flowchart LR
 | **11. RD4 Audio & Multimedia Passthrough**| 4 | 0 | 2 | 2 | 0 | **0%** |
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 0 | 0 | 1 | 0 | **0%** (Pending CAN Frame) |
 | **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
-| **Overall** | **44** | **31** | **7** | **4** | **2** | **70%** |
+| **Overall** | **44** | **32** | **6** | **4** | **2** | **73%** |
 
 ---
 
@@ -91,13 +91,12 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | Status | CMD | Name / Category | Wire LEN | Vehicle CAN ID | Core Files / Drivers | Test Verification & Notes |
 | :---: | :---: | :--- | :---: | :---: | :--- | :--- |
 | `[x]` | `0xF0` | **Version String Report** | Variable | N/A (Firmware) | `src/protocols/hiworld_connection.c` | `test_hiworld_verification_vector_2_version_report`<br>Reports build string e.g. `H1H2PA123A-240717` |
-| `[x]` | `0x11` | **Steering Wheel Keys (SWC)** | `0x03` (3) | `0x0F6`<br>`0x128` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_stalk_buttons_press_and_release`<br>`test_peugeot_407_stalk_rotary_encoder`<br>`test_integration_hiworld_steering_wheel_volume_up_pipeline` |
+| `[x]` | `0x11` | **Steering Wheel Keys (SWC)** | `0x0A` (10) | `0x21F`<br>`0x221`<br>`0x0F6` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_stalk_0x21f_buttons_and_rotary`<br>`test_peugeot_407_stalk_tip_0x221_trip_button`<br>`test_integration_hiworld_native_stalk_0x21f_pipeline`<br>`test_integration_hiworld_stalk_tip_0x221_trip_pipeline`<br>`test_peugeot_407_stalk_buttons_press_and_release`<br>`test_peugeot_407_stalk_rotary_encoder`<br>`test_integration_hiworld_steering_wheel_volume_up_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md` |
 | `[x]` | `0x12` | **Doors & Apertures Status** | `0x0B` (11) | `0x220`<br>`0x036` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_doors_hiworld_vector_1_driver_front`<br>`test_integration_hiworld_door_status_pipeline`<br>10 payload bytes: FL, FR, RL, RR, trunk, bonnet, handbrake |
 | `[x]` | `0x13` | **Instantaneous Trip Telemetry** | `0x0B` (11) | `0x221` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_trip_hiworld_vector_1_instant_fuel`<br>`test_integration_hiworld_trip_pipeline`<br>Instant fuel ($0.1\text{ L/100km}$), DTE range, target distance |
 | `[x]` | `0x14` | **Trip 1 Computer Telemetry** | `0x07` (7) | `0x2A1` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_trip_hiworld_vector_2_trip1_historical`<br>Trip 1 avg fuel, avg speed, trip distance |
 | `[x]` | `0x15` | **Trip 2 Computer Telemetry** | `0x07` (7) | `0x261` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_trip_hiworld_vector_3_trip2_historical`<br>Trip 2 avg fuel, avg speed, trip distance |
-| `[x]` | `0x18` | **TPMS Discrete Wheel Alarms** | `0x05` (5) | `0x1E1`<br>`0x361` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_tpms_hiworld_0x1e1_status_enum`<br>Discrete states: Normal, Under-inflation, Puncture, Flat sensor |
-| `[-]` | `0x21` | **Console Panel Button Telemetry**| `0x03` (3) | `0x3E5` | `src/profiles/peugeot_407.c` | Partial decoder tested in `test_peugeot_407.c`; Fascia Menu/Clim/Trip mapping pending |
+| `[x]` | `0x21` | **Console Panel Button Telemetry**| `0x02` (2) | `0x3E5` only | `src/profiles/peugeot_407.c` (`psa_decode_console_0x3e5_ex`)<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_console_0x3e5_buttons`<br>`test_peugeot_407_console_0x3e5_edge_cases`<br>`test_integration_hiworld_console_0x3e5_full_pipeline`<br>`test_integration_hiworld_console_0x3e5_ok_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md` section 3.3<br>Verified KeyIDs (OEM Canbox): AUDIO `0x31`, TRIP `0x40`, CLIM `0x28`, DARK `0x07`, OK `0x24`, ESC `0x25`, MENU `0x2E`, UP `0x17`, DOWN `0x18`, LEFT `0x19`, RIGHT `0x1A`. `0x3E5` 2-bit fields: B0 MENU[7:6] CLIM[1:0]; B1 TRIP[7:6] AUDIO[1:0]; B2 OK[7:6] ESC[5:4] DARK[3:2]; B5 UP[7:6] DOWN[5:4] RIGHT[3:2] LEFT[1:0]. Captured in `can_log_buttons*.log`: AUDIO, TRIP, CLIM, DARK, MENU, OK, ESC, UP; DOWN/LEFT/RIGHT bits from simulator docs (not yet captured). TEL decoded (B0[5:4] -> Hiworld `0x05` PHONE, unverified on vehicle, not yet captured); MODE pending (no KeyID). `0x167`/`0x0DF` decoders removed. CMD `0x22` and OEM idle `0x11` frame pending. |
 | `[-]` | `0x24` | **CD Changer (CDC) Status** | `0x07` (7) | `0x3A6` | `src/profiles/peugeot_407.c` | `test_peugeot_407_cd_changer_and_rds`<br>Disc index ($1\dots 6$), track, elapsed time decoded; adapter pending |
 | `[x]` | `0x31` | **Dual-Zone Climate Status** | `0x0D` (13) | `0x1D0`<br>`0x1E3` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_hvac_hiworld`<br>Power, AC, auto, dual, defrost, fan (0..8), temps, AQS, airflow |
 | `[x]` | `0x41` | **Parking Radar Distance (OPS)** | `0x0D` (13) | `0x0E1` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center`<br>`test_integration_hiworld_radar_pipeline`<br>8 sensor bars (0..4 distance level); strictly CAN2004 `0x0E1` |
@@ -145,17 +144,32 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 ## 4. Subsystem Deep-Dive: Implementation & Verification
 
 ### 4.1 Steering Column Stalk & Console Keys (`0x11` / `0x21`)
-- **CAN Ground Truth:**
-  - `0x0F6` (dlc 2..8, 50 ms): Column stalk buttons & rotary encoder.
-  - `0x128` (dlc 5..8, 100 ms): Instrument cluster lighting and steering wheel key events.
+- **CAN Ground Truth (`dump_2026-10-06_16-56-18.log`, `dump_2026-10-06_17-06-48.log`, `dump_2026-10-06_17-13-24.log`, `dump_2026-10-06_17-18-39.log` & `doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md`):**
+  - **COM2000 Stalk (`0x21F`, dlc 3, 50-100 ms) $\to$ CMD `0x11` (`CarBaseInfo`):**
+    - Byte 0: Vol+ (`0x08` $\to$ Hiworld `0x01`), Vol- (`0x04` $\to$ Hiworld `0x02`), Mute chord (`0x0C` $\to$ Hiworld `0x03`), Source (`0x02` $\to$ Hiworld `0x0B`), Next Track (`0x80` $\to$ Hiworld `0x08`), Prev Track (`0x40` $\to$ Hiworld `0x09`).
+    - Byte 1: Rotary thumbwheel (*molette*) counter (Roll Up $+1 \to$ Hiworld `0x12`, Roll Down $-1 \to$ Hiworld `0x11`).
+    - Byte 2: Constant `0x00`.
+    - Stalk tips (`0x221` dlc 7): Byte 0 Bit 3 (`0x08`): Trip Computer button (`0xC8` pressed, `0xC0` idle $\to$ Hiworld CMD `0x11` KeyCode `0x14`).
+  - **RD4 / RD5 Center Console & Fascia (`0x3E5` only) $\to$ CMD `0x21` (`ControlPanelKey`):**
+    - Broadcast as 2-byte payload `[KeyID, PressState]` (`5A A5 02 21 [KeyID] [State] [CS]`).
+    - Release packet: `5A A5 02 21 00 00 22`.
+    - Verified KeyIDs (OEM Canbox log): AUDIO `0x31`, TRIP `0x40`, CLIM `0x28`, DARK `0x07`, OK `0x24`, ESC `0x25`, MENU `0x2E`, UP `0x17`, DOWN `0x18`, LEFT `0x19`, RIGHT `0x1A`.
+    - Code now matches the corrected spec (0x3E5 only; 0x167/0x0DF decoders removed).
+    - Raw `0x3E5` evidence in `can_log_buttons.log`: AUDIO=B1[1:0], TRIP=B1[7:6], CLIM=B0[1:0], DARK=B2[3:2]. MENU=B0[7:6], OK=B2[7:6], ESC=B2[5:4] verified in `can_log_buttons1.log`; UP=B5[7:6] verified in `can_log_buttons2.log`. DOWN/LEFT/RIGHT bit positions from simulator docs only (not yet captured). `0x0DF` toggles every ~500 ms independent of keys.
+    - Directional keys (UP, DOWN, LEFT, RIGHT): OEM Canbox emits KeyIDs `0x17..0x1A`; B5 field layout from simulator docs. Earlier dumps showed no arrow traffic on CAN, UP is now verified on CAN (B5[7:6]); DOWN/LEFT/RIGHT remain **unverified** until captured.
+    - RD4/RD5 internal keys: SOURCE and BAND toggle internal tuner modes on the radio without sending panel pulses.
 - **Implemented Decoders:**
-  - `psa_stalk_process_can_ex()` in `src/profiles/peugeot_407.c`.
-  - Dispatches: Vol+, Vol-, Next, Prev, Source, OK, Dark, ESC, Menu, Tel Answer, Tel Hangup.
-  - Rotary encoder scroll: Edge-detected with roll-over compensation (`PSA_STALK_KEY_SCROLL_UP` / `DOWN`).
+  - COM2000 Stalk (`0x21F`): `psa_decode_stalk_0x21f_ex()` and `psa_decode_stalk_0x21f()` in `src/profiles/peugeot_407.c`, registered in `profile_psa.c`.
+  - COM2000 Stalk Tip Trip (`0x221`): `psa_decode_stalk_tip_0x221_ex()` and `psa_decode_stalk_tip_0x221()` in `src/profiles/peugeot_407.c`, registered in `profile_psa.c`.
+  - ~~RD4/RD5 Fascia Display Mode & Trip (`0x167`)~~: removed (not a key source).
+  - RD4/RD5 Fascia Multi-Key Frame (`0x3E5`): `psa_decode_console_0x3e5_ex()` / `psa_decode_console_0x3e5()` in `src/profiles/peugeot_407.c`, registered in `profile_psa.c`. Table-driven 2-bit-field decoder (AUDIO, TRIP, CLIM, DARK, MENU, OK, ESC, UP, DOWN, LEFT, RIGHT).
+  - Legacy Aftermarket Stalk (`0x0F6`): `psa_stalk_process_can_ex()` in `src/profiles/peugeot_407.c`.
+  - Dispatches: Vol+, Vol-, Mute, Next, Prev, Source, Rotary scroll up/down pulses, Stalk Tip Trip (`WHEEL_KEY_TRIP`), and Fascia buttons (DARK `0x40`, TRIP `0x07`, OK `0x24`, CLIM `0x31`, AUDIO `0x28`, MENU `0x2E`, ESC `0x25`).
 - **Hiworld Protocol Serialization:**
-  - Packed into CMD `0x11` (`HIWORLD_CMD_CAR_BASE_INFO`), payload `[Key Code, Press State]`.
-  - Unit tests: `test_peugeot_407_stalk_buttons_press_and_release`, `test_peugeot_407_stalk_rotary_encoder`.
-  - Integration pipeline: `test_integration_hiworld_steering_wheel_volume_up_pipeline`.
+  - Stalk keys packed into CMD `0x11` (`HIWORLD_CMD_CAR_BASE_INFO` / `CarBaseInfo`), 10-byte OEM payload layout `[0x23, 0x00, KeyCode, PressState, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22]` with automatic pulse release for scroll keys.
+  - Console keys packed into CMD `0x21` (`HIWORLD_CMD_CONTROL_PANEL_KEY` / `ControlPanelKey`), 2-byte payload `[KeyID, PressState]` with release frame `5A A5 02 21 00 00 22`.
+  - Unit tests: `test_peugeot_407_stalk_0x21f_buttons_and_rotary`, `test_peugeot_407_stalk_tip_0x221_trip_button`, `test_peugeot_407_console_0x3e5_buttons`, `test_peugeot_407_console_0x3e5_edge_cases`, `test_peugeot_407_stalk_buttons_press_and_release`, `test_peugeot_407_stalk_rotary_encoder`.
+  - Integration pipelines: `test_integration_hiworld_native_stalk_0x21f_pipeline`, `test_integration_hiworld_stalk_tip_0x221_trip_pipeline`, `test_integration_hiworld_console_0x3e5_full_pipeline`, `test_integration_hiworld_console_0x3e5_ok_pipeline`, `test_integration_hiworld_steering_wheel_volume_up_pipeline`.
 
 ### 4.2 Dual-Zone Climate Control (HVAC) (`0x31` Uplink, `0x3B` Downlink)
 - **CAN Ground Truth:**

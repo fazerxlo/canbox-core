@@ -75,6 +75,8 @@ static void raise_send_wheel_key(const vehicle_wheel_t *wheel) {
         case WHEEL_KEY_MUTE:         raise_key_code = 0x09; break;
         case WHEEL_KEY_PHONE_ACCEPT: raise_key_code = 0x05; break;
         case WHEEL_KEY_PHONE_REJECT: raise_key_code = 0x06; break;
+        case WHEEL_KEY_SCROLL_UP:    raise_key_code = 0x42; break;
+        case WHEEL_KEY_SCROLL_DOWN:  raise_key_code = 0x43; break;
         default:                     raise_key_code = 0x00; break;
     }
 
@@ -174,6 +176,7 @@ const hu_protocol_driver_t g_hu_protocol_raise = {
     .init = raise_init,
     .feed_byte = raise_feed_byte,
     .send_wheel_key = raise_send_wheel_key,
+    .send_panel_key = NULL,
     .send_doors = raise_send_doors,
     .send_climate = NULL,
     .send_telemetry = raise_send_telemetry,

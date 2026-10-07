@@ -39,8 +39,32 @@ void can_router_process_can(const can_frame_t *frame) {
     if (s_current_state.wheel.active_key != s_last_sent_state.wheel.active_key ||
         s_current_state.wheel.press_state != s_last_sent_state.wheel.press_state) {
         
-        hu_protocol_send_wheel_key(&s_current_state.wheel);
-        s_last_sent_state.wheel = s_current_state.wheel;
+        /* Only emit if either current or previous state had an active key */
+        if (s_current_state.wheel.active_key != WHEEL_KEY_NONE ||
+            s_last_sent_state.wheel.active_key != WHEEL_KEY_NONE) {
+            hu_protocol_send_wheel_key(&s_current_state.wheel);
+            s_last_sent_state.wheel = s_current_state.wheel;
+
+            /* If this was a momentary pulse key (rotary scroll), emit immediate release */
+            if (s_current_state.wheel.press_state != 0 &&
+                (s_current_state.wheel.active_key == WHEEL_KEY_SCROLL_UP ||
+                 s_current_state.wheel.active_key == WHEEL_KEY_SCROLL_DOWN)) {
+                s_current_state.wheel.active_key = WHEEL_KEY_NONE;
+                s_current_state.wheel.press_state = 0;
+                hu_protocol_send_wheel_key(&s_current_state.wheel);
+                s_last_sent_state.wheel = s_current_state.wheel;
+            }
+        } else {
+            s_last_sent_state.wheel = s_current_state.wheel;
+        }
+    }
+
+    // Immediately push panel/fascia key events on change
+    if (s_current_state.panel_key.key_code != s_last_sent_state.panel_key.key_code ||
+        s_current_state.panel_key.press_state != s_last_sent_state.panel_key.press_state) {
+
+        hu_protocol_send_panel_key(&s_current_state.panel_key);
+        s_last_sent_state.panel_key = s_current_state.panel_key;
     }
 
     // Immediately push door status updates on change
