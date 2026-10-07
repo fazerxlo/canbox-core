@@ -73,7 +73,7 @@ hal_status_t hal_uart_flush_tx(void) {
 
 void UART02_IRQHandler(void) {
     if (UART0->ISR & UART_ISR_RDA_INT_Msk) {
-        while (!UART_IS_RX_EMPTY(UART0)) {
+        while (!UART_GET_RX_EMPTY(UART0)) {
             uint8_t byte = (uint8_t)UART_READ(UART0);
             ring_buffer_push(&s_uart_rx_rb, &byte);
         }

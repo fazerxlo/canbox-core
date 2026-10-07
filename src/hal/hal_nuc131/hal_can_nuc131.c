@@ -11,13 +11,12 @@
 static can_frame_t s_rx_storage[NUC_CAN_RX_RING_SIZE];
 static ring_buffer_t s_can_rx_rb;
 
+// Function implemented in Nuvoton CAN BSP driver but omitted from can.h
+int32_t CAN_SetRxMsgObjAndMsk(CAN_T *tCAN, uint8_t u8MsgObj, uint8_t u8idType, uint32_t u32id, uint32_t u32idmask, uint8_t u8singleOrFifoLast);
+
 // Helper: Busy-wait until Interface register request clears
 static inline void can_wait_if(CAN_T *can, uint8_t iface) {
-    if (iface == 0) {
-        while (CAN0->IF1_CREQ & CAN_IF_CREQ_BUSY_Msk);
-    } else {
-        while (CAN0->IF2_CREQ & CAN_IF_CREQ_BUSY_Msk);
-    }
+    while (can->IF[iface & 1].CREQ & CAN_IF_CREQ_BUSY_Msk);
 }
 
 hal_status_t hal_can_init(can_baudrate_t baudrate) {
@@ -43,7 +42,6 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     // - timing parameters for the requested baudrate
     // - message objects
     // - leaves init mode enabled
-    uint32_t u32Freq = 48000000; // 48 MHz PLL clock
     CAN_Open(CAN0, baudrate, CAN_NORMAL_MODE);
 
     // Set all RX message objects to accept all frames
