@@ -22,7 +22,8 @@
    - 2.3 Phase 2: Vehicle Model Configuration (`ForwardCarType` / `Cmd 0x24`)
    - 2.4 Phase 3: Firmware & Software Version Exchange (`CanBoxVersion` / `Cmd 0xF0`)
    - 2.5 Phase 4: CAN Box Hardware Type & Feature Enable Masks (`Cmd 0x71` / `0x72`)
-   - 2.6 Phase 5: Initial Parameter Synchronization & Periodic Heartbeat
+   - 2.6 Phase 5: Initial Parameter Synchronization & Protocol Heartbeat Ping (`Cmd 0xFF`)
+   - 2.7 Connection Lifecycle & Operational Resynchronization Scenarios
 3. [Master Vehicle Model Code Table](#3-master-vehicle-model-code-table)
 4. [Master Command ID Dictionary (Uplink & Downlink)](#4-master-command-id-dictionary-uplink--downlink)
 5. [Pure C99 Protocol Driver & Connection State Machine](#5-pure-c99-protocol-driver--connection-state-machine)
@@ -128,56 +129,66 @@ sequenceDiagram
     participant CB as Hiworld CAN Box Adapter
     participant CAN as Vehicle Network (BSI/ECU)
 
-    Note over HU,CB: Phase 1: Physical Link Up & Wakeup
-    HU->>CB: Ping / Wakeup Query (Cmd 0x24 / CarType)
-    CB-->>HU: Hardware Ping ACK (Cmd 0xFF)
+    Note over HU,CB: Phase 1: Physical Link Up & Wakeup Beacon
+    CB-->>HU: Periodic Version Beacon (Cmd 0xF0: every 1000 ms while waiting)
+    HU->>CB: Handshake / Vehicle Model Configuration (Cmd 0x24: Model=34, Variant=0)
+    CB-->>HU: Immediate Command ACK (Cmd 0xFF: 5A A5 01 FF 24 23)
 
-    Note over HU,CB: Phase 2: Vehicle Model Selection
-    HU->>CB: Set Vehicle Model (Cmd 0x24, Model=34 for Peugeot 407)
+    Note over HU,CB: Phase 2: CAN Hardware Setup & Initial Configuration Burst
     CB->>CAN: Configure CAN Baudrate (125 kbps) & ID Acceptance Filters
-    CB-->>HU: ACK / Echo Model Confirmation
+    CB-->>HU: Firmware Version Report (Cmd 0xF0: "HW_PSA_V2.04.01")
+    CB-->>HU: Feature Enable Mask 1 (Cmd 0x71)
+    CB-->>HU: Feature Enable Mask 2 (Cmd 0x72)
+    CB-->>HU: BSI Personalization State 1 (Cmd 0x76)
+    CB-->>HU: BSI Personalization State 2 (Cmd 0x79)
+    CB-->>HU: Measurement Units Feedback (Cmd 0xC1)
 
-    Note over HU,CB: Phase 3: Version & Identity Exchange
-    HU->>CB: Query CAN Box Firmware Version (Cmd 0x30 / 0xF0)
-    CB-->>HU: Report Firmware String (Cmd 0xF0: "HW_PSA_V2.04.01")
-    HU->>HU: Store Version in Android System Settings (mCanVersionInfo)
-
-    Note over HU,CB: Phase 4: Feature Enable & Configuration Masks
-    CB-->>HU: Broadcast Central Feature Enable Mask 1 (Cmd 0x71)
-    CB-->>HU: Broadcast Central Feature Enable Mask 2 (Cmd 0x72)
+    Note over HU,CB: Phase 3: Android System Parameter Synchronization
     HU->>CB: Sync GPS Date & Time (Cmd 0xCB: Year, Month, Day, Hour, Min, 24H)
     CB->>CAN: Inject Cluster Clock Sync Frame (ID 0x228)
+    HU->>CB: Master Measurement Units Setting (Cmd 0xCA)
+    HU->>CB: Vehicle System Language Setting (Cmd 0x9A)
 
-    Note over HU,CB: Phase 5: Telemetry Burst & Active Operation
-    CB-->>HU: Initial Telemetry Snapshot (HVAC 0x31, Doors 0x12, Body 0x11)
-    loop Active Operational Cycle (Every 50..1000 ms)
-        CAN-->>CB: Vehicle Sensor CAN Frames
-        CB-->>HU: Hiworld Uplink Packets (Keys 0x11, Radar 0x41, SAS 0x11)
+    Note over HU,CB: Phase 4: Active Operation & Link Keep-Alive
+    loop Keep-Alive Heartbeat (1.0 Hz / 1000 ms)
+        CB-->>HU: Keep-Alive Heartbeat Ping (Cmd 0xFF: 5A A5 01 FF E1 E0)
+    end
+    loop Operational Telemetry & Sensor Events
+        CAN-->>CB: Vehicle Sensor CAN Frames (0x0E1, 0x0F6, 0x1D0, etc.)
+        CB-->>HU: Hiworld Uplink Packets (Keys 0x11, Radar 0x41, Doors 0x12, AC 0x31)
+    end
+    opt Repeated 0x24 Downlink (Model Unchanged)
+        HU->>CB: Downlink Model Ping (Cmd 0x24)
+        CB-->>HU: Immediate ACK ONLY (5A A5 01 FF 24 23) — 70-byte burst suppressed
     end
 ```
 
 ---
 
-### 2.2 Phase 1: Physical Link Up & Handshake Ping
-When Android boots or the USB/UART interface connects:
-1. `QF_Canbus.apk` initializes `WcVehicleDataRuleHead5aa5` and opens the serial stream at 38,400 baud.
-2. The Headunit checks if the CAN Box is responsive by dispatching periodic vehicle model configuration frames (`forwardCurrentCarType`).
-3. If no valid `0x5AA5` response is received within 3000 ms, the host resends the handshake frame.
+### 2.2 Phase 1: Physical Link Up & Handshake Beacon
+When the CAN box micro-controller powers on:
+1. It initializes internal state machines to `HIWORLD_LINK_WAIT_MODEL`.
+2. While awaiting initial vehicle model assignment from the Android Head Unit, the CAN box emits a periodic firmware version beacon (`Cmd 0xF0`) once every 1000 ms (`hiworld_conn_task_periodic`). This serves as a link-discovery announcement.
+3. When Android boots or the USB/UART serial interface binds, Android's `QF_Canbus.apk` (`WcVehicleDataRuleHead5aa5`) opens the serial stream at 38,400 baud.
+4. The Head Unit begins dispatching the vehicle model configuration frame `0x24` (`forwardCurrentCarType`).
+5. **3000 ms Timeout / Retry Rule:** If Android receives no valid ACK response (`0xFF` with payload `0x24`) within 3000 ms, `QF_Canbus.apk` periodically resends `0x24` every 3000 ms until an acknowledgment is received.
 
 ---
 
-### 2.3 Phase 2: Vehicle Model Configuration (`ForwardCarType` / `Cmd 0x24`)
+### 2.3 Phase 2: Vehicle Model Configuration (`ForwardCarType` / `Cmd 0x24`) & Immediate ACK
+
+#### Downlink Packet (Host $\to$ CAN Box):
 The headunit informs the CAN box which vehicle brand, platform, and model profile to load.
 
 - **Sync Header:** `0x5A 0xA5`
 - **Length ($L$):** `0x02` (2 bytes)
 - **Command ID:** `0x24` (`36` decimal)
 - **Payload:**
-  - `Byte 0`: `VehicleModelCode` (See Master Vehicle Code Table below)
+  - `Byte 0`: `VehicleModelCode` (See Master Vehicle Code Table below; e.g. `0x22` = 34 for Peugeot 407)
   - `Byte 1`: `SubVariant / OptionsMask` (`0x00` = Default trim, `0x01` = High trim with amplifier)
 - **Checksum:** `(0x02 + 0x24 + Model + Options - 1) & 0xFF`
 
-#### Example Packet (Configuring Peugeot 407, Code = 34 / 0x22):
+##### Example Downlink Packet (Configuring Peugeot 407, Code = 34 / 0x22):
 ```
 5A A5 02 24 22 00 47
 │  │  │  │  │  │  └── Checksum: (0x02 + 0x24 + 0x22 + 0x00 - 1) & 0xFF = 0x47
@@ -187,10 +198,27 @@ The headunit informs the CAN box which vehicle brand, platform, and model profil
 └──┴───────────────── Preamble: 0x5A 0xA5
 ```
 
-Upon receiving this frame, the CAN box microcontroller:
-1. Configures the hardware CAN controller baud rate (125 kbps for Peugeot 407 Comfort CAN; 500 kbps for EMP2/PSA 15).
-2. Sets hardware acceptance filter masks for CAN IDs `0x0F6`, `0x1D0`, `0x220`, `0x21F`, `0x0E6`, `0x1A0`, `0x225`, `0x385`.
-3. Activates the corresponding telemetry translation tables.
+#### Immediate Uplink ACK Response (`Cmd 0xFF`):
+Upon receiving `Cmd 0x24`, the CAN box MUST immediately acknowledge receipt to satisfy Android's handshake timer:
+- **Frame:** `5A A5 01 FF 24 23`
+  - Sync: `0x5A 0xA5`
+  - Length: `0x01`
+  - Command ID: `0xFF` (`HIWORLD_CMD_HEARTBEAT` / ACK type)
+  - Payload Byte 0: `0x24` (Acknowledged Downlink Command ID)
+  - Checksum: `(0x01 + 0xFF + 0x24 - 1) & 0xFF = 0x23`
+
+#### Handshake De-duplication & Burst Suppression Rule:
+To prevent serial buffer overflows on Android head units and avoid UI redraw stuttering:
+1. **Unchanged Model in `HIWORLD_LINK_ACTIVE`:**
+   If the CAN box is already in `HIWORLD_LINK_ACTIVE` state and receives a `0x24` frame whose `car_model_id` and `car_variant` match the active configuration:
+   - The CAN box returns **ONLY** the 6-byte ACK `5A A5 01 FF 24 23`.
+   - The redundant ~70-byte initialization block (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`) is **suppressed**.
+2. **Initial Handshake or Model Change:**
+   If the CAN box is in `HIWORLD_LINK_WAIT_MODEL` state OR the received `car_model_id` / `car_variant` differs from the current configuration:
+   - Returns ACK `5A A5 01 FF 24 23`.
+   - Dynamically reconfigures CAN controller hardware (e.g., 125 kbps for CAN2004 vs 500 kbps for EMP2) and switches active profile (`vehicle_profile_set_active`).
+   - Transmits full initialization sequence: `0xF0` (Version), `0x71` & `0x72` (Feature Enable Masks), `0x76` & `0x79` (Central States), and `0xC1` (Measurement Units).
+   - Sets state to `HIWORLD_LINK_ACTIVE`.
 
 ---
 
@@ -198,8 +226,8 @@ Upon receiving this frame, the CAN box microcontroller:
 The headunit displays the CAN adapter's firmware version string in the **Factory / Vehicle Settings** menu.
 
 - **Uplink Command ID:** `0xF0` (`-16` signed / `240` decimal / `Handle.CanBoxVersion`)
-- **Payload:** ASCII String ($N$ bytes, e.g. `"HW_PSA_V2.04.01"`)
-- **Length ($L$):** Length of ASCII string (e.g. `15` bytes)
+- **Payload:** ASCII String ($N$ bytes, e.g. `"HW_PSA_V2.04.01"` or `"H1H2PA123A-240717"`)
+- **Length ($L$):** Length of ASCII string (e.g. `16` bytes)
 
 #### Example Packet (CAN Box reporting firmware string `"HW_PSA_V2.04"`):
 ```
@@ -243,11 +271,92 @@ To inform the Android user interface which vehicle features should be displayed 
 
 ---
 
-### 2.6 Phase 5: Initial Parameter Synchronization & Periodic Heartbeat
-After vehicle model acknowledgment, the headunit immediately pushes global parameters:
+### 2.6 Phase 5: Initial Parameter Synchronization & Protocol Heartbeat Ping (`Cmd 0xFF`)
+
+#### 1. Parameter Push from Android Headunit:
+After vehicle model acknowledgment, the headunit pushes global parameters:
 1. **System Date & Time (`Cmd 0xCB` / `-53` signed):** Year (0..99), Month (1..12), Day (1..31), Hour (0..23), Minute (0..59), Format (1=24H).
-2. **System Language (`Cmd 0x9A` / `-102` signed):** Language ID (`0x00`=English, `0x01`=Chinese, `0x02`=French, `0x03`=German, `0x04`=Spanish, `0x05`=Italian).
+   - Injected by OpenCanbox into PSA CAN frame `0x228` (Cluster/MFD clock synchronization).
+2. **System Language (`Cmd 0x9A` / `-102` signed):** Language ID (`0x00`=English, `0x01`=Chinese, `0x02`=French, etc.).
 3. **Master Measurement Units (`Cmd 0xCA` / `-54` signed):** Distance unit (km/mi), Consumption unit (L/100km, MPG), Temperature unit (°C/°F), Pressure unit (Bar/PSI/kPa).
+
+#### 2. Dual Nature of Command `0xFF` (`HIWORLD_CMD_HEARTBEAT`):
+The Hiworld protocol uses `0xFF` for two separate functions:
+1. **Command Downlink ACK:**
+   - Syntax: `5A A5 01 FF <CmdID> <Checksum>`
+   - Triggered immediately upon receiving downlink control commands like `0x24` (`5A A5 01 FF 24 23`).
+2. **Periodic Link Keep-Alive Heartbeat:**
+   - Syntax: `5A A5 01 FF <StatusByte> <Checksum>` (e.g., `5A A5 01 FF E1 E0` on real OEM Hiworld adapter, or `5A A5 01 FF 01 00`).
+   - **Rate Specification:** **1.0 Hz** ($1000\text{ ms}$).
+   - **Rationale:** Running the keep-alive ping faster (such as 10 Hz / 100 ms) wastes over 600 bytes/sec of UART bandwidth and risks buffer overruns in the Android serial daemon when concurrent telemetry (radar, HVAC, trips) is active. A 1.0 Hz cadence complies with OEM Hiworld timing and reliably keeps Android's watchdog satisfied.
+
+---
+
+### 2.7 Connection Lifecycle & Operational Resynchronization Scenarios
+
+The serial link between OpenCanbox and the Android Head Unit is resilient across dynamic boot, reboot, crash, and configuration changes:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        Connection Lifecycle Scenario Matrix                            │
+├──────┬────────────────────────┬────────────────────────────────┬───────────────────────┤
+│ Case │ Trigger Event          │ Serial Link Behavior           │ OpenCanbox Action     │
+├──────┼────────────────────────┼────────────────────────────────┼───────────────────────┤
+│ (a)  │ Canbox powers on first │ Canbox sends 1 Hz 0xF0 beacon. │ Receives 0x24 -> ACKs │
+│      │ HU boots up later      │ HU starts, sends 0x24.         │ with 0xFF 24, configs │
+│      │                        │ Canbox replies with ACK + burst│ CAN, enters ACTIVE.   │
+├──────┼────────────────────────┼────────────────────────────────┼───────────────────────┤
+│ (b)  │ HU reboots             │ HU restarts QF_Canbus service. │ Receives 0x24 -> ACKs │
+│      │ Canbox stays powered   │ HU sends 0x24. Canbox replies  │ with 0xFF 24 only.    │
+│      │                        │ with immediate ACK only.       │ Full state resynced   │
+│      │                        │ No 70-byte burst flood.        │ via periodic/telemetry│
+├──────┼────────────────────────┼────────────────────────────────┼───────────────────────┤
+│ (c)  │ Canbox crashes/resets  │ Heartbeat drops briefly.       │ Emits 0xF0 beacon.    │
+│      │ HU remains running     │ Canbox boots into WAIT_MODEL.  │ Catches HU 3s 0x24,   │
+│      │                        │ HU 3s retry timer sends 0x24.  │ ACKs + full config    │
+│      │                        │ Canbox replies with ACK+burst. │ burst. Restored!      │
+├──────┼────────────────────────┼────────────────────────────────┼───────────────────────┤
+│ (d)  │ Car Model changed      │ HU sends new model in 0x24     │ Detects model mismatch│
+│      │ in Android Settings UI │ (e.g. Model 16 Peugeot 408).   │ -> ACKs 0xFF 24,      │
+│      │                        │ Canbox replies with ACK +      │ reconfigs CAN baud,   │
+│      │                        │ updated config burst.          │ activates new profile.│
+└──────┴────────────────────────┴────────────────────────────────┴───────────────────────┘
+```
+
+#### Detailed Scenario Breakdown:
+
+##### Scenario (a): Canbox Powered First, HU Boots Later
+1. OpenCanbox initializes into `HIWORLD_LINK_WAIT_MODEL`.
+2. Every 1000 ms, `hiworld_conn_task_periodic()` transmits `5A A5 0B F0 ...` (firmware version beacon).
+3. Android Head Unit finishes booting and starts `QF_Canbus.apk`.
+4. Head Unit opens UART at 38,400 baud and dispatches model handshake: `5A A5 02 24 22 00 47` (Peugeot 407).
+5. OpenCanbox responds within 1 ms with `5A A5 01 FF 24 23` (ACK), reconfigures CAN baud rate to 125 kbps, switches active car profile to Peugeot 407, transmits the initial configuration burst (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`), and transitions to `HIWORLD_LINK_ACTIVE`.
+6. Normal telemetry and 1 Hz keep-alive begin.
+
+##### Scenario (b): HU Reboots While Canbox Remains Running
+1. OpenCanbox remains powered in `HIWORLD_LINK_ACTIVE`, maintaining CAN bus reception and emitting 1 Hz heartbeat.
+2. Android OS restarts; the Android UART buffer is cleared.
+3. Upon service startup, `QF_Canbus.apk` dispatches `5A A5 02 24 22 00 47` to detect the CAN box.
+4. OpenCanbox immediately responds with `5A A5 01 FF 24 23` (ACK).
+5. **Deduplication in action:** Because `state == HIWORLD_LINK_ACTIVE` and the model is unchanged (`34 == 34`), OpenCanbox suppresses the 70-byte initialization blast. This prevents UART packet collisions while Android finishes launching background services.
+6. The Android UI receives live vehicle telemetry (doors, HVAC, trips, radar) upon vehicle CAN activity, restoring complete synchronization without UI glitching. Furthermore, OpenCanbox's 60-second slow periodic resync re-blasts all cached states if no CAN events occur.
+
+##### Scenario (c): Canbox Crashes / Restarts While HU is Running
+1. OpenCanbox experiences an MCU reset (watchdog or power glitch) and restarts into `HIWORLD_LINK_WAIT_MODEL`.
+2. Keep-alive heartbeat (`0xFF`) stops temporarily.
+3. OpenCanbox transmits its 1000 ms periodic version beacon (`0xF0`).
+4. On the Android side, `QF_Canbus.apk` detects the missing heartbeat or receives the boot `0xF0` beacon; its 3000 ms watchdog expires, triggering a resend of `5A A5 02 24 22 00 47`.
+5. OpenCanbox receives `0x24`, replies with `5A A5 01 FF 24 23`, configures CAN hardware, executes the full initialization burst (`0xF0`, `0x71`, `0x72`, etc.), and enters `HIWORLD_LINK_ACTIVE`.
+6. Link is fully restored within 1 to 3 seconds with zero manual intervention.
+
+##### Scenario (d): Vehicle Model Changed in Android HU UI Settings
+1. User enters Factory Settings -> CANBus Settings on the Android Head Unit and changes vehicle model (e.g., from Peugeot 407 Code `0x22` to Peugeot 308 Code `0x07` or Peugeot 408 EMP2 Code `0x10`).
+2. Android immediately transmits downlink `0x24`: `5A A5 02 24 10 00 35`.
+3. OpenCanbox receives `0x24` and transmits immediate ACK: `5A A5 01 FF 24 23`.
+4. OpenCanbox compares the incoming model ID with `ctx->car_model_id`: since `0x10 != 0x22`, the deduplication check evaluates to false.
+5. OpenCanbox calls `hiworld_car_mapping_get_profile(0x10)` to look up the new profile, invokes `vehicle_profile_set_active()`, and calls `ctx->can_config()` to reconfigure CAN controller baud rate (e.g. switching from 125 kbps to 500 kbps for EMP2).
+6. OpenCanbox transmits updated firmware version and feature enable masks corresponding to the new vehicle model.
+
 
 ---
 
@@ -318,6 +427,7 @@ Decompiled from `PeugeotDataDefine.adaptCurrentCarCommand`:
 | **`0xC1`** | `-63` (`193`) | `Handle.UnitInfo` | Measurement Units Feedback (Distance, Temp, Fuel, Pressure) |
 | **`0xC2`** | `-62` (`194`) | `Handle.DateTimeInfo` | Vehicle Calendar & Clock Feedback |
 | **`0xF0`** | `-16` (`240`) | `Handle.CanBoxVersion` | CAN Box Hardware & Firmware ASCII Version String |
+| **`0xFF`** | `255` / `-1` | `Handle.HeartbeatAck` | Periodic Keep-Alive Heartbeat (1.0 Hz) & Downlink Command ACK (e.g. `0x24`) |
 
 ### Outbound Downlink Commands (Android Headunit $\to$ CAN Box)
 | Command ID (Hex) | Dec / Signed | Constant Identifier | Functional Description |
@@ -371,6 +481,7 @@ Decompiled from `PeugeotDataDefine.adaptCurrentCarCommand`:
 #define HIWORLD_CMD_UNIT_SET              0xCA /* -54 */
 #define HIWORLD_CMD_FEATURE_ENABLE1       0x71 /* 113 */
 #define HIWORLD_CMD_FEATURE_ENABLE2       0x72 /* 114 */
+#define HIWORLD_CMD_HEARTBEAT             0xFF /* 255 - Link keep-alive / ACK */
 
 /* Connection State Machine States */
 typedef enum {
@@ -383,6 +494,7 @@ typedef enum {
 /* Serial and CAN Callback Types */
 typedef void (*hiworld_uart_tx_fn)(const uint8_t *buf, size_t len);
 typedef void (*hiworld_can_config_fn)(uint8_t car_model_id, uint32_t baud_rate);
+typedef void (*hiworld_can_tx_fn)(const can_frame_t *frame);
 
 typedef struct {
     hiworld_link_state_t state;
@@ -395,6 +507,7 @@ typedef struct {
     
     hiworld_uart_tx_fn   uart_tx;
     hiworld_can_config_fn can_config;
+    hiworld_can_tx_fn    can_tx;
 } hiworld_connection_ctx_t;
 
 /* Public API */
@@ -492,8 +605,22 @@ static void handle_parsed_command(hiworld_connection_ctx_t *ctx, uint8_t cmd_id,
         case HIWORLD_CMD_CAR_TYPE_SET: {
             /* Headunit sets Vehicle Model */
             if (len >= 1) {
-                ctx->car_model_id = payload[0];
-                ctx->car_variant  = (len >= 2) ? payload[1] : 0;
+                uint8_t new_model_id = payload[0];
+                uint8_t new_variant  = (len >= 2) ? payload[1] : 0;
+
+                /* Respond immediately with ACK frame: 5A A5 01 FF 24 23 */
+                const uint8_t ack_payload[1] = { HIWORLD_CMD_CAR_TYPE_SET };
+                send_hiworld_frame(ctx, HIWORLD_CMD_HEARTBEAT, ack_payload, 1);
+
+                /* Do not re-blast entire 6-frame block if already active and unchanged */
+                if (ctx->state == HIWORLD_LINK_ACTIVE &&
+                    ctx->car_model_id == new_model_id &&
+                    ctx->car_variant == new_variant) {
+                    break;
+                }
+
+                ctx->car_model_id = new_model_id;
+                ctx->car_variant  = new_variant;
                 ctx->state = HIWORLD_LINK_INITIALIZED;
 
                 /* Configure Vehicle CAN Controller accordingly */
@@ -610,7 +737,19 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
   - Payload: Model ID = `0x22` (34 dec = Peugeot 407), Variant = `0x00`
   - Checksum: `(0x02 + 0x24 + 0x22 + 0x00 - 1) & 0xFF = 0x47`
 
-### Vector 2: CAN Box Acknowledges and Transmits Firmware Version
+### Vector 2: CAN Box Immediately Acknowledges Model Set Request (`Cmd 0xFF`)
+- **Uplink Serial Transmitted (CAN Box $\to$ Host within <1 ms):**
+  ```
+  Hex Trace: 5A A5 01 FF 24 23
+  ```
+  - Preamble: `5A A5`
+  - Length: `0x01`
+  - Command: `0xFF` (`HIWORLD_CMD_HEARTBEAT` / Downlink ACK)
+  - Payload: `0x24` (Echoes acknowledged Downlink Command ID)
+  - Checksum: `(0x01 + 0xFF + 0x24 - 1) & 0xFF = 0x23`
+  - **Significance:** Satisfies Android `QF_Canbus.apk` 3000 ms watchdog; stops Android from re-spamming `0x24`.
+
+### Vector 3: CAN Box Transmits Firmware Version
 - **Uplink Serial Transmitted (CAN Box $\to$ Host):**
   ```
   Hex Trace: 5A A5 0B F0 48 57 5F 50 53 41 5F 56 32 2E 30 E2
@@ -621,7 +760,7 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
   - Payload (ASCII): `"HW_PSA_V2.0"` (`48 57 5F 50 53 41 5F 56 32 2E 30`)
   - Checksum: `0xE2`
 
-### Vector 3: CAN Box Broadcasts Feature Enable Bitmasks
+### Vector 4: CAN Box Broadcasts Feature Enable Bitmasks
 - **Uplink Serial Transmitted (`Cmd 0x71` & `0x72`):**
   ```
   Frame 1: 5A A5 02 71 FF FF 71
@@ -630,7 +769,32 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
   - Checksum 1: `(0x02 + 0x71 + 0xFF + 0xFF - 1) & 0xFF = 0x71`
   - Checksum 2: `(0x02 + 0x72 + 0xFB + 0xFF - 1) & 0xFF = 0x6E`
 
-### Vector 4: Headunit Synchronizes GPS Clock (22 Sept 2026, 15:30, 24H)
+### Vector 5: Periodic 1.0 Hz Protocol Keep-Alive Heartbeat
+- **Uplink Serial Transmitted (Every 1000 ms):**
+  ```
+  Hex Trace (OEM Hiworld): 5A A5 01 FF E1 E0
+  Hex Trace (OpenCanbox):   5A A5 01 FF 01 00
+  ```
+  - Preamble: `5A A5`
+  - Length: `0x01`
+  - Command: `0xFF` (`HIWORLD_CMD_HEARTBEAT`)
+  - Payload: Status byte (`0x01` or OEM `0xE1`)
+  - Checksum: `(0x01 + 0xFF + 0x01 - 1) & 0xFF = 0x00`
+  - **Rate:** Exactly 1.0 Hz (1000 ms cadence). Prevents UART link timeout on Head Unit without choking the 38,400 baud serial bus.
+
+### Vector 6: Handshake De-duplication on Repeated Model Set (Model Unchanged)
+- **Downlink Serial Received (Host $\to$ CAN Box):**
+  ```
+  Hex Trace: 5A A5 02 24 22 00 47
+  ```
+- **Uplink Serial Transmitted (CAN Box $\to$ Host):**
+  ```
+  Hex Trace: 5A A5 01 FF 24 23
+  ```
+  - **Expected Outcome:** Exactly **one** 6-byte ACK frame is emitted.
+  - The redundant 6-frame block (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`) is **suppressed**. Zero dropped frames, zero Android UI stutter.
+
+### Vector 7: Headunit Synchronizes GPS Clock (22 Sept 2026, 15:30, 24H)
 - **Downlink Serial Received (Host $\to$ CAN Box):**
   ```
   Hex Trace: 5A A5 06 CB 1A 09 16 0F 1E 01 4B

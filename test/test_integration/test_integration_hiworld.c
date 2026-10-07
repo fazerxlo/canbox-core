@@ -86,11 +86,19 @@ void test_integration_hiworld_door_status_pipeline(void) {
 void test_integration_hiworld_telemetry_periodic_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
 
-    // Trigger periodic 100ms update
-    can_router_periodic_100ms();
-
     uint8_t rx_buf[64];
-    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    size_t rx_len;
+
+    // Ticks 1 to 9 (100ms - 900ms) must NOT emit heartbeat (throttled to 1 Hz)
+    for (int tick = 1; tick <= 9; tick++) {
+        can_router_periodic_100ms();
+        rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+        TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+    }
+
+    // Tick 10 (1000ms / 1s) MUST emit the 1 Hz Hiworld periodic heartbeat (Cmd 0xFF)
+    can_router_periodic_100ms();
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
     // Hiworld periodic heartbeat (Cmd 0xFF, Len 0x01, Payload: 0x01, CS = (0x01 + 0xFF + 0x01 - 1) = 0x00)
     const uint8_t expected[] = {
@@ -113,13 +121,27 @@ void test_integration_hiworld_runtime_car_selection_and_handshake(void) {
     uint8_t rx_buf[128];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
-    // Expect response with Version (0xF0) + Feature Enable 1 (0x71) + Feature Enable 2 (0x72)
-    TEST_ASSERT_TRUE(rx_len > 0);
+    // Expect response with ACK (0xFF, payload 0x24) + Version (0xF0) + Feature Enables
+    TEST_ASSERT_TRUE(rx_len >= 6);
 
-    // Verify first response is 0xF0
-    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF1, rx_buf[0]);
-    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, rx_buf[1]);
-    TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, rx_buf[3]);
+    // Verify first response is ACK frame: 5A A5 01 FF 24 23
+    const uint8_t expected_ack[] = { 0x5A, 0xA5, 0x01, 0xFF, 0x24, 0x23 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    // Verify subsequent frame is Version Report (0xF0)
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF1, rx_buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, rx_buf[9]);
+
+    // Feed downlink car model selection packet again (repeated handshake with unchanged model)
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        hu_protocol_get_active()->feed_byte(stream[i]);
+    }
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // MUST ONLY emit ACK frame (6 bytes), completely suppressing the 70-byte configuration burst
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_ack), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
 }
 
 void test_integration_hiworld_tpms_pipeline(void) {

@@ -275,13 +275,99 @@ def read_stream(stream, logger, source, stats):
     except Exception:
         pass
 
+class SerialFrameReassembler:
+    """
+    Buffers a byte stream and extracts complete serial frames based on protocol
+    preamble and length, ensuring packets are not split across lines.
+    Supports Hiworld (5A A5), Raise (2E), and Bagoo (D5/FD).
+    """
+    def __init__(self, max_payload_len: int = 128):
+        self.buf = bytearray()
+        self.max_payload_len = max_payload_len
+        self.last_feed_time = time.time()
+
+    def feed(self, data: bytes):
+        self.buf.extend(data)
+        self.last_feed_time = time.time()
+        frames = []
+
+        while len(self.buf) >= 3:
+            b0 = self.buf[0]
+            # 1. Hiworld framing: 5A A5 <len> <cmd> <payload...> <cs>
+            # Total length: 2 (sync) + 1 (len) + 1 (cmd) + len (payload) + 1 (cs) = len + 5
+            if b0 == 0x5A:
+                if len(self.buf) == 1:
+                    break
+                if self.buf[1] != 0xA5:
+                    del self.buf[0]
+                    continue
+                if len(self.buf) < 4:
+                    break
+                plen = self.buf[2]
+                if plen > self.max_payload_len:
+                    del self.buf[0]
+                    continue
+                total_len = plen + 5
+                if len(self.buf) < total_len:
+                    break
+                frame = bytes(self.buf[:total_len])
+                del self.buf[:total_len]
+                frames.append(frame)
+                continue
+
+            # 2. Raise framing: 2E <cmd> <len> <payload...> <cs>
+            # Total length: 1 (sync) + 1 (cmd) + 1 (len) + len (payload) + 1 (cs) = len + 4
+            elif b0 == 0x2E:
+                if len(self.buf) < 3:
+                    break
+                plen = self.buf[2]
+                if plen > self.max_payload_len:
+                    del self.buf[0]
+                    continue
+                total_len = plen + 4
+                if len(self.buf) < total_len:
+                    break
+                frame = bytes(self.buf[:total_len])
+                del self.buf[:total_len]
+                frames.append(frame)
+                continue
+
+            # 3. Bagoo framing: D5/FD <cmd> <len> <payload...> <cs>
+            elif b0 in (0xD5, 0xFD):
+                if len(self.buf) < 3:
+                    break
+                plen = self.buf[2]
+                if plen > self.max_payload_len:
+                    del self.buf[0]
+                    continue
+                total_len = plen + 4
+                if len(self.buf) < total_len:
+                    break
+                frame = bytes(self.buf[:total_len])
+                del self.buf[:total_len]
+                frames.append(frame)
+                continue
+
+            # Drop unknown leading byte
+            del self.buf[0]
+
+        return frames
+
+    def flush_stale(self, timeout_sec: float = 0.2):
+        if self.buf and (time.time() - self.last_feed_time) >= timeout_sec:
+            raw = bytes(self.buf)
+            self.buf.clear()
+            return [raw]
+        return []
+
 class UartProxy(threading.Thread):
-    def __init__(self, real_port, baud, logger, stats):
+    def __init__(self, real_port, baud, logger, stats, orig_ser=None):
         super().__init__(daemon=True)
         self.real_port = real_port
         self.baud = baud
         self.logger = logger
         self.stats = stats
+        self.orig_ser = orig_ser
         self.master_fd, self.slave_fd = pty.openpty()
         self.slave_name = os.ttyname(self.slave_fd)
         try:
@@ -289,6 +375,8 @@ class UartProxy(threading.Thread):
             tty.setraw(self.slave_fd)
         except:
             pass
+        self.tx_reassembler = SerialFrameReassembler()
+        self.rx_reassembler = SerialFrameReassembler()
 
     def run(self):
         try:
@@ -299,19 +387,41 @@ class UartProxy(threading.Thread):
             
         while True:
             try:
-                r, _, _ = select.select([self.master_fd, ser.fileno()], [], [], 0.1)
+                r, _, _ = select.select([self.master_fd, ser.fileno()], [], [], 0.05)
                 if self.master_fd in r:
                     data = os.read(self.master_fd, 1024)
                     if data:
-                        self.logger.log("APP_UART_TX", f"{data.hex()}")
                         self.stats["HU_TX_BYTES"] += len(data)
+                        frames = self.tx_reassembler.feed(data)
+                        for f in frames:
+                            self.logger.log("APP_UART_TX", f"{f.hex()}")
                         ser.write(data)
+
                 if ser.fileno() in r:
                     data = ser.read(ser.in_waiting or 1)
                     if data:
-                        self.logger.log("APP_UART_RX", f"{data.hex()}")
                         self.stats["HU_RX_BYTES"] += len(data)
+                        frames = self.rx_reassembler.feed(data)
+                        for f in frames:
+                            self.logger.log("APP_UART_RX", f"{f.hex()}")
                         os.write(self.master_fd, data)
+                        # Forward Head Unit downlink data (including handshake) to original canbox
+                        if self.orig_ser and self.orig_ser.is_open:
+                            try:
+                                self.orig_ser.write(data)
+                                self.stats["ORIG_TX_BYTES"] = self.stats.get("ORIG_TX_BYTES", 0) + len(data)
+                                for f in frames:
+                                    self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
+                            except Exception as e:
+                                self.logger.log("ORIG_CANBOX", f"TX error: {e}")
+
+                # Flush stale incomplete fragments on idle
+                for f in self.tx_reassembler.flush_stale(0.2):
+                    self.logger.log("APP_UART_TX", f"{f.hex()}")
+                for f in self.rx_reassembler.flush_stale(0.2):
+                    self.logger.log("APP_UART_RX", f"{f.hex()}")
+                    if self.orig_ser and self.orig_ser.is_open:
+                        self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
             except Exception:
                 pass
 
@@ -341,15 +451,19 @@ class CanSniffer(threading.Thread):
         except Exception as e:
             self.logger.log("CAN_ERR", str(e))
 
-def read_serial(port, baud, logger, source, stats):
+def read_serial(ser, logger, source, stats):
+    reassembler = SerialFrameReassembler()
     try:
-        ser = serial.Serial(port, baud, timeout=1)
         while True:
             data = ser.read(ser.in_waiting or 1)
             if data:
-                hex_data = data.hex()
-                logger.log(source, f"RX: {hex_data}")
                 stats["ORIG_BYTES"] += len(data)
+                frames = reassembler.feed(data)
+                for f in frames:
+                    logger.log(source, f"RX: {f.hex()}")
+            else:
+                for f in reassembler.flush_stale(0.2):
+                    logger.log(source, f"RX: {f.hex()}")
     except Exception as e:
         logger.log(source, f"Serial error: {e}")
 
@@ -434,18 +548,28 @@ def main():
     app_bin = build_app()
 
     logger = Logger()
-    stats = {"APP_LINES": 0, "ORIG_BYTES": 0, "CAN_FRAMES": 0, "HU_TX_BYTES": 0, "HU_RX_BYTES": 0}
+    stats = {"APP_LINES": 0, "ORIG_BYTES": 0, "ORIG_TX_BYTES": 0, "CAN_FRAMES": 0, "HU_TX_BYTES": 0, "HU_RX_BYTES": 0}
 
     can_sniffer = CanSniffer(can_iface, logger, stats)
     can_sniffer.start()
 
-    # Start UART proxy for Head Unit connection
-    uart_proxy = UartProxy(hu_dev, args.baud, logger, stats)
+    # Open original canbox serial device if configured
+    orig_ser = None
+    if orig_dev:
+        try:
+            orig_ser = serial.Serial(orig_dev, args.baud, timeout=0.1)
+            print(f"[*] Original Canbox opened: {format_port_label(orig_dev)} (Baud: {args.baud})")
+        except Exception as e:
+            print(f"[!] Warning: Failed to open original canbox on {orig_dev}: {e}")
+            orig_ser = None
+
+    # Start UART proxy for Head Unit connection (with orig_ser forwarding for HU handshake/commands)
+    uart_proxy = UartProxy(hu_dev, args.baud, logger, stats, orig_ser=orig_ser)
     uart_proxy.start()
 
     # Start original canbox logger if selected
-    if orig_dev:
-        t_orig = threading.Thread(target=read_serial, args=(orig_dev, args.baud, logger, "ORIG_CANBOX", stats), daemon=True)
+    if orig_ser:
+        t_orig = threading.Thread(target=read_serial, args=(orig_ser, logger, "ORIG_CANBOX", stats), daemon=True)
         t_orig.start()
 
     # Start the app
@@ -478,6 +602,11 @@ def main():
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         if app_proc.poll() is None:
             app_proc.terminate()
+        if orig_ser and orig_ser.is_open:
+            try:
+                orig_ser.close()
+            except Exception:
+                pass
         logger.cleanup()
         print("\n[*] Exiting...")
         sys.exit(0)
@@ -492,7 +621,7 @@ def main():
             now = time.time()
             if now - last_stats_time > 0.5:
                 # Print stats
-                sys.stdout.write(f"\r[STATS] CAN: {stats['CAN_FRAMES']} | APP UART TX: {stats['HU_TX_BYTES']} RX: {stats['HU_RX_BYTES']} | ORIG RX: {stats['ORIG_BYTES']}   ")
+                sys.stdout.write(f"\r[STATS] CAN: {stats['CAN_FRAMES']} | APP UART TX: {stats['HU_TX_BYTES']} RX: {stats['HU_RX_BYTES']} | ORIG TX: {stats['ORIG_TX_BYTES']} RX: {stats['ORIG_BYTES']}   ")
                 sys.stdout.flush()
                 last_stats_time = now
                 

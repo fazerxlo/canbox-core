@@ -11,6 +11,7 @@
 
 static hiworld_connection_ctx_t s_hw_conn_ctx;
 static bool s_hiworld_initialized = false;
+static uint8_t s_hiworld_hb_tick = 0;
 
 static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
     (void)car_model_id;
@@ -72,6 +73,7 @@ static void ensure_hiworld_initialized(void) {
     if (!s_hiworld_initialized) {
         proto_hiworld_init(on_hiworld_packet_received);
         hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+        s_hiworld_hb_tick = 0;
         s_hiworld_initialized = true;
     }
 }
@@ -79,6 +81,7 @@ static void ensure_hiworld_initialized(void) {
 static void hiworld_init(void) {
     proto_hiworld_init(on_hiworld_packet_received);
     hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+    s_hiworld_hb_tick = 0;
     s_hiworld_initialized = true;
 }
 
@@ -183,6 +186,12 @@ static void hiworld_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) 
 }
 
 static void hiworld_send_heartbeat(void) {
+    /* Throttle keep-alive heartbeat (0xFF) from 10 Hz to 1 Hz (every 10 * 100ms ticks = 1000ms) */
+    if (++s_hiworld_hb_tick < 10) {
+        return;
+    }
+    s_hiworld_hb_tick = 0;
+
     static const uint8_t hb[1] = { 0x01 };
     uint8_t tx_buf[8];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_HEARTBEAT, hb, sizeof(hb), tx_buf, sizeof(tx_buf));

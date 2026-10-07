@@ -115,7 +115,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[ ]` | `0xC2` | **Date & Time Broadcast** | `0x08` (8) | `0x228` | `src/protocols/hiworld_connection.c` | Uplink vehicle clock broadcast |
 | `[-]` | `0xCB` | **Extended Powertrain Telemetry** | `0x0B` (11) | `0x0B6`<br>`0x165` | `src/profiles/peugeot_407.c` | Engine RPM & Speed decoded in `peugeot_407.c`; packaging to `0xCB` planned |
 | `[x]` | `0xEA` | **Custom Extended CAN Alerts** | `0x06` / Variable | `0x1A1`<br>`0x120` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_custom_cockpit_check_sequence`<br>`test_peugeot_407_custom_summary_table_and_empty_clearance`<br>15-bit PSA DTCs, severity, door masks, CHECK sequence |
-| `[x]` | `0xFF` | **Protocol Heartbeat Ping** | `0x02` (2) | Internal Timer | `src/protocols/proto_hiworld_adapter.c` | Periodic link keep-alive (`5A A5 02 FF 01 01`) |
+| `[x]` | `0xFF` | **Protocol Heartbeat Ping** | `0x02` (2) | Internal Timer | `src/protocols/proto_hiworld_adapter.c` | Periodic link keep-alive (`5A A5 01 FF 01 00`), throttled to 1 Hz (1000 ms / 10 ticks); `test_integration_hiworld_telemetry_periodic_pipeline` |
 
 ---
 
@@ -124,7 +124,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | Status | CMD | Name / Category | Wire LEN | Vehicle CAN Tx | Core Files / Drivers | Test Verification & Notes |
 | :---: | :---: | :--- | :---: | :---: | :--- | :--- |
 | `[x]` | `0x1B` | **Trip Computer Page Reset** | `0x03` / `0x05` | `0x221` (Tx) | `src/protocols/proto_hiworld_adapter.c`<br>`src/core/can_router.c` | `test_peugeot_407_trip_reset_frames`<br>`test_integration_hiworld_downlink_trip_reset_pipeline`<br>Resets Trip 1 or Trip 2 from UI button |
-| `[x]` | `0x24` | **Car Model & Baud Selection** | `0x02` / `0x03` | N/A (Config) | `src/protocols/hiworld_connection.c`<br>`src/protocols/hiworld_car_mapping.c` | `test_hiworld_verification_vector_1_car_type_set`<br>`test_integration_hiworld_runtime_car_selection_and_handshake`<br>Configures Peugeot 407 (ID 34) & 125 kbps baud |
+| `[x]` | `0x24` | **Car Model & Baud Selection** | `0x02` / `0x03` | N/A (Config) | `src/protocols/hiworld_connection.c`<br>`src/protocols/hiworld_car_mapping.c` | `test_hiworld_verification_vector_1_car_type_set`<br>`test_integration_hiworld_runtime_car_selection_and_handshake`<br>Configures Peugeot 407 (ID 34) & 125 kbps; immediate ACK (`5A A5 01 FF 24 23`) and redundant 70B config burst suppression on active model |
 | `[x]` | `0x2F` | **Diagnostic Journal Query** | `0x02` (2) | `0x39B` (Tx) | `src/protocols/proto_hiworld_adapter.c`<br>`src/core/can_router.c` | `test_peugeot_407_custom_downlink_0x2f_response`<br>Android requests fault journal refresh (`forwardType 0x2F`) |
 | `[x]` | `0x30` | **Firmware Version Query** | `0x02` (2) | N/A (Internal) | `src/protocols/hiworld_connection.c` | Handled in `hiworld_connection.c`; replies with `0xF0` |
 | `[-]` | `0x3B` | **Climate Control Downlink** | `0x0B` (11) | `0x1E1` (Tx) | `doc/PEUGEOT_HIWORLD_CLIMA_PROTOCOL_DOWNLINK.md` | Downlink parser architecture ready; Priority 1 task |
@@ -265,11 +265,22 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 - **REVERSE (Camera Trigger):** Synthesized from CAN `0x0F6` Byte 7 Bit 7 (`0x80` reverse gear engaged).
 - **Verification:** `test_scenario_ignition_off_after_power_on`, `test_scenario_lights_off_side_light_on_headlights_on`, `test_integration_hiworld_reverse_pipeline`.
 
+### 4.10 Protocol Connection, Handshake & Resync Lifecycle (`0x24`, `0xF0`, `0xFF`)
+- **Downlink Model Configuration (`0x24`):**
+  - Handled in `src/protocols/hiworld_connection.c`.
+  - Immediate Command ACK: Emits `5A A5 01 FF 24 23` to satisfy Android HU 3000 ms watchdog.
+  - De-duplication & Burst Suppression: If `ctx->state == HIWORLD_LINK_ACTIVE` and vehicle model is unchanged, suppresses the redundant 70-byte configuration blast (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`), eliminating UART buffer floods.
+  - Model Switch: If vehicle model changes, reconfigures CAN controller baud rate dynamically (e.g. 125 kbps vs 500 kbps), switches active profile, and transmits updated configuration burst.
+- **Protocol Heartbeat Ping (`0xFF`):**
+  - Emitted at 1.0 Hz (1000 ms cadence / 10 periodic ticks) in `src/protocols/proto_hiworld_adapter.c` (`5A A5 01 FF 01 00`).
+  - Rate throttled down from 10 Hz to prevent serial queue saturation.
+- **Lifecycle Recovery (Scenarios A, B, C, D):**
+  - Full operational recovery documented in `doc/CANBOX_SPEC_HIWORLD_GENERIC_CONNECTION_PHASE.md`.
+- **Verification:** `test_hiworld_verification_vector_1_car_type_set`, `test_integration_hiworld_runtime_car_selection_and_handshake`, `test_integration_hiworld_telemetry_periodic_pipeline`.
+
 ---
 
 ## 5. Critical PSA Alert DTC Mapping Reference
-
-Direct alignment between native PSA CAN Alarm IDs and Hiworld Protocol (`commands_and_payload_structure.md` Section 5):
 
 | Alert ID (Hex) | Dec | Severity | English Warning Text | French OEM Context | Hiworld Std (`0x42`) | Extended (`0xEA`) |
 | :---: | :---: | :---: | :--- | :--- | :---: | :---: |
@@ -345,10 +356,11 @@ All test commands run on host desktop without hardware connected:
 
 | Test Scope | CLI Command | Current Status | Coverage |
 | :--- | :--- | :---: | :--- |
-| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **87 / 87 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table |
-| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **21 / 21 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline |
+| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **91 / 91 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table |
+| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **25 / 25 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline |
 | **STM32 Target Build** | `~/.platformio/penv/bin/pio run -e stm32_cbox` | **BUILD OK** | Bare-metal ARM Cortex-M3 flash binary |
 | **ESP32 Target Build** | `~/.platformio/penv/bin/pio run -e esp32_cbox` | **BUILD OK** | Dual-core Xtensa FreeRTOS flash binary |
 | **Interactive Desktop Sim** | `CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec` | **OPERATIONAL** | Virtual CAN (`vcan0`) and pseudo-terminal (`pty`) emulator |
 
 ---
+
