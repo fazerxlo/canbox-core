@@ -14,6 +14,8 @@ static bool            s_bsi_alert_query_pending = false;
 static uint8_t         s_bsi_alert_query_timeout_ticks = 0;
 static vehicle_alert_item_t s_prev_alert_items[CANBOX_MAX_ACTIVE_ALERTS];
 static uint8_t         s_prev_alert_count = 0;
+static uint16_t        s_can_inactivity_ticks = 0;
+static bool            s_can_bus_sleeping = false;
 
 void can_router_init(void) {
     memset(&s_current_state, 0, sizeof(s_current_state));
@@ -25,7 +27,12 @@ void can_router_init(void) {
     s_bsi_alert_query_timeout_ticks = 0;
     s_prev_alert_count = 0;
     memset(s_prev_alert_items, 0, sizeof(s_prev_alert_items));
+    s_can_inactivity_ticks = 0;
+    s_can_bus_sleeping = false;
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
+    hal_gpio_write(GPIO_PIN_ILL_OUT, false);
+    hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false);
+    hal_gpio_write(GPIO_PIN_CAN_STBY, false);
     vehicle_profile_init();
     hu_protocol_init();
 }
@@ -33,7 +40,36 @@ void can_router_init(void) {
 void can_router_process_can(const can_frame_t *frame) {
     if (!frame) return;
 
+    // Wake transceiver and reset inactivity counter on any CAN activity
+    if (s_can_bus_sleeping) {
+        hal_gpio_write(GPIO_PIN_CAN_STBY, false);
+        s_can_bus_sleeping = false;
+    }
+    s_can_inactivity_ticks = 0;
+
     vehicle_profile_process_frame(frame, &s_current_state);
+
+    // Immediately push illumination hardware trigger on lighting change
+    bool ill_active = s_current_state.lights.side_light ||
+                      s_current_state.lights.headlights ||
+                      s_current_state.lights.illumination;
+    bool prev_ill   = s_last_sent_state.lights.side_light ||
+                      s_last_sent_state.lights.headlights ||
+                      s_last_sent_state.lights.illumination;
+    if (ill_active != prev_ill) {
+        hal_gpio_write(GPIO_PIN_ILL_OUT, ill_active);
+    }
+    s_last_sent_state.lights = s_current_state.lights;
+
+    // Immediately push switched ACC / HU power on ignition transition
+    bool acc_active = (s_current_state.ignition_state == VEHICLE_IGNITION_ON ||
+                       s_current_state.ignition_state == VEHICLE_IGNITION_ACC);
+    bool prev_acc   = (s_last_sent_state.ignition_state == VEHICLE_IGNITION_ON ||
+                       s_last_sent_state.ignition_state == VEHICLE_IGNITION_ACC);
+    if (acc_active != prev_acc) {
+        hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, acc_active);
+        s_last_sent_state.ignition_state = s_current_state.ignition_state;
+    }
 
     // Immediately push high-priority event-driven changes (steering keys)
     if (s_current_state.wheel.active_key != s_last_sent_state.wheel.active_key ||
@@ -239,6 +275,25 @@ void can_router_process_uart_byte(uint8_t byte) {
 }
 
 void can_router_periodic_100ms(void) {
+    // Bus Inactivity & Safe Sleep Watchdog (3.0s / 30 ticks of total CAN silence)
+    if (++s_can_inactivity_ticks >= 30) {
+        s_can_inactivity_ticks = 30; /* Clamp */
+        if (!s_can_bus_sleeping) {
+            s_current_state.ignition_state = VEHICLE_IGNITION_OFF;
+            s_last_sent_state.ignition_state = VEHICLE_IGNITION_OFF;
+            hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false);
+            hal_gpio_write(GPIO_PIN_ILL_OUT, false);
+            hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
+            hal_gpio_write(GPIO_PIN_CAN_STBY, true); /* Silent/Standby mode */
+            s_can_bus_sleeping = true;
+        }
+    }
+
+    // When bus is sleeping, halt all periodic transmissions and heartbeats
+    if (s_can_bus_sleeping) {
+        return;
+    }
+
     // Broadcast periodic states (Vehicle speed, RPM)
     if (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||
         s_current_state.rpm != s_last_sent_state.rpm) {
@@ -306,4 +361,8 @@ bool can_router_query_alert_journal(void) {
     s_bsi_alert_query_pending = true;
     s_bsi_alert_query_timeout_ticks = 5; /* 5 * 100ms = 500ms */
     return vehicle_profile_query_alerts();
+}
+
+bool can_router_is_bus_sleeping(void) {
+    return s_can_bus_sleeping;
 }

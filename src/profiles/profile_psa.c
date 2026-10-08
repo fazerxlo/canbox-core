@@ -118,11 +118,52 @@ static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_
 static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc < 2) return;
 
-    state->reverse_gear          = (frame->data[1] & (1 << 7)) != 0;
-    state->handbrake             = (frame->data[1] & (1 << 0)) != 0;
+    state->reverse_gear = (frame->data[1] & (1 << 7)) != 0;
+    state->handbrake    = (frame->data[1] & (1 << 0)) != 0;
+
+    if (frame->dlc >= 3) {
+        state->economy_mode = (frame->data[2] & 0x80) != 0;
+    }
+
+    if (frame->dlc >= 4) {
+        state->lights.illumination = (frame->data[3] & 0x20) != 0;
+        state->lights.brightness   = (frame->data[3] & 0x0F);
+    }
 
     if (frame->dlc >= 5) {
-        state->ignition_state    = (vehicle_ignition_state_t)frame->data[4];
+        if (state->economy_mode) {
+            /* Economy mode: forces radio / head unit power OFF immediately to protect battery */
+            state->ignition_state = VEHICLE_IGNITION_OFF;
+        } else {
+            uint8_t phase_vie = frame->data[4] & 0x07;
+            if (phase_vie == 0x01) {
+                /* 0x01: Ignition ON (Wakeup / Run +APC) — Radio turns ON and stays awake */
+                state->ignition_state = VEHICLE_IGNITION_ON;
+            } else if (phase_vie == 0x02 || phase_vie == 0x00) {
+                /* 0x02: Ignition OFF (Going to sleep) — Initiates shutdown / accessory timer */
+                /* 0x00: Deep Sleep / Standby — Head unit enters deep sleep mode */
+                /* Radio power OFF unless RD4 radio (0x165) specifically activated ACC */
+                if (state->ignition_state != VEHICLE_IGNITION_ACC) {
+                    state->ignition_state = VEHICLE_IGNITION_OFF;
+                }
+            } else if (phase_vie == 0x03) {
+                /* 0x03: Wakeup transition — Brief (~40 ms) pulse during key turn */
+            }
+        }
+    }
+}
+
+static void psa_decode_radio_power_0x165(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 4) return;
+    if (state->economy_mode) {
+        state->ignition_state = VEHICLE_IGNITION_OFF;
+        return;
+    }
+    bool radio_on = (frame->data[0] & 0x80) != 0;
+    if (radio_on && state->ignition_state == VEHICLE_IGNITION_OFF) {
+        state->ignition_state = VEHICLE_IGNITION_ACC;
+    } else if (!radio_on && (frame->data[0] & 0x40) == 0 && state->ignition_state == VEHICLE_IGNITION_ACC) {
+        state->ignition_state = VEHICLE_IGNITION_OFF;
     }
 }
 
@@ -353,6 +394,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
     { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
+    { 0x165,                         psa_decode_radio_power_0x165 },
 };
 
 static void psa_init(void) {

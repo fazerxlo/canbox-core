@@ -200,14 +200,18 @@ void test_integration_hiworld_tpms_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_numeric_only), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_numeric_only, rx_buf, sizeof(expected_numeric_only));
 
-    // 3. Periodic refresh: 299 ticks do NOT emit TPMS
+    // 3. Periodic refresh: 299 ticks do NOT emit TPMS (while bus is active)
     for (int t = 0; t < 299; t++) {
+        can_frame_t keepalive = { .id = 0x7FF, .dlc = 0 };
+        can_router_process_can(&keepalive);
         can_router_periodic_100ms();
         // Drain heartbeats (Cmd 0xFF)
         read_uart_output(rx_buf, sizeof(rx_buf));
     }
 
     // Tick 300 (30 seconds) MUST emit both Numeric (0x66) and Discrete (0x18)
+    can_frame_t keepalive = { .id = 0x7FF, .dlc = 0 };
+    can_router_process_can(&keepalive);
     can_router_periodic_100ms();
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     // Expect: Numeric (0x66, 11 bytes) + Discrete (0x18, 9 bytes) + Heartbeat (0xFF, 6 bytes) = 26 bytes

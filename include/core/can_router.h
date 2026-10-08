@@ -78,6 +78,8 @@ typedef struct {
     bool high_beam;       // High beam / Main beam
     bool front_fog;       // Front fog lights
     bool rear_fog;        // Rear fog lights
+    bool illumination;    // Instrument cluster / interior night illumination active
+    uint8_t brightness;   // Cluster / Backlight brightness level (0..15)
 } vehicle_lights_t;
 
 typedef vehicle_lights_t lights_state_t;
@@ -176,6 +178,7 @@ typedef struct {
     int16_t                  steering_angle_deg;
     bool                     reverse_gear;
     bool                     handbrake;
+    bool                     economy_mode;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);
@@ -192,6 +195,7 @@ void can_router_periodic_100ms(void);
 const vehicle_state_t *can_router_get_state(void);
 bool can_router_reset_trip(uint8_t trip_index);
 bool can_router_query_alert_journal(void);
+bool can_router_is_bus_sleeping(void);
 
 #ifdef __cplusplus
 }

@@ -10,29 +10,37 @@ hal_status_t hal_gpio_init(void) {
     LL_GPIO_InitTypeDef gpio_init;
     LL_GPIO_StructInit(&gpio_init);
 
-    // Status LED: PC13 (Output Push-Pull)
+    // CAN STBY: PB6 (Output Open-Drain, default LOW -> normal mode)
+    gpio_init.Pin = LL_GPIO_PIN_6;
+    gpio_init.Mode = LL_GPIO_MODE_OUTPUT;
+    gpio_init.Speed = LL_GPIO_SPEED_FREQ_LOW;
+    gpio_init.OutputType = LL_GPIO_OUTPUT_OPENDRAIN;
+    LL_GPIO_Init(GPIOB, &gpio_init);
+    LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_6);
+
+    // Head Unit Power (ACC): PB9 (Output Push-Pull, default LOW)
+    gpio_init.Pin = LL_GPIO_PIN_9;
+    gpio_init.Mode = LL_GPIO_MODE_OUTPUT;
+    gpio_init.Speed = LL_GPIO_SPEED_FREQ_LOW;
+    gpio_init.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+    LL_GPIO_Init(GPIOB, &gpio_init);
+    LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_9);
+
+    // Illumination Output: PC13 (Output Push-Pull, default LOW)
     gpio_init.Pin = LL_GPIO_PIN_13;
     gpio_init.Mode = LL_GPIO_MODE_OUTPUT;
     gpio_init.Speed = LL_GPIO_SPEED_FREQ_LOW;
     gpio_init.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
     LL_GPIO_Init(GPIOC, &gpio_init);
-    LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_13); // Default off (active low on BluePill)
+    LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_13);
 
-    // CAN STBY: PB0 (Output Push-Pull, default LOW -> normal mode)
-    gpio_init.Pin = LL_GPIO_PIN_0;
+    // Brake / Parking Brake Output: PB8 (Output Push-Pull, default LOW / permanently OFF)
+    gpio_init.Pin = LL_GPIO_PIN_8;
     gpio_init.Mode = LL_GPIO_MODE_OUTPUT;
     gpio_init.Speed = LL_GPIO_SPEED_FREQ_LOW;
     gpio_init.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
     LL_GPIO_Init(GPIOB, &gpio_init);
-    LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_0);
-
-    // Head Unit Power Enable: PB1 (Output Push-Pull, default HIGH)
-    gpio_init.Pin = LL_GPIO_PIN_1;
-    gpio_init.Mode = LL_GPIO_MODE_OUTPUT;
-    gpio_init.Speed = LL_GPIO_SPEED_FREQ_LOW;
-    gpio_init.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
-    LL_GPIO_Init(GPIOB, &gpio_init);
-    LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_1);
+    LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_8);
 
     // Reverse Camera Trigger: PB5 (Output Push-Pull, default LOW)
     gpio_init.Pin = LL_GPIO_PIN_5;
@@ -53,26 +61,30 @@ hal_status_t hal_gpio_init(void) {
 
 void hal_gpio_write(hal_gpio_pin_t pin, bool state) {
     switch (pin) {
-        case GPIO_PIN_LED_STATUS:
-            if (state) {
-                LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_13); // Active LOW on BluePill
-            } else {
-                LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_13);
-            }
-            break;
         case GPIO_PIN_CAN_STBY:
             if (state) {
-                LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_0);
+                LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_6);
             } else {
-                LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_0);
+                LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_6);
             }
             break;
         case GPIO_PIN_HEADUNIT_POWER:
             if (state) {
-                LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_1);
+                LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_9);
             } else {
-                LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_1);
+                LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_9);
             }
+            break;
+        case GPIO_PIN_ILL_OUT:
+            if (state) {
+                LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_13);
+            } else {
+                LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_13);
+            }
+            break;
+        case GPIO_PIN_BRAKE_OUT:
+            // Permanently OFF
+            LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_8);
             break;
         case GPIO_PIN_REVERSE_OUT:
             if (state) {
@@ -81,6 +93,7 @@ void hal_gpio_write(hal_gpio_pin_t pin, bool state) {
                 LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_5);
             }
             break;
+        case GPIO_PIN_LED_STATUS:
         case GPIO_PIN_IGNITION_IN:
         default:
             break;
@@ -89,37 +102,42 @@ void hal_gpio_write(hal_gpio_pin_t pin, bool state) {
 
 bool hal_gpio_read(hal_gpio_pin_t pin) {
     switch (pin) {
-        case GPIO_PIN_LED_STATUS:
-            return LL_GPIO_IsOutputPinSet(GPIOC, LL_GPIO_PIN_13) == 0;
         case GPIO_PIN_CAN_STBY:
-            return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_0) != 0;
+            return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_6) != 0;
         case GPIO_PIN_HEADUNIT_POWER:
-            return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_1) != 0;
+            return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_9) != 0;
+        case GPIO_PIN_ILL_OUT:
+            return LL_GPIO_IsOutputPinSet(GPIOC, LL_GPIO_PIN_13) != 0;
+        case GPIO_PIN_BRAKE_OUT:
+            return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_8) != 0;
         case GPIO_PIN_REVERSE_OUT:
             return LL_GPIO_IsOutputPinSet(GPIOB, LL_GPIO_PIN_5) != 0;
         case GPIO_PIN_IGNITION_IN:
             return LL_GPIO_IsInputPinSet(GPIOB, LL_GPIO_PIN_12) != 0;
+        case GPIO_PIN_LED_STATUS:
         default:
             return false;
     }
 }
 
 void hal_gpio_toggle(hal_gpio_pin_t pin) {
-    switch (pin) {
-        case GPIO_PIN_LED_STATUS:
-            LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_13);
-            break;
-        case GPIO_PIN_CAN_STBY:
-            LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_0);
-            break;
-        case GPIO_PIN_HEADUNIT_POWER:
-            LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_1);
-            break;
-        case GPIO_PIN_REVERSE_OUT:
-            LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_5);
-            break;
-        case GPIO_PIN_IGNITION_IN:
-        default:
-            break;
+    if (pin != GPIO_PIN_LED_STATUS && pin != GPIO_PIN_BRAKE_OUT) {
+        switch (pin) {
+            case GPIO_PIN_CAN_STBY:
+                LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_6);
+                break;
+            case GPIO_PIN_HEADUNIT_POWER:
+                LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_9);
+                break;
+            case GPIO_PIN_ILL_OUT:
+                LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_13);
+                break;
+            case GPIO_PIN_REVERSE_OUT:
+                LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_5);
+                break;
+            case GPIO_PIN_IGNITION_IN:
+            default:
+                break;
+        }
     }
 }

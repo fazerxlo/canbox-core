@@ -112,10 +112,13 @@ In many modern vehicles (including the Peugeot 407 CAN2004 architecture), physic
 |:---|:---:|:---:|:---|:---|
 | **`0x128`** | Byte 0 | `0x80` (`Bit 7`) | Sidelights (Position/Parking) | `1` = Sidelights ON, `0` = OFF |
 | **`0x128`** | Byte 0 | `0x40` (`Bit 6`) | Headlights (Low / Dipped Beam) | `1` = Headlights ON, `0` = OFF |
-| **`0x036`** | Byte 3 | `0x20` (`Bit 5`) | Instrument Cluster Illumination | `1` = Dashboard Backlight Active |
+| **`0x036`** | Byte 3 | `0x20` (`Bit 5`) | Instrument Cluster Illumination | `1` = Night Backlight Active, `0` = Daytime |
+| **`0x036`** | Byte 3 | `0x0F` (`Bits 3..0`) | Cluster Dimming Brightness | Normalized level $0 \dots 15$ ($15 = \text{max}$) |
 
 > [!NOTE]
-> The `ILL` signal must activate if **either** sidelights (`0x128` Bit 7) or low-beam headlights (`0x128` Bit 6) are active.
+> The physical `ILL` hardware output line (`GPIO_PIN_ILL_OUT`) is asserted active if **any** of the following conditions are met:
+> `ill_active = side_light || headlights || illumination;`
+> Brightness level is simultaneously tracked in the canonical vehicle state (`state->lights.brightness`) and forwarded to Head Unit protocols supporting variable backlight dimming.
 
 #### Electrical Characteristics
 - **Standard Harness Wire Color:** Orange or Orange with White stripe (marked `ILL`, `ILLUMINATION`, or `LAMP`).
@@ -142,10 +145,29 @@ In many modern vehicles (including the Peugeot 407 CAN2004 architecture), physic
 #### Vehicle CAN Sources & Wakeup Triggers
 | CAN ID / Source | Byte Index | Value / Mask | Signal Name | Logic Definition |
 |:---|:---:|:---:|:---|:---|
-| **`0x036`** | Byte 4 | `0x03` | Ignition Key ACC Position | `true` = ACC Active |
-| **`0x036`** | Byte 4 | `0x01` | Ignition Key IGN / Engine Run | `true` = IGN Active |
-| **`0x036`** | Byte 4 | `0x00` | Ignition Key Removed / OFF | `false` = Standby / OFF |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x01` | `PHASE_VIE`: Ignition ON (Run `+APC`) | `true` = `VEHICLE_IGNITION_ON` (Radio ON / ACC ON) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x02` | `PHASE_VIE`: Ignition OFF (Going to sleep) | `false` = `VEHICLE_IGNITION_OFF` (Shutdown / ACC OFF) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x03` | `PHASE_VIE`: Wakeup Transition (~40 ms) | Key turn transition pulse |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x00` | `PHASE_VIE`: Deep Sleep / Standby | `false` = `VEHICLE_IGNITION_OFF` (Deep Sleep / ACC OFF) |
+| **`0x036`** | Byte 2 Bit 7 | `0x80` | `MODE_ECO`: Economy Mode | `1` = Forces radio / ACC OFF immediately to protect battery |
+| **`0x165`** | Byte 0 Bit 7 | `0x80` | RD4 Factory Radio Power State | `true` = Promotes to `VEHICLE_IGNITION_ACC` (unless Economy Mode) |
 | **Physical Pin `PB12`** | — | High Level | Hardware Ignition Wire Sense | Fallback if CAN is asleep |
+
+#### Real-World Operational Scenarios (CAN Log Ground Truth)
+1. **Battery Reconnect Initial Wake (`dump_connect_battery_only.log`):**
+   - When $+12\text{V}$ battery power is physically connected without ignition key, the PSA BSI initializes and transmits `0x036` Byte 4 = `0x02` (`PHASE_VIE = 0x02`, Ignition OFF) for approximately $14\text{ seconds}$.
+   - Because the ignition key is absent, the radio and physical ACC wire stay strictly at $0\text{V}$ (OFF).
+   - At $t = 1791462266.040\text{ s}$, `0x036` Byte 4 transitions to `0x00` (`Deep Sleep / Standby`).
+   - Immediately following this drop, all periodic CAN frames cease, and the vehicle comfort bus enters silent sleep. The 3.0-second bus inactivity watchdog asserts transceiver standby mode (`GPIO_PIN_CAN_STBY = true`) and completely silences UART comms.
+2. **Key OFF + RD4 Radio Knob Power-On (`dump_ign_off_rd4_on_off.log`):**
+   - With the vehicle key removed (`IGN OFF`), pressing the power knob on the factory RD4 radio wakes the comfort CAN bus.
+   - The BSI transmits `0x036` Byte 4 = `0x01` (`VEHICLE_IGNITION_ON`), and the RD4 radio transmits `0x165` with `data[0] = 0xC8` (`Bit 7 = 1` radio active, `Bit 6 = 1` display active).
+   - The decoder promotes this state to `VEHICLE_IGNITION_ACC`, immediately asserting `GPIO_PIN_HEADUNIT_POWER = true` (+12V switched ACC) so that the aftermarket Android Head Unit powers up alongside the OEM audio system.
+   - When the user presses the RD4 knob again to turn off the radio, `0x165` transitions to `0x48` then `0x08` (`(data[0] & 0xC0) == 0`), display frame `0x1E0` zeros out, and comfort bus frames stop.
+   - The 3.0-second bus silence watchdog drops `GPIO_PIN_HEADUNIT_POWER` to `false` and places the CAN transceiver into standby.
+3. **Economy Mode Battery Protection (`MODE_ECO`):**
+   - When BSI senses battery charge dropping below threshold, it sets `0x036` Byte 2 Bit 7 (`0x80`).
+   - Firmware immediately forces `ignition_state = VEHICLE_IGNITION_OFF`, dropping `GPIO_PIN_HEADUNIT_POWER` to $0\text{V}$ and preventing RD4 knob power-up from drawing current until the engine is started.
 
 #### Electrical Characteristics
 - **Standard Harness Wire Color:** Red (marked `ACC` or `SWITCHED +12V`).
@@ -155,6 +177,45 @@ In many modern vehicles (including the Peugeot 407 CAN2004 architecture), physic
 - **Continuous Current Rating:** Must support **$500\text{ mA} - 1.5\text{ A}$ continuous** (some Head Units pull operating current for internal peripherals from the ACC line).
 
 ---
+
+### 2.4 CAN Transceiver Standby & Sleep Control (`GPIO_PIN_CAN_STBY`)
+
+#### Purpose & Low-Power Sleep Management
+- Minimizes parasitic battery drain when the vehicle comfort bus is sleeping and the ignition key is removed.
+- Prevents the CAN box from draining the car battery over prolonged parking periods by placing the physical CAN transceiver into silent/standby mode.
+
+#### Transceiver IC Compatibility & Electrical Logic
+- **Compatible Transceivers:** TJA1050, TJA1040, SN65HVD230, MCP2551, VP230.
+- **Hardware Pin Assignment:**
+  - STM32F103: Pin **`PB0`** (Push-Pull Output).
+  - ESP32: Pin **`GPIO_NUM_21`** (or designated standby pin).
+- **Electrical Truth Table:**
+  | Logical State (`bool`) | MCU Output Level | Transceiver Mode | Receiver State | Transmitter State | Quiescent Current ($I_{CC}$) |
+  |:---:|:---:|:---:|:---:|:---:|:---:|
+  | **`false`** | **`0V` (LOW)** | **Normal Mode** | Active | Active (High-Speed TX/RX) | $\approx 5\text{ mA} - 15\text{ mA}$ |
+  | **`true`** | **`3.3V` (HIGH)** | **Standby / Silent** | Listen-only / Sleep | Disabled | $< 15\ \mu\text{A}$ |
+
+#### Dynamic Power Management in Firmware (`can_router.c`)
+1. **Wake-on-CAN:**
+   - Whenever any incoming CAN message arrives via `can_router_process_can()`, the router immediately asserts:
+     ```c
+     hal_gpio_write(GPIO_PIN_CAN_STBY, false); /* Normal Mode (0V / LOW) */
+     s_can_inactivity_ticks = 0;
+     ```
+2. **Inactivity Sleep Watchdog:**
+   - In `can_router_periodic_100ms()`, `s_can_inactivity_ticks` increments every 100 ms.
+   - If no CAN frames arrive for **3.0 seconds** (30 consecutive ticks), the bus is physically dormant or disconnected. The watchdog unconditionally forces sleep:
+     ```c
+     /* 3.0 seconds of total bus silence */
+     s_current_state.ignition_state = VEHICLE_IGNITION_OFF;
+     s_last_sent_state.ignition_state = VEHICLE_IGNITION_OFF;
+     hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false); /* Drop ACC +12V */
+     hal_gpio_write(GPIO_PIN_ILL_OUT, false);        /* Drop ILL +12V */
+     hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);    /* Drop REVERSE */
+     hal_gpio_write(GPIO_PIN_CAN_STBY, true);        /* Standby Mode (3.3V / HIGH) */
+     s_can_bus_sleeping = true;
+     ```
+   - All periodic transmissions, TPMS updates, door repeats, and keep-alive heartbeats (`CMD 0xFF`) are halted immediately during sleep (`if (s_can_bus_sleeping) return;`). UART traffic is completely silenced until a CAN frame wakes the bus.
 
 # 3. Hardware Schematic & Electronic Topologies
 
@@ -240,20 +301,33 @@ For harsh commercial vehicle environments or galvanic isolation:
 
 # 4. Microcontroller Pinout Mapping
 
-### 4.1 STM32F103 (BluePill & Custom PCB Targets)
+### 4.1 STM32F103 (OEM CAN Box `volvo_od2` / `qemu`)
 
 | Signal Name | HAL Enum Identifier | STM32 Pin | GPIO Mode | Active State | Description |
 |:---|:---|:---:|:---|:---:|:---|
-| **ACC / HU POWER** | `GPIO_PIN_HEADUNIT_POWER` | **`PB1`** (or `PB2`) | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Switched 12V ACC output to Head Unit |
+| **CAN TRANSCEIVER**| `GPIO_PIN_CAN_STBY` | **`PB6`** | Output (Open-Drain)| `0` = Active, `1` = Standby | Transceiver standby/silent control (ZL1040/TJA1040) |
+| **ACC / HU POWER** | `GPIO_PIN_HEADUNIT_POWER` | **`PB9`** | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Switched 12V ACC output trigger to Head Unit |
+| **ILLUMINATION** | `GPIO_PIN_ILL_OUT` | **`PC13`** | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Night dimming trigger wire |
+| **BRAKE / PARK** | `GPIO_PIN_BRAKE_OUT` | **`PB8`** | Push-Pull Output | LOW (Permanently OFF) | Handbrake / Parking brake trigger to Head Unit |
 | **REVERSE OUT** | `GPIO_PIN_REVERSE_OUT` | **`PB5`** | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Camera trigger wire |
-| **ILLUMINATION** | `GPIO_PIN_ILL_OUT` | **`PB7`** | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Night dimming trigger wire |
 | **IGNITION SENSE** | `GPIO_PIN_IGNITION_IN` | **`PB12`** | Input (Pull-Down) | HIGH (+12V In) | Hardware analog ACC/IGN monitor |
-| **CAN TRANSCEIVER**| `GPIO_PIN_CAN_STBY` | **`PB0`** | Push-Pull Output | LOW (0V) | Transceiver standby (0 = Normal, 1 = Standby) |
-| **STATUS LED** | `GPIO_PIN_LED_STATUS` | **`PC13`** | Push-Pull Output | LOW (Active LOW) | Onboard heartbeat/diagnostic LED |
 
 ---
 
-### 4.2 ESP32 Target (`esp32_cbox`)
+### 4.2 NUC131 Target (OEM CAN Box `vw_nc03`)
+
+| Signal Name | HAL Enum Identifier | NUC131 Pin | GPIO Mode | Active State | Description |
+|:---|:---|:---:|:---|:---:|:---|
+| **CAN TRANSCEIVER**| `GPIO_PIN_CAN_STBY` | **`PC3`** | Output (Open-Drain)| `0` = Active, `1` = Standby | Transceiver standby/silent control |
+| **ACC / HU POWER** | `GPIO_PIN_HEADUNIT_POWER` | **`PA8`** | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Switched 12V ACC output trigger to Head Unit |
+| **ILLUMINATION** | `GPIO_PIN_ILL_OUT` | **`PA9`** | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Night dimming trigger wire |
+| **BRAKE / PARK** | `GPIO_PIN_BRAKE_OUT` | **`PA12`** | Push-Pull Output | LOW (Permanently OFF) | Handbrake / Parking brake trigger to Head Unit |
+| **REVERSE OUT** | `GPIO_PIN_REVERSE_OUT` | **`PA13`** | Push-Pull Output | HIGH (3.3V &rarr; +12V) | Camera trigger wire |
+| **IGNITION SENSE** | `GPIO_PIN_IGNITION_IN` | **`PA0`** | Input (Pull-Down) | HIGH (+12V In) | Hardware analog ACC/IGN monitor |
+
+---
+
+### 4.3 ESP32 Target (`esp32_cbox`)
 
 | Signal Name | HAL Enum Identifier | ESP32 Pin | GPIO Mode | Active State | Description |
 |:---|:---|:---:|:---|:---:|:---|
@@ -284,9 +358,10 @@ typedef enum {
     GPIO_PIN_LED_STATUS = 0,
     GPIO_PIN_CAN_STBY,       /* Transceiver standby/silent control */
     GPIO_PIN_IGNITION_IN,    /* Accessory/Ignition 12V detect (via opto/divider) */
-    GPIO_PIN_HEADUNIT_POWER, /* Switched +12V ACC supply enable */
+    GPIO_PIN_HEADUNIT_POWER, /* Switched +12V ACC supply enable (ACC) */
     GPIO_PIN_REVERSE_OUT,    /* Physical BACK / REVERSE trigger wire */
-    GPIO_PIN_ILL_OUT         /* Physical ILLUMINATION trigger wire */
+    GPIO_PIN_ILL_OUT,        /* Physical ILLUMINATION trigger wire */
+    GPIO_PIN_BRAKE_OUT       /* Physical HANDBRAKE / PARK trigger wire */
 } hal_gpio_pin_t;
 
 hal_status_t hal_gpio_init(void);
@@ -324,15 +399,16 @@ if (s_current_state.reverse_gear != s_last_sent_state.reverse_gear) {
 }
 
 /* 2. Instantaneous Illumination / Headlights Update */
-bool ill_active = s_current_state.lights.side_light || s_current_state.lights.headlights;
-bool prev_ill   = s_last_sent_state.lights.side_light || s_last_sent_state.lights.headlights;
+bool ill_active = s_current_state.lights.side_light || s_current_state.lights.headlights || s_current_state.lights.illumination;
+bool prev_ill   = s_last_sent_state.lights.side_light || s_last_sent_state.lights.headlights || s_last_sent_state.lights.illumination;
 
 if (ill_active != prev_ill) {
     /* Drive physical ILL trigger wire */
     hal_gpio_write(GPIO_PIN_ILL_OUT, ill_active);
     
-    s_last_sent_state.lights.side_light = s_current_state.lights.side_light;
-    s_last_sent_state.lights.headlights = s_current_state.lights.headlights;
+    s_last_sent_state.lights.side_light   = s_current_state.lights.side_light;
+    s_last_sent_state.lights.headlights   = s_current_state.lights.headlights;
+    s_last_sent_state.lights.illumination = s_current_state.lights.illumination;
 }
 
 /* 3. Accessory / Ignition Power Control */
@@ -343,6 +419,22 @@ if (acc_active != (s_last_sent_state.ignition_state == VEHICLE_IGNITION_ON ||
                    s_last_sent_state.ignition_state == VEHICLE_IGNITION_ACC)) {
     /* Enable or disable switched +12V ACC to Head Unit */
     hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, acc_active);
+}
+
+/* 4. CAN Transceiver Wake-up & Inactivity Watchdog */
+/* Inside can_router_process_can(): */
+hal_gpio_write(GPIO_PIN_CAN_STBY, false); /* Wake transceiver on any frame */
+s_can_inactivity_ticks = 0;
+
+/* Inside can_router_periodic_100ms(): */
+s_can_inactivity_ticks++;
+if (s_can_inactivity_ticks >= 30) { /* 3.0 seconds bus silence */
+    if (s_current_state.ignition_state != VEHICLE_IGNITION_ON) {
+        s_current_state.ignition_state = VEHICLE_IGNITION_OFF;
+        hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false);
+        hal_gpio_write(GPIO_PIN_ILL_OUT, false);
+        hal_gpio_write(GPIO_PIN_CAN_STBY, true); /* Enter low-power standby */
+    }
 }
 ```
 

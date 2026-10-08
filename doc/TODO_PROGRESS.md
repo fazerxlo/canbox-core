@@ -259,11 +259,39 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Synthesizes PSA CAN `0x228` frame with year offset from 2000, month, day, hour, minute.
   - Unit test: `test_hiworld_verification_vector_4_gps_time_sync`.
 
-### 4.9 Physical Hardware Synthesis (GPIO)
-- **ACC (Switched Wakeup):** Synthesized from CAN `0x036` Byte 4 (`0x01` IGN, `0x03` ACC).
-- **ILL (Night Dimming):** Synthesized from CAN `0x036` Byte 3 Bit 5 and CAN `0x128` exterior lighting states.
-- **REVERSE (Camera Trigger):** Synthesized from CAN `0x0F6` Byte 7 Bit 7 (`0x80` reverse gear engaged).
-- **Verification:** `test_scenario_ignition_off_after_power_on`, `test_scenario_lights_off_side_light_on_headlights_on`, `test_integration_hiworld_reverse_pipeline`.
+### 4.9 Physical Hardware Synthesis & Low-Power Management (GPIO)
+- **ACC (Switched Head Unit Power):**
+  - Synthesized via `GPIO_PIN_HEADUNIT_POWER` (PB9 on STM32 `volvo_od2`, PA8 on NUC131 `vw_nc03`, GPIO 18 on ESP32).
+  - Primary Control Frame: CAN `0x036` (`COMMANDES_BSI`, 100 ms).
+    - Byte 4 Bits [2:0] (`PHASE_VIE`):
+      - `0x01`: **Ignition ON** (Wakeup / Run `+APC`) — Radio turns ON and stays awake (`VEHICLE_IGNITION_ON`, ACC ON).
+      - `0x02`: **Ignition OFF** (Going to sleep) — Initiates shutdown / accessory timer (`VEHICLE_IGNITION_OFF`, ACC OFF).
+      - `0x03`: **Wakeup transition** — Brief (~40 ms) pulse during key turn.
+      - `0x00`: **Deep Sleep / Standby** — Head unit enters deep sleep mode (`VEHICLE_IGNITION_OFF`, ACC OFF).
+    - Byte 2 Bit 7 (`MODE_ECO` = `0x80`):
+      - `1`: **Economy Mode** — Forces radio and head unit power OFF immediately to protect battery.
+  - RD4 Radio Awakening: CAN `0x165` Byte 0 Bit 7 (`0x80`). When key is OFF, turning on the factory RD4 radio promotes ignition state to `VEHICLE_IGNITION_ACC` to power the head unit. Shuts down when radio switches OFF (`(data[0] & 0xC0) == 0`). Overridden to OFF if Economy Mode (`0x036` Byte 2 Bit 7) is active.
+  - Battery Reconnect: BSI sends `0x036` Byte 4 = `0x02` (Ignition OFF) for ~14s before dropping to `0x00` (`dump_connect_battery_only.log`); ACC wire stays strictly 0V throughout.
+- **ILL (Night Dimming & Brightness):**
+  - Synthesized via `GPIO_PIN_ILL_OUT` (PC13 on STM32 `volvo_od2`, PA9 on NUC131 `vw_nc03`, GPIO 5 on ESP32).
+  - Triggers: CAN `0x036` Byte 3 Bit 5 (`0x20` cluster illumination) OR CAN `0x128` Byte 0 (`0x80` sidelights / `0x40` low beam).
+  - Brightness Level: CAN `0x036` Byte 3 lower nibble (`0x0F`, 0..15) normalized in `state->lights.brightness`.
+- **BRAKE / PARK (Handbrake Output):**
+  - Synthesized via `GPIO_PIN_BRAKE_OUT` (PB8 on STM32 `volvo_od2`, PA12 on NUC131 `vw_nc03`).
+  - Active State: Initialized to Output Push-Pull, held permanently OFF (`0`).
+- **REVERSE (Fast Camera Switch):**
+  - Synthesized via `GPIO_PIN_REVERSE_OUT` (PB5 on STM32 `volvo_od2`, PA13 on NUC131 `vw_nc03`, GPIO 4 on ESP32).
+  - Triggers: CAN `0x036` Byte 1 Bit 7 / CAN `0x0F6` Byte 7 Bit 7 (`0x80` reverse gear engaged).
+- **CAN Transceiver Standby & Sleep (`GPIO_PIN_CAN_STBY`):**
+  - Pin PB6 on STM32 (`volvo_od2` / `qemu`), PC3 on NUC131 (`vw_nc03`). Configured in Open-Drain mode (`0` / 0V = Normal high-speed TX/RX mode, `1` / float to pull-up = Standby / Silent low-power mode $< 15\ \mu\text{A}$).
+  - Wake-on-CAN: Any CAN frame received via `can_router_process_can()` immediately asserts `false` (Normal Mode) and resets watchdog (`s_can_bus_sleeping = false`).
+  - Inactivity Sleep Watchdog: 3.0-second silence watchdog in `can_router_periodic_100ms()` unconditionally forces `ignition_state = VEHICLE_IGNITION_OFF`, drops ACC (`GPIO_PIN_HEADUNIT_POWER`), drops ILL, drops REVERSE, asserts Standby mode (`GPIO_PIN_CAN_STBY = true`), sets `s_can_bus_sleeping = true`, and completely halts all periodic telemetry, door repeats, TPMS updates, and keep-alive heartbeats (`CMD 0xFF`).
+- **Verification:**
+  - `test_scenario_ignition_off_after_power_on`: Battery connect, key OFF (0x02 hold), deep sleep (0x00), and transceiver standby after 3.0s bus silence.
+  - `test_scenario_ignition_silence_watchdog_forces_sleep_from_on`: Unconditional sleep enforcement from active IGN ON, ACC cut, CAN standby assertion, UART silencing, and CAN frame wake-up.
+  - `test_scenario_ignition_economy_mode_forces_radio_off`: Economy mode 0x80 override, ACC shutdown, RD4 ignition lock.
+  - `test_scenario_lights_off_side_light_on_headlights_on`: ILL output, illumination bit, brightness 15 -> 10, headlights.
+  - `test_integration_hiworld_reverse_pipeline`: REVERSE output.
 
 ### 4.10 Protocol Connection, Handshake & Resync Lifecycle (`0x24`, `0xF0`, `0xFF`)
 - **Downlink Model Configuration (`0x24`):**
@@ -357,7 +385,7 @@ All test commands run on host desktop without hardware connected:
 | Test Scope | CLI Command | Current Status | Coverage |
 | :--- | :--- | :---: | :--- |
 | **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **91 / 91 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table |
-| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **25 / 25 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline |
+| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **27 / 27 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline |
 | **STM32 Target Build** | `~/.platformio/penv/bin/pio run -e stm32_cbox` | **BUILD OK** | Bare-metal ARM Cortex-M3 flash binary |
 | **ESP32 Target Build** | `~/.platformio/penv/bin/pio run -e esp32_cbox` | **BUILD OK** | Dual-core Xtensa FreeRTOS flash binary |
 | **Interactive Desktop Sim** | `CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec` | **OPERATIONAL** | Virtual CAN (`vcan0`) and pseudo-terminal (`pty`) emulator |

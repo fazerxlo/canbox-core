@@ -272,8 +272,24 @@ def read_stream(stream, logger, source, stats):
                 if text:
                     logger.log(source, text)
                     stats["APP_LINES"] += 1
+                    m_gpio = re.search(r"ACC:(\d+)\s+ILL:(\d+)\s+REV:(\d+)", text)
+                    if m_gpio:
+                        stats["ACC"] = int(m_gpio.group(1))
+                        stats["ILL"] = int(m_gpio.group(2))
+                        stats["REV"] = int(m_gpio.group(3))
+                    else:
+                        m_acc = re.search(r"\bACC:(\d+)\b", text)
+                        if m_acc:
+                            stats["ACC"] = int(m_acc.group(1))
+                        m_ill = re.search(r"\bILL:(\d+)\b", text)
+                        if m_ill:
+                            stats["ILL"] = int(m_ill.group(1))
+                        m_rev = re.search(r"\bREV:(\d+)\b", text)
+                        if m_rev:
+                            stats["REV"] = int(m_rev.group(1))
     except Exception:
         pass
+
 
 class SerialFrameReassembler:
     """
@@ -548,7 +564,17 @@ def main():
     app_bin = build_app()
 
     logger = Logger()
-    stats = {"APP_LINES": 0, "ORIG_BYTES": 0, "ORIG_TX_BYTES": 0, "CAN_FRAMES": 0, "HU_TX_BYTES": 0, "HU_RX_BYTES": 0}
+    stats = {
+        "APP_LINES": 0,
+        "ORIG_BYTES": 0,
+        "ORIG_TX_BYTES": 0,
+        "CAN_FRAMES": 0,
+        "HU_TX_BYTES": 0,
+        "HU_RX_BYTES": 0,
+        "ACC": 0,
+        "ILL": 0,
+        "REV": 0,
+    }
 
     can_sniffer = CanSniffer(can_iface, logger, stats)
     can_sniffer.start()
@@ -621,7 +647,7 @@ def main():
             now = time.time()
             if now - last_stats_time > 0.5:
                 # Print stats
-                sys.stdout.write(f"\r[STATS] CAN: {stats['CAN_FRAMES']} | APP UART TX: {stats['HU_TX_BYTES']} RX: {stats['HU_RX_BYTES']} | ORIG TX: {stats['ORIG_TX_BYTES']} RX: {stats['ORIG_BYTES']}   ")
+                sys.stdout.write(f"\r[STATS] CAN: {stats['CAN_FRAMES']} | APP UART TX: {stats['HU_TX_BYTES']} RX: {stats['HU_RX_BYTES']} ACC:{stats['ACC']} ILL:{stats['ILL']} REV:{stats['REV']} | ORIG TX: {stats['ORIG_TX_BYTES']} RX: {stats['ORIG_BYTES']}   ")
                 sys.stdout.flush()
                 last_stats_time = now
                 
