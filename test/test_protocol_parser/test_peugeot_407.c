@@ -1399,6 +1399,28 @@ void test_peugeot_407_rd4_frequency_and_ta_stability(void) {
     out_len = build_hiworld_radio_state(&media.radio, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(19, out_len);
     TEST_ASSERT_EQUAL_HEX8(0x02, out[4]); /* FM2 band for Hiworld */
+
+    // 8. Station name & RDS cleared on frequency change or empty 0x2A5
+    // Set a station name first:
+    const uint8_t can_2a5_test[] = { 'T', 'E', 'S', 'T', 'F', 'M', ' ', ' ' };
+    psa_rd4_process_can_0x2a5(&media.radio, can_2a5_test, sizeof(can_2a5_test));
+    TEST_ASSERT_EQUAL_STRING("TESTFM  ", media.radio.station_name);
+
+    // Now arrive with 0x2A5 carrying all 0x00 (no signal):
+    const uint8_t can_2a5_empty[8] = { 0 };
+    psa_rd4_process_can_0x2a5(&media.radio, can_2a5_empty, sizeof(can_2a5_empty));
+    TEST_ASSERT_EQUAL_STRING("        ", media.radio.station_name);
+
+    // Set station name again, then change frequency without RDS:
+    psa_rd4_process_can_0x2a5(&media.radio, can_2a5_test, sizeof(can_2a5_test));
+    TEST_ASSERT_EQUAL_STRING("TESTFM  ", media.radio.station_name);
+
+    // Change frequency to 96.45 MHz (raw 0x03A1) without RDS (Byte 0 = 0x00):
+    const uint8_t can_225_new_freq[] = { 0x00, 0x00, 0x10, 0x03, 0xA1 };
+    psa_rd4_process_can_0x225(&media.radio, can_225_new_freq, sizeof(can_225_new_freq));
+    TEST_ASSERT_EQUAL_STRING("        ", media.radio.station_name);
+    TEST_ASSERT_EQUAL_UINT16(964, media.radio.freq_0_1mhz);
+    TEST_ASSERT_EQUAL_HEX8(0x00, media.radio.indicators & 0x20); /* RDS cleared */
 }
 
 /* --------------------------------------------------------------------------

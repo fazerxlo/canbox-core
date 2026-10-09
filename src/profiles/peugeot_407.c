@@ -1319,12 +1319,31 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
 
     /* Frequency conversion: Raw to 0.1 MHz */
     uint16_t raw_freq = ((uint16_t)data[3] << 8) | data[4];
+    uint16_t new_freq_0_1mhz;
     if (radio->band < 0x10) {
         /* FM: Freq * 10 = (raw / 2) + 500 */
-        radio->freq_0_1mhz = (raw_freq / 2) + 500;
+        new_freq_0_1mhz = (raw_freq / 2) + 500;
     } else {
         /* AM: kHz direct */
-        radio->freq_0_1mhz = raw_freq;
+        new_freq_0_1mhz = raw_freq;
+    }
+
+    /* If frequency changed or RDS sync is lost, clear previous station name and radio text */
+    if (radio->freq_0_1mhz != new_freq_0_1mhz || !(radio->indicators & 0x20)) {
+        if (radio->freq_0_1mhz != new_freq_0_1mhz) {
+            radio->freq_0_1mhz = new_freq_0_1mhz;
+            memset(radio->station_name, ' ', 8);
+            radio->station_name[8] = '\0';
+            radio->radio_text[0] = '\0';
+            radio->radio_text_len = 0;
+            radio->radio_text_updated = true;
+        } else if (!(radio->indicators & 0x20) && radio->station_name[0] != ' ') {
+            memset(radio->station_name, ' ', 8);
+            radio->station_name[8] = '\0';
+            radio->radio_text[0] = '\0';
+            radio->radio_text_len = 0;
+            radio->radio_text_updated = true;
+        }
     }
 
     if (radio->source_mode < 0x20) {
@@ -1350,8 +1369,23 @@ void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint
 
 void psa_rd4_process_can_0x2a5(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 8) return;
-    memcpy(radio->station_name, data, 8);
-    radio->station_name[8] = '\0';
+
+    /* Check if frame is all 0x00 or all spaces (no RDS signal) */
+    bool all_empty = true;
+    for (size_t i = 0; i < 8; i++) {
+        if (data[i] != 0x00 && data[i] != ' ') {
+            all_empty = false;
+            break;
+        }
+    }
+
+    if (all_empty) {
+        memset(radio->station_name, ' ', 8);
+        radio->station_name[8] = '\0';
+    } else {
+        memcpy(radio->station_name, data, 8);
+        radio->station_name[8] = '\0';
+    }
     radio->updated = true;
 }
 
