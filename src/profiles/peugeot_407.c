@@ -1301,10 +1301,19 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
     /* Preset memory: 0=manual, 1..6 */
     radio->preset_slot = (data[1] >= 0x10) ? ((data[1] >> 4) & 0x0F) : (data[1] & 0x0F);
 
-    /* Band conversion */
+    /* Band conversion:
+     * Hiworld Peugeot OriginalTuner maps:
+     *   0x00 -> "FM", 0x01 -> "FM1", 0x02 -> "FM2", 0x03 -> "FM3", 0x04 -> "FM-AST"
+     *   0x10 -> "AM", 0x11 -> "AM1", 0x12 -> "AM2", 0x13 -> "AM-AST"
+     * PSA CAN 0x225 data[2]:
+     *   0x10 / 0x90: FM1
+     *   0x20 / 0xA0: FM2
+     *   0x40 / 0xC0: FM-AST
+     *   0x50 / 0xD0: AM
+     */
     uint8_t raw_band = data[2];
-    if (raw_band == 0x10 || raw_band == 0x90)      radio->band = 0x00; /* FM1 */
-    else if (raw_band == 0x20 || raw_band == 0xA0) radio->band = 0x01; /* FM2 */
+    if (raw_band == 0x10 || raw_band == 0x90)      radio->band = 0x01; /* FM1 */
+    else if (raw_band == 0x20 || raw_band == 0xA0) radio->band = 0x02; /* FM2 */
     else if (raw_band == 0x40 || raw_band == 0xC0) radio->band = 0x04; /* FM-AST */
     else if (raw_band == 0x50 || raw_band == 0xD0) radio->band = 0x10; /* AM */
 

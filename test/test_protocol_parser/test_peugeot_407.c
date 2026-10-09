@@ -1187,12 +1187,12 @@ void test_peugeot_407_rd4_vector_1_fm_tuner(void) {
     // 2. Tuner Status (0x225): FM1, Preset 1, RDS Lock, 102.50 MHz (raw 1050 = 0x041A)
     const uint8_t can_225[] = { 0x20, 0x01, 0x90, 0x04, 0x1A };
     psa_rd4_process_can_0x225(&media.radio, can_225, sizeof(can_225));
-    TEST_ASSERT_EQUAL_UINT8(0x00, media.radio.band);
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.radio.band); /* FM1 */
     TEST_ASSERT_EQUAL_UINT16(1025, media.radio.freq_0_1mhz);
     TEST_ASSERT_EQUAL_UINT8(1, media.radio.preset_slot);
     TEST_ASSERT_EQUAL_UINT8(0x20, media.radio.indicators);
     TEST_ASSERT_EQUAL_UINT8(0x01, media.radio.power_status);
-    TEST_ASSERT_EQUAL_UINT8(0x00, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.radio.source_mode);
 
     // 3. Station Name (0x2A5): "RMF FM  "
     const uint8_t can_2a5[] = { 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D, 0x20, 0x20 };
@@ -1208,7 +1208,7 @@ void test_peugeot_407_rd4_vector_1_fm_tuner(void) {
     TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
     TEST_ASSERT_EQUAL_HEX8(0x0E, out[2]);
     TEST_ASSERT_EQUAL_HEX8(0x84, out[3]);
-    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]); /* FM1 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[4]); /* FM1 */
     TEST_ASSERT_EQUAL_HEX8(0x01, out[5]); /* 1025 & 0xFF (Little Endian for Hiworld) */
     TEST_ASSERT_EQUAL_HEX8(0x04, out[6]); /* 1025 >> 8 */
     TEST_ASSERT_EQUAL_HEX8(0x01, out[7]); /* Preset 1 */
@@ -1378,14 +1378,27 @@ void test_peugeot_407_rd4_frequency_and_ta_stability(void) {
     psa_rd4_process_can_0x225(&media.radio, can_225, sizeof(can_225));
     TEST_ASSERT_EQUAL_HEX8(0xA0, media.radio.indicators & 0xA0); /* TA remains set (no flickering!) */
 
-    // 6. Hiworld Serialization (Cmd 0x84): verify Little-Endian frequency bytes
+    // 6. Hiworld Serialization (Cmd 0x84): verify Little-Endian frequency bytes & FM1 band
     uint8_t out[32];
     size_t out_len = build_hiworld_radio_state(&media.radio, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(19, out_len);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[4]); /* FM1 band */
     // 960 (0x03C0) in Little Endian: out[5] = 0xC0, out[6] = 0x03
     TEST_ASSERT_EQUAL_HEX8(0xC0, out[5]);
     TEST_ASSERT_EQUAL_HEX8(0x03, out[6]);
     TEST_ASSERT_EQUAL_HEX8(0xA0, out[8]); /* Indicators: TA + RDS */
+
+    // 7. Test FM2 frame from real dump (dump_2026-10-09_21-41-25.log):
+    // CAN 0x225: 20 50 20 02 ee (Preset 5, Band 0x20 = FM2, Freq 750 = 87.5 MHz)
+    const uint8_t can_225_fm2[] = { 0x20, 0x50, 0x20, 0x02, 0xEE };
+    psa_rd4_process_can_0x225(&media.radio, can_225_fm2, sizeof(can_225_fm2));
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.radio.band); /* FM2 -> 0x02 */
+    TEST_ASSERT_EQUAL_UINT8(5, media.radio.preset_slot);
+    TEST_ASSERT_EQUAL_UINT16(875, media.radio.freq_0_1mhz); /* 750 / 2 + 500 = 875 (87.5 MHz) */
+
+    out_len = build_hiworld_radio_state(&media.radio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(19, out_len);
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[4]); /* FM2 band for Hiworld */
 }
 
 /* --------------------------------------------------------------------------

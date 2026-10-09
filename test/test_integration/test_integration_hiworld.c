@@ -861,7 +861,7 @@ void test_integration_hiworld_rd4_radio_tuner_pipeline(void) {
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
     TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
     TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
-    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[4]); /* FM1 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[4]); /* FM1 -> 0x01 */
     TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[5]); /* 1025 & 0xFF (Little Endian for Hiworld) */
     TEST_ASSERT_EQUAL_HEX8(0x04, rx_buf[6]); /* 1025 >> 8 */
     TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[7]);
