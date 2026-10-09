@@ -220,9 +220,11 @@ def triage_log(log_path: str):
                     app_packets.append((p, list(recent_can)))
 
             elif tag == "[ORIG_CANBOX]":
-                pkts = orig_parser.feed(rest, ts)
-                for p in pkts:
-                    orig_packets.append((p, list(recent_can)))
+                if rest.startswith("RX: "):
+                    rest = rest[4:]
+                    pkts = orig_parser.feed(rest, ts)
+                    for p in pkts:
+                        orig_packets.append((p, list(recent_can)))
 
     duration = (end_ts - start_ts) if (start_ts and end_ts) else 0.0
 

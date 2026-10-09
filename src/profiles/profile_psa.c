@@ -7,13 +7,16 @@ static inline uint16_t read_be16_local(const uint8_t *d) {
 }
 
 static vehicle_state_t *s_active_state_for_stalk = 0;
+static vehicle_state_t *s_active_state_for_console = 0;
 
 static void stalk_key_cb(uint8_t key_id, uint8_t state) {
     if (!s_active_state_for_stalk) return;
 
     if (state == 0) {
-        s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_NONE;
-        s_active_state_for_stalk->wheel.press_state = 0;
+        if (key_id != PSA_STALK_KEY_SCROLL_UP && key_id != PSA_STALK_KEY_SCROLL_DOWN) {
+            s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_NONE;
+            s_active_state_for_stalk->wheel.press_state = 0;
+        }
         return;
     }
 
@@ -25,15 +28,22 @@ static void stalk_key_cb(uint8_t key_id, uint8_t state) {
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_VOL_DOWN;
             break;
         case PSA_STALK_KEY_NEXT:
-        case PSA_STALK_KEY_SCROLL_UP:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_NEXT;
             break;
         case PSA_STALK_KEY_PREV:
-        case PSA_STALK_KEY_SCROLL_DOWN:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_PREV;
+            break;
+        case PSA_STALK_KEY_SCROLL_UP:
+            s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_SCROLL_UP;
+            break;
+        case PSA_STALK_KEY_SCROLL_DOWN:
+            s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_SCROLL_DOWN;
             break;
         case PSA_STALK_KEY_SRC:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_SRC;
+            break;
+        case PSA_STALK_KEY_MUTE:
+            s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_MUTE;
             break;
         case PSA_STALK_KEY_TEL_ANSWER:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_PHONE_ACCEPT;
@@ -41,17 +51,40 @@ static void stalk_key_cb(uint8_t key_id, uint8_t state) {
         case PSA_STALK_KEY_TEL_HANGUP:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_PHONE_HANGUP;
             break;
+        case PSA_STALK_KEY_TRIP:
+            s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_TRIP;
+            break;
         default:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_NONE;
             break;
     }
-    s_active_state_for_stalk->wheel.press_state = (state != 0) ? 1 : 0;
+    if (s_active_state_for_stalk->wheel.active_key == WHEEL_KEY_NONE) {
+        s_active_state_for_stalk->wheel.press_state = 0;
+    } else {
+        s_active_state_for_stalk->wheel.press_state = (state != 0) ? 1 : 0;
+    }
 }
 
-static void psa_decode_stalk_0x0f6(const can_frame_t *frame, vehicle_state_t *state) {
+static void console_key_cb(uint8_t key_id, uint8_t state) {
+    if (!s_active_state_for_console) return;
+
+    s_active_state_for_console->panel_key.key_code = (state != 0) ? key_id : 0;
+    s_active_state_for_console->panel_key.press_state = state;
+}
+
+static void psa_decode_stalk_0x21f_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc < 2) return;
     s_active_state_for_stalk = state;
-    psa_stalk_process_can(frame->data, frame->dlc, stalk_key_cb);
+    psa_decode_stalk_0x21f(frame->data, frame->dlc, stalk_key_cb);
+}
+
+static void psa_decode_console_0x3e5_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 6) return;
+    s_active_state_for_console = state;
+    psa_decode_console_0x3e5(frame->data, frame->dlc, console_key_cb);
+}
+
+static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc >= 8) {
         state->reverse_gear = (frame->data[7] & (1 << 7)) != 0;
     }
@@ -85,11 +118,52 @@ static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_
 static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc < 2) return;
 
-    state->reverse_gear          = (frame->data[1] & (1 << 7)) != 0;
-    state->handbrake             = (frame->data[1] & (1 << 0)) != 0;
+    state->reverse_gear = (frame->data[1] & (1 << 7)) != 0;
+    state->handbrake    = (frame->data[1] & (1 << 0)) != 0;
+
+    if (frame->dlc >= 3) {
+        state->economy_mode = (frame->data[2] & 0x80) != 0;
+    }
+
+    if (frame->dlc >= 4) {
+        state->lights.illumination = (frame->data[3] & 0x20) != 0;
+        state->lights.brightness   = (frame->data[3] & 0x0F);
+    }
 
     if (frame->dlc >= 5) {
-        state->ignition_state    = (vehicle_ignition_state_t)frame->data[4];
+        if (state->economy_mode) {
+            /* Economy mode: forces radio / head unit power OFF immediately to protect battery */
+            state->ignition_state = VEHICLE_IGNITION_OFF;
+        } else {
+            uint8_t phase_vie = frame->data[4] & 0x07;
+            if (phase_vie == 0x01) {
+                /* 0x01: Ignition ON (Wakeup / Run +APC) — Radio turns ON and stays awake */
+                state->ignition_state = VEHICLE_IGNITION_ON;
+            } else if (phase_vie == 0x02 || phase_vie == 0x00) {
+                /* 0x02: Ignition OFF (Going to sleep) — Initiates shutdown / accessory timer */
+                /* 0x00: Deep Sleep / Standby — Head unit enters deep sleep mode */
+                /* Radio power OFF unless RD4 radio (0x165) specifically activated ACC */
+                if (state->ignition_state != VEHICLE_IGNITION_ACC) {
+                    state->ignition_state = VEHICLE_IGNITION_OFF;
+                }
+            } else if (phase_vie == 0x03) {
+                /* 0x03: Wakeup transition — Brief (~40 ms) pulse during key turn */
+            }
+        }
+    }
+}
+
+static void psa_decode_radio_power_0x165(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 4) return;
+    if (state->economy_mode) {
+        state->ignition_state = VEHICLE_IGNITION_OFF;
+        return;
+    }
+    bool radio_on = (frame->data[0] & 0x80) != 0;
+    if (radio_on && state->ignition_state == VEHICLE_IGNITION_OFF) {
+        state->ignition_state = VEHICLE_IGNITION_ACC;
+    } else if (!radio_on && (frame->data[0] & 0x40) == 0 && state->ignition_state == VEHICLE_IGNITION_ACC) {
+        state->ignition_state = VEHICLE_IGNITION_OFF;
     }
 }
 
@@ -197,6 +271,12 @@ static void psa_decode_tpms_0x1e1_profile(const can_frame_t *frame, vehicle_stat
 }
 
 static void psa_decode_trip_0x221_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 1) return;
+
+    /* Stalk Tip Trip button on Byte 0 Bit 3 (0x08) */
+    s_active_state_for_stalk = state;
+    psa_decode_stalk_tip_0x221(frame->data, frame->dlc, stalk_key_cb);
+
     if (frame->dlc < 7) return;
 
     /* Byte 0 Bit 7: Fuel info hidden/invalid.
@@ -296,7 +376,9 @@ static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, veh
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
-    { PSA_CAN_ID_STALK_BUTTONS,      psa_decode_stalk_0x0f6 },
+    { 0x0F6,                         psa_decode_bsi_slow_0x0f6 },
+    { PSA_CAN_ID_STALK_21F,          psa_decode_stalk_0x21f_profile },
+    { PSA_CAN_ID_CONSOLE_3E5,        psa_decode_console_0x3e5_profile },
     { PSA_CAN_ID_ALERT_JOURNAL,      psa_decode_alert_journal_0x120_profile },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
     { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
@@ -312,10 +394,12 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
     { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
+    { 0x165,                         psa_decode_radio_power_0x165 },
 };
 
 static void psa_init(void) {
     psa_stalk_init(NULL);
+    psa_console_init(NULL);
     psa_journal_iso_tp_init(&s_journal_ctx);
 }
 

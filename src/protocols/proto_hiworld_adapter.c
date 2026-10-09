@@ -11,6 +11,7 @@
 
 static hiworld_connection_ctx_t s_hw_conn_ctx;
 static bool s_hiworld_initialized = false;
+static uint8_t s_hiworld_hb_tick = 0;
 
 static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
     (void)car_model_id;
@@ -72,6 +73,7 @@ static void ensure_hiworld_initialized(void) {
     if (!s_hiworld_initialized) {
         proto_hiworld_init(on_hiworld_packet_received);
         hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+        s_hiworld_hb_tick = 0;
         s_hiworld_initialized = true;
     }
 }
@@ -79,6 +81,7 @@ static void ensure_hiworld_initialized(void) {
 static void hiworld_init(void) {
     proto_hiworld_init(on_hiworld_packet_received);
     hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+    s_hiworld_hb_tick = 0;
     s_hiworld_initialized = true;
 }
 
@@ -95,22 +98,56 @@ static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
         case WHEEL_KEY_VOL_UP:       hw_key_code = 0x01; break;
         case WHEEL_KEY_VOL_DOWN:     hw_key_code = 0x02; break;
         case WHEEL_KEY_MUTE:         hw_key_code = 0x03; break;
-        case WHEEL_KEY_SRC:          hw_key_code = 0x04; break;
-        case WHEEL_KEY_NEXT:         hw_key_code = 0x07; break;
-        case WHEEL_KEY_PREV:         hw_key_code = 0x08; break;
+        case WHEEL_KEY_NEXT:         hw_key_code = 0x08; break;
+        case WHEEL_KEY_PREV:         hw_key_code = 0x09; break;
+        case WHEEL_KEY_SRC:          hw_key_code = 0x0B; break;
+        case WHEEL_KEY_SCROLL_UP:    hw_key_code = 0x12; break;
+        case WHEEL_KEY_SCROLL_DOWN:  hw_key_code = 0x11; break;
         case WHEEL_KEY_PHONE_ACCEPT: hw_key_code = 0x09; break;
         case WHEEL_KEY_PHONE_REJECT: hw_key_code = 0x0A; break;
-        case WHEEL_KEY_VOICE:        hw_key_code = 0x0B; break;
+        case WHEEL_KEY_VOICE:        hw_key_code = 0x05; break;
+        case WHEEL_KEY_TRIP:         hw_key_code = 0x14; break;
         default:                     hw_key_code = 0x00; break;
     }
 
-    /* Hiworld Key Payload: [Key Code, Press Status (1 = pressed, 0 = released)] */
+    /* Hiworld Key Payload (Cmd 0x11, 10 bytes as captured from real PSA Hiworld Canbox):
+     * [0x23, 0x00, KeyCode, PressState, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22]
+     * When released: KeyCode = 0x00, PressState = 0x00
+     */
+    uint8_t payload[10] = {
+        0x23,
+        0x00,
+        (wheel->press_state != 0) ? hw_key_code : 0x00,
+        (wheel->press_state != 0) ? 0x01 : 0x00,
+        0x00,
+        0x0A,
+        0x00,
+        0x00,
+        0x5E,
+        0x22
+    };
+
+    uint8_t tx_buf[20];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_BASE_INFO, payload, sizeof(payload), 
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_panel_key(const vehicle_panel_key_t *panel_key) {
+    if (!panel_key) return;
+
+    /* Hiworld Fascia / Console Key Payload (Cmd 0x21):
+     * 2 bytes payload: [KeyID, PressState (1 = pressed, 0 = released)]
+     * When released, KeyID is 0x00, PressState is 0x00.
+     */
     uint8_t payload[2];
-    payload[0] = hw_key_code;
-    payload[1] = wheel->press_state;
+    payload[0] = (panel_key->press_state != 0) ? panel_key->key_code : 0x00;
+    payload[1] = panel_key->press_state ? 0x01 : 0x00;
 
     uint8_t tx_buf[16];
-    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_BASE_INFO, payload, sizeof(payload), 
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CONTROL_PANEL_KEY, payload, sizeof(payload),
                                          tx_buf, sizeof(tx_buf));
     if (len > 0) {
         hal_uart_write(tx_buf, len);
@@ -149,6 +186,12 @@ static void hiworld_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) 
 }
 
 static void hiworld_send_heartbeat(void) {
+    /* Throttle keep-alive heartbeat (0xFF) from 10 Hz to 1 Hz (every 10 * 100ms ticks = 1000ms) */
+    if (++s_hiworld_hb_tick < 10) {
+        return;
+    }
+    s_hiworld_hb_tick = 0;
+
     static const uint8_t hb[1] = { 0x01 };
     uint8_t tx_buf[8];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_HEARTBEAT, hb, sizeof(hb), tx_buf, sizeof(tx_buf));
@@ -445,6 +488,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .init = hiworld_init,
     .feed_byte = hiworld_feed_byte,
     .send_wheel_key = hiworld_send_wheel_key,
+    .send_panel_key = hiworld_send_panel_key,
     .send_doors = hiworld_send_doors,
     .send_climate = hiworld_send_climate,
     .send_telemetry = hiworld_send_telemetry,

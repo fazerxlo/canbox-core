@@ -104,8 +104,22 @@ static void handle_parsed_command(hiworld_connection_ctx_t *ctx, uint8_t cmd_id,
     switch (cmd_id) {
         case HIWORLD_CMD_CAR_TYPE_SET: {
             if (len >= 1) {
-                ctx->car_model_id = payload[0];
-                ctx->car_variant  = (len >= 2) ? payload[1] : 0;
+                uint8_t new_model_id = payload[0];
+                uint8_t new_variant  = (len >= 2) ? payload[1] : 0;
+
+                /* Respond immediately with ACK frame: 5A A5 01 FF 24 23 */
+                const uint8_t ack_payload[1] = { HIWORLD_CMD_CAR_TYPE_SET };
+                send_hiworld_frame(ctx, HIWORLD_CMD_HEARTBEAT, ack_payload, 1);
+
+                /* Do not re-blast entire 6-frame block if already active and unchanged */
+                if (ctx->state == HIWORLD_LINK_ACTIVE &&
+                    ctx->car_model_id == new_model_id &&
+                    ctx->car_variant == new_variant) {
+                    break;
+                }
+
+                ctx->car_model_id = new_model_id;
+                ctx->car_variant  = new_variant;
                 ctx->state = HIWORLD_LINK_INITIALIZED;
 
                 /* Look up car profile and baud rate */

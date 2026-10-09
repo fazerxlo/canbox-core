@@ -69,6 +69,7 @@ extern "C" {
 #define HIWORLD_CMD_UNIT_INFO             0xC1 /* 193 */
 #define HIWORLD_CMD_DATE_TIME_INFO        0xC2 /* 194 */
 #define HIWORLD_CMD_VERSION_REPORT        0xF0 /* 240 */
+#define HIWORLD_CMD_HEARTBEAT             0xFF /* 255 - Link keep-alive / ACK */
 
 /* Master Command IDs - Outbound Downlink (HU -> CAN Box) */
 #define HIWORLD_CMD_ECU_SETTING_SET       0x1B /* 27 */

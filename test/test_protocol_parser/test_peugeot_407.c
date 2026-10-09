@@ -21,6 +21,16 @@ static void test_stalk_key_callback(uint8_t key_id, uint8_t state) {
     s_stalk_cb_count++;
 }
 
+static uint8_t s_last_panel_key_id = 0;
+static uint8_t s_last_panel_key_state = 0;
+static int s_panel_cb_count = 0;
+
+static void test_panel_key_callback(uint8_t key_id, uint8_t state) {
+    s_last_panel_key_id = key_id;
+    s_last_panel_key_state = state;
+    s_panel_cb_count++;
+}
+
 #define MAX_TPMS_TX_PACKETS 4
 static uint8_t s_tpms_uart_buf[MAX_TPMS_TX_PACKETS][32];
 static size_t  s_tpms_uart_len[MAX_TPMS_TX_PACKETS];
@@ -65,6 +75,9 @@ void setUp_peugeot_407(void) {
     s_last_stalk_key_id = 0;
     s_last_stalk_key_state = 0;
     s_stalk_cb_count = 0;
+    s_last_panel_key_id = 0;
+    s_last_panel_key_state = 0;
+    s_panel_cb_count = 0;
     s_tpms_uart_tx_calls = 0;
     memset(s_tpms_uart_len, 0, sizeof(s_tpms_uart_len));
     memset(s_tpms_uart_buf, 0, sizeof(s_tpms_uart_buf));
@@ -171,6 +184,192 @@ void test_peugeot_407_verification_vector_1_vol_up(void) {
 
     const uint8_t expected[] = { 0x2E, 0x02, 0x02, 0x14, 0x01, 0xE6 };
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected), len);
+}
+
+void test_peugeot_407_stalk_0x21f_buttons_and_rotary(void) {
+    psa_stalk_state_t st;
+    psa_stalk_init(&st);
+
+    uint8_t data[3] = { 0x00, 0x00, 0x00 };
+
+    // 1. Volume Up: 0x08
+    data[0] = 0x08;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_VOL_UP, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    data[0] = 0x00;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_VOL_UP, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
+
+    // 2. Volume Down: 0x04
+    data[0] = 0x04;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_VOL_DOWN, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    data[0] = 0x00;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_VOL_DOWN, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
+
+    // 3. Chorded MUTE: 0x0C (0x08 | 0x04)
+    data[0] = 0x0C;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_MUTE, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    data[0] = 0x00;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_MUTE, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
+
+    // 4. Next Seek: 0x80
+    data[0] = 0x80;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_NEXT, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    data[0] = 0x00;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_NEXT, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
+
+    // 5. Prev Seek: 0x40
+    data[0] = 0x40;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_PREV, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    data[0] = 0x00;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_PREV, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
+
+    // 6. Source Toggle: 0x02
+    data[0] = 0x02;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_SRC, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    data[0] = 0x00;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_SRC, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
+
+    // 7. Rotary Scroll Up (+1 step: counter 0 -> 1)
+    data[1] = 0x01;
+    s_stalk_cb_count = 0;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_INT(2, s_stalk_cb_count); // pulse press (1) and release (0)
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_SCROLL_UP, s_last_stalk_key_id);
+
+    // 8. Rotary Scroll Down (-1 step: counter 1 -> 0)
+    data[1] = 0x00;
+    s_stalk_cb_count = 0;
+    psa_decode_stalk_0x21f_ex(&st, data, sizeof(data), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_INT(2, s_stalk_cb_count);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_SCROLL_DOWN, s_last_stalk_key_id);
+}
+
+/* Helper: feed one 0x3E5 frame, return callback count */
+static void feed_3e5(psa_console_state_t *st, uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b5) {
+    uint8_t data[6] = { b0, b1, b2, 0x00, 0x00, b5 };
+    psa_decode_console_0x3e5_ex(st, data, sizeof(data), test_panel_key_callback);
+}
+
+static void check_3e5_key(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b5, uint8_t expected_key) {
+    psa_console_state_t st;
+    psa_console_init(&st);
+
+    s_last_panel_key_id = PSA_PANEL_KEY_NONE;
+    s_last_panel_key_state = 0;
+    s_panel_cb_count = 0;
+    feed_3e5(&st, b0, b1, b2, b5);
+    TEST_ASSERT_EQUAL_HEX8(expected_key, s_last_panel_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_panel_key_state);
+    TEST_ASSERT_EQUAL_INT(1, s_panel_cb_count);
+
+    /* Release (idle frame) */
+    feed_3e5(&st, 0, 0, 0, 0);
+    TEST_ASSERT_EQUAL_HEX8(expected_key, s_last_panel_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_panel_key_state);
+    TEST_ASSERT_EQUAL_INT(2, s_panel_cb_count);
+}
+
+/* Proven frames from can_log_buttons.log (AUDIO, TRIP, CLIM, DARK) */
+void test_peugeot_407_console_0x3e5_buttons(void) {
+    check_3e5_key(0x00, 0x01, 0x00, 0x00, PSA_PANEL_KEY_AUDIO); /* 000100000000 */
+    check_3e5_key(0x00, 0x40, 0x00, 0x00, PSA_PANEL_KEY_TRIP);  /* 004000000000 */
+    check_3e5_key(0x01, 0x00, 0x00, 0x00, PSA_PANEL_KEY_CLIM);  /* 010000000000 */
+    check_3e5_key(0x00, 0x00, 0x04, 0x00, PSA_PANEL_KEY_DARK);  /* 000004000000 */
+    /* can_log_buttons1.log (MENU, OK, ESC) */
+    check_3e5_key(0x40, 0x00, 0x00, 0x00, PSA_PANEL_KEY_MENU);  /* 400000000000 */
+    check_3e5_key(0x00, 0x00, 0x40, 0x00, PSA_PANEL_KEY_OK);    /* 000040000000 */
+    check_3e5_key(0x00, 0x00, 0x10, 0x00, PSA_PANEL_KEY_ESC);   /* 000010000000 */
+    /* can_log_buttons2.log (UP) + simulator-doc layout for the other arrows */
+    check_3e5_key(0x00, 0x00, 0x00, 0x40, PSA_PANEL_KEY_UP);    /* 000000000040 */
+    check_3e5_key(0x00, 0x00, 0x00, 0x10, PSA_PANEL_KEY_DOWN);
+    check_3e5_key(0x00, 0x00, 0x00, 0x04, PSA_PANEL_KEY_RIGHT);
+    check_3e5_key(0x00, 0x00, 0x00, 0x01, PSA_PANEL_KEY_LEFT);
+    /* TEL: B0[5:4] per simulator doc; Hiworld code 0x05 PHONE */
+    check_3e5_key(0x10, 0x00, 0x00, 0x00, PSA_PANEL_KEY_TEL);
+}
+
+void test_peugeot_407_console_0x3e5_edge_cases(void) {
+    psa_console_state_t st;
+    psa_console_init(&st);
+
+    /* Repeated identical press frames do not retrigger */
+    s_panel_cb_count = 0;
+    feed_3e5(&st, 0, 0, 0x04, 0);
+    feed_3e5(&st, 0, 0, 0x04, 0);
+    feed_3e5(&st, 0, 0, 0x04, 0);
+    TEST_ASSERT_EQUAL_INT(1, s_panel_cb_count);
+    feed_3e5(&st, 0, 0, 0, 0);
+    TEST_ASSERT_EQUAL_INT(2, s_panel_cb_count);
+
+    /* Same key pressed twice in a row gives two full press/release cycles (DARK x2 in log) */
+    s_panel_cb_count = 0;
+    feed_3e5(&st, 0, 0, 0x04, 0);
+    feed_3e5(&st, 0, 0, 0, 0);
+    feed_3e5(&st, 0, 0, 0x04, 0);
+    feed_3e5(&st, 0, 0, 0, 0);
+    TEST_ASSERT_EQUAL_INT(4, s_panel_cb_count);
+
+    /* Idle frame with no key held produces nothing */
+    s_panel_cb_count = 0;
+    feed_3e5(&st, 0, 0, 0, 0);
+    TEST_ASSERT_EQUAL_INT(0, s_panel_cb_count);
+
+    /* Short DLC is rejected (no out-of-bounds read) */
+    const uint8_t short_frame[5] = { 0x40, 0, 0, 0, 0 };
+    psa_decode_console_0x3e5_ex(&st, short_frame, sizeof(short_frame), test_panel_key_callback);
+    TEST_ASSERT_EQUAL_INT(0, s_panel_cb_count);
+
+    /* Pending MODE (B1[5:4]) is NOT decoded */
+    feed_3e5(&st, 0x00, 0x10, 0, 0);
+    TEST_ASSERT_EQUAL_INT(0, s_panel_cb_count);
+}
+
+void test_peugeot_407_stalk_tip_0x221_trip_button(void) {
+    psa_stalk_state_t st;
+    psa_stalk_init(&st);
+
+    // 1. Press: CAN ID 0x221 Byte 0 Bit 3 = 0x08 (0xC8 nominal from vehicle dump)
+    const uint8_t can_221_press[] = { 0xC8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    s_last_stalk_key_id = 0;
+    s_last_stalk_key_state = 0;
+    psa_decode_stalk_tip_0x221_ex(&st, can_221_press, sizeof(can_221_press), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_TRIP, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    // 2. Release: CAN ID 0x221 Byte 0 Bit 3 cleared (0xC0 nominal from vehicle dump)
+    const uint8_t can_221_release[] = { 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    psa_decode_stalk_tip_0x221_ex(&st, can_221_release, sizeof(can_221_release), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_TRIP, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
 }
 
 /* --------------------------------------------------------------------------
@@ -1406,6 +1605,39 @@ void test_peugeot_407_hvac_hiworld(void) {
     TEST_ASSERT_FALSE(climate.recirculate);
     TEST_ASSERT_TRUE(climate.ac_on);
     TEST_ASSERT_TRUE(climate.dual_mode);
+
+    // Vector 10: Issue 3 Provenance scenario from dump_2026-10-05_21-28-30.log
+    // and dump_2026-10-06_14-44-27.log: Front defrost active with AQS intake.
+    // 0x1E3 arrives: Byte 0 = 0x14 (AQS active), Byte 1 = 0xB0 (Bit 7 = Front Demist active)
+    const uint8_t can_1e3_v10[] = { 0x14, 0xB0, 0x0B, 0x0B, 0x00, 0x00, 0x01, 0x00 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v10, 8);
+    TEST_ASSERT_TRUE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+
+    // 0x1D0 arrives: Byte 0 = 0x19 (Front Demist active), Byte 4 = 0x20 (Forced Fresh Air physical flap)
+    const uint8_t can_1d0_v10[] = { 0x19, 0x00, 0x01, 0x00, 0x20, 0x0B, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_v10, 8);
+    TEST_ASSERT_TRUE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+
+    // Re-feed 0x1E3: verify zero state jitter / oscillation
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v10, 8);
+    TEST_ASSERT_TRUE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.recirculate);
+
+    // Turn off Front Demist back to Auto:
+    const uint8_t can_1d0_auto[] = { 0x08, 0x00, 0x02, 0x00, 0x00, 0x0B, 0x0B, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_auto, 8);
+    TEST_ASSERT_FALSE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
+
+    const uint8_t can_1e3_auto[] = { 0x1C, 0x30, 0x0B, 0x0B, 0x00, 0x00, 0x02 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_auto, 7);
+    TEST_ASSERT_FALSE(climate.front_max_defrost);
+    TEST_ASSERT_TRUE(climate.aqs_auto);
 }
 
 void test_peugeot_407_trip_reset_frames(void) {

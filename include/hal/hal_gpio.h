@@ -12,9 +12,10 @@ typedef enum {
     GPIO_PIN_LED_STATUS = 0,
     GPIO_PIN_CAN_STBY,       // Transceiver standby/silent control
     GPIO_PIN_IGNITION_IN,    // Accessory/Ignition 12V detect (via opto/divider)
-    GPIO_PIN_HEADUNIT_POWER, // Optional switched 12V supply enable
+    GPIO_PIN_HEADUNIT_POWER, // Optional switched 12V supply enable (ACC)
     GPIO_PIN_REVERSE_OUT,    // Physical BACK / REVERSE trigger wire to Head Unit (+12V active high)
-    GPIO_PIN_ILL_OUT         // Physical ILLUMINATION trigger wire to Head Unit (+12V active high)
+    GPIO_PIN_ILL_OUT,        // Physical ILLUMINATION trigger wire to Head Unit (+12V active high)
+    GPIO_PIN_BRAKE_OUT       // Physical HANDBRAKE / PARK trigger wire to Head Unit
 } hal_gpio_pin_t;
 
 hal_status_t hal_gpio_init(void);

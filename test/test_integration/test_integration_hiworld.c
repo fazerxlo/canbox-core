@@ -1,3 +1,4 @@
+#include <string.h>
 #include "test_integration_common.h"
 #include "core/vehicle_profile.h"
 #include "protocols/proto_hiworld.h"
@@ -18,8 +19,8 @@ void test_integration_hiworld_steering_wheel_volume_up_pipeline(void) {
     uint8_t rx_buf[32];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
-    // Hiworld SWC Frame: Sync(0x5A, 0xA5), Len(0x02), Cmd(0x11), Key(0x01), Pressed(0x01), CS(0x14)
-    const uint8_t expected[] = { 0x5A, 0xA5, 0x02, 0x11, 0x01, 0x01, 0x14 };
+    // Hiworld SWC Frame: Sync(0x5A, 0xA5), Len(0x0A), Cmd(0x11), Payload[10], CS(0xC9)
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x01, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xC9 };
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, sizeof(expected));
 
@@ -29,8 +30,8 @@ void test_integration_hiworld_steering_wheel_volume_up_pipeline(void) {
     can_router_process_can(&frame);
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    // Release Frame: Sync(0x5A, 0xA5), Len(0x02), Cmd(0x11), Key(0x00), Pressed(0x00), CS(0x12)
-    const uint8_t expected_release[] = { 0x5A, 0xA5, 0x02, 0x11, 0x00, 0x00, 0x12 };
+    // Release Frame: Sync(0x5A, 0xA5), Len(0x0A), Cmd(0x11), Key(0x00), Pressed(0x00), CS(0xC7)
+    const uint8_t expected_release[] = { 0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xC7 };
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_release), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_release, rx_buf, sizeof(expected_release));
 }
@@ -85,11 +86,19 @@ void test_integration_hiworld_door_status_pipeline(void) {
 void test_integration_hiworld_telemetry_periodic_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
 
-    // Trigger periodic 100ms update
-    can_router_periodic_100ms();
-
     uint8_t rx_buf[64];
-    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    size_t rx_len;
+
+    // Ticks 1 to 9 (100ms - 900ms) must NOT emit heartbeat (throttled to 1 Hz)
+    for (int tick = 1; tick <= 9; tick++) {
+        can_router_periodic_100ms();
+        rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+        TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+    }
+
+    // Tick 10 (1000ms / 1s) MUST emit the 1 Hz Hiworld periodic heartbeat (Cmd 0xFF)
+    can_router_periodic_100ms();
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
     // Hiworld periodic heartbeat (Cmd 0xFF, Len 0x01, Payload: 0x01, CS = (0x01 + 0xFF + 0x01 - 1) = 0x00)
     const uint8_t expected[] = {
@@ -112,13 +121,27 @@ void test_integration_hiworld_runtime_car_selection_and_handshake(void) {
     uint8_t rx_buf[128];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
-    // Expect response with Version (0xF0) + Feature Enable 1 (0x71) + Feature Enable 2 (0x72)
-    TEST_ASSERT_TRUE(rx_len > 0);
+    // Expect response with ACK (0xFF, payload 0x24) + Version (0xF0) + Feature Enables
+    TEST_ASSERT_TRUE(rx_len >= 6);
 
-    // Verify first response is 0xF0
-    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF1, rx_buf[0]);
-    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, rx_buf[1]);
-    TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, rx_buf[3]);
+    // Verify first response is ACK frame: 5A A5 01 FF 24 23
+    const uint8_t expected_ack[] = { 0x5A, 0xA5, 0x01, 0xFF, 0x24, 0x23 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    // Verify subsequent frame is Version Report (0xF0)
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF1, rx_buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, rx_buf[9]);
+
+    // Feed downlink car model selection packet again (repeated handshake with unchanged model)
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        hu_protocol_get_active()->feed_byte(stream[i]);
+    }
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // MUST ONLY emit ACK frame (6 bytes), completely suppressing the 70-byte configuration burst
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_ack), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
 }
 
 void test_integration_hiworld_tpms_pipeline(void) {
@@ -177,14 +200,18 @@ void test_integration_hiworld_tpms_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_numeric_only), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_numeric_only, rx_buf, sizeof(expected_numeric_only));
 
-    // 3. Periodic refresh: 299 ticks do NOT emit TPMS
+    // 3. Periodic refresh: 299 ticks do NOT emit TPMS (while bus is active)
     for (int t = 0; t < 299; t++) {
+        can_frame_t keepalive = { .id = 0x7FF, .dlc = 0 };
+        can_router_process_can(&keepalive);
         can_router_periodic_100ms();
         // Drain heartbeats (Cmd 0xFF)
         read_uart_output(rx_buf, sizeof(rx_buf));
     }
 
     // Tick 300 (30 seconds) MUST emit both Numeric (0x66) and Discrete (0x18)
+    can_frame_t keepalive = { .id = 0x7FF, .dlc = 0 };
+    can_router_process_can(&keepalive);
     can_router_periodic_100ms();
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     // Expect: Numeric (0x66, 11 bytes) + Discrete (0x18, 9 bytes) + Heartbeat (0xFF, 6 bytes) = 26 bytes
@@ -577,4 +604,221 @@ void test_integration_hiworld_reverse_quiescent_no_blinking_or_trajectory(void) 
     can_router_process_can(&frame_0e1);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+}
+
+void test_integration_hiworld_native_stalk_0x21f_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    size_t rx_len;
+
+    // 1. Volume Up Press (21F: 0x08, counter: 0x01)
+    can_frame_t frame_21f = {
+        .id = 0x21F,
+        .dlc = 3,
+        .data = { 0x08, 0x01, 0x00 }
+    };
+    can_router_process_can(&frame_21f);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_vol_up[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x01, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xC9
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_vol_up), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_vol_up, rx_buf, sizeof(expected_vol_up));
+
+    // Release Vol Up
+    frame_21f.data[0] = 0x00;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_release[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xC7
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_release), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_release, rx_buf, sizeof(expected_release));
+
+    // 2. Chorded MUTE Press (21F: 0x0C = Vol+ | Vol-)
+    frame_21f.data[0] = 0x0C;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_mute[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x03, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xCB
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_mute), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_mute, rx_buf, sizeof(expected_mute));
+
+    // Release MUTE
+    frame_21f.data[0] = 0x00;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_release), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_release, rx_buf, sizeof(expected_release));
+
+    // 3. Next Track / Seek Up (21F: 0x80)
+    frame_21f.data[0] = 0x80;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_next[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x08, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xD0
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_next), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_next, rx_buf, sizeof(expected_next));
+
+    // Release Seek Up
+    frame_21f.data[0] = 0x00;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_release), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_release, rx_buf, sizeof(expected_release));
+
+    // 4. Source Toggle (21F: 0x02)
+    frame_21f.data[0] = 0x02;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_src[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x0B, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xD3
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_src), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_src, rx_buf, sizeof(expected_src));
+
+    // Release Source
+    frame_21f.data[0] = 0x00;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_release), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_release, rx_buf, sizeof(expected_release));
+
+    // 5. Rotary Scroll Up (+1 step: counter 0x01 -> 0x02)
+    // Emits press (0x12, 1) and immediate auto-release (0x00, 0)
+    frame_21f.data[0] = 0x00;
+    frame_21f.data[1] = 0x02;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_scroll_up_pulse[] = {
+        // Press:
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x12, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xDA,
+        // Release:
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xC7
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_scroll_up_pulse), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_scroll_up_pulse, rx_buf, sizeof(expected_scroll_up_pulse));
+
+    // 6. Rotary Scroll Down (-1 step: counter 0x02 -> 0x01)
+    // Emits press (0x11, 1) and immediate auto-release (0x00, 0)
+    frame_21f.data[1] = 0x01;
+    can_router_process_can(&frame_21f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_scroll_down_pulse[] = {
+        // Press:
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x11, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xD9,
+        // Release:
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xC7
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_scroll_down_pulse), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_scroll_down_pulse, rx_buf, sizeof(expected_scroll_down_pulse));
+}
+
+void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[32];
+    size_t rx_len;
+
+    // Stalk Tip Trip Button Press (CAN ID 0x221: Byte 0 Bit 3 = 0x08, 0xC8 nominal from vehicle dumps)
+    // Verified in dump_2026-10-06_20-27-16.log and dump_2026-10-06_20-45-34.log
+    can_frame_t frame_221 = {
+        .id = 0x221,
+        .dlc = 7,
+        .data = { 0xC8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }
+    };
+    can_router_process_can(&frame_221);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_stalk_trip_press[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x14, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xDC
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stalk_trip_press), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_press, rx_buf, sizeof(expected_stalk_trip_press));
+
+    // Release Stalk Tip Trip Button (0xC0 nominal from vehicle dumps)
+    frame_221.data[0] = 0xC0;
+    can_router_process_can(&frame_221);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_stalk_trip_release[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xC7
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stalk_trip_release), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_release, rx_buf, sizeof(expected_stalk_trip_release));
+}
+
+static void check_3e5_pipeline(const uint8_t *can6, const uint8_t *expected_press) {
+    uint8_t rx_buf[32];
+    size_t rx_len;
+    const uint8_t idle[6] = { 0 };
+    const uint8_t expected_release[] = { 0x5A, 0xA5, 0x02, 0x21, 0x00, 0x00, 0x22 };
+    can_frame_t f = { .id = 0x3E5, .dlc = 6 };
+
+    memcpy(f.data, can6, 6);
+    can_router_process_can(&f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(7, rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_press, rx_buf, 7);
+
+    memcpy(f.data, idle, 6);
+    can_router_process_can(&f);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_release), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_release, rx_buf, sizeof(expected_release));
+}
+
+/* CAN frames from can_log_buttons*.log -> wire frames from the original OEM Hiworld Canbox */
+void test_integration_hiworld_console_0x3e5_full_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    static const uint8_t audio[6] = { 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
+    static const uint8_t trip[6]  = { 0x00, 0x40, 0x00, 0x00, 0x00, 0x00 };
+    static const uint8_t clim[6]  = { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    static const uint8_t dark[6]  = { 0x00, 0x00, 0x04, 0x00, 0x00, 0x00 };
+    static const uint8_t menu[6]  = { 0x40, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    static const uint8_t esc[6]   = { 0x00, 0x00, 0x10, 0x00, 0x00, 0x00 };
+    static const uint8_t up[6]    = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x40 };
+    static const uint8_t down[6]  = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x10 };
+    static const uint8_t right[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x04 };
+    static const uint8_t tel[6]   = { 0x10, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    static const uint8_t left[6]  = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+
+    static const uint8_t w_audio[] = { 0x5A, 0xA5, 0x02, 0x21, 0x31, 0x01, 0x54 };
+    static const uint8_t w_trip[]  = { 0x5A, 0xA5, 0x02, 0x21, 0x40, 0x01, 0x63 };
+    static const uint8_t w_clim[]  = { 0x5A, 0xA5, 0x02, 0x21, 0x28, 0x01, 0x4B };
+    static const uint8_t w_dark[]  = { 0x5A, 0xA5, 0x02, 0x21, 0x07, 0x01, 0x2A };
+    static const uint8_t w_menu[]  = { 0x5A, 0xA5, 0x02, 0x21, 0x2E, 0x01, 0x51 };
+    static const uint8_t w_esc[]   = { 0x5A, 0xA5, 0x02, 0x21, 0x25, 0x01, 0x48 };
+    static const uint8_t w_up[]    = { 0x5A, 0xA5, 0x02, 0x21, 0x17, 0x01, 0x3A };
+    static const uint8_t w_down[]  = { 0x5A, 0xA5, 0x02, 0x21, 0x18, 0x01, 0x3B };
+    static const uint8_t w_tel[]   = { 0x5A, 0xA5, 0x02, 0x21, 0x05, 0x01, 0x28 };
+    static const uint8_t w_left[]  = { 0x5A, 0xA5, 0x02, 0x21, 0x19, 0x01, 0x3C };
+    static const uint8_t w_right[] = { 0x5A, 0xA5, 0x02, 0x21, 0x1A, 0x01, 0x3D };
+
+    check_3e5_pipeline(audio, w_audio);
+    check_3e5_pipeline(trip, w_trip);
+    check_3e5_pipeline(clim, w_clim);
+    check_3e5_pipeline(dark, w_dark);
+    check_3e5_pipeline(dark, w_dark); /* DARK pressed twice in the log */
+    check_3e5_pipeline(menu, w_menu);
+    check_3e5_pipeline(esc, w_esc);
+    check_3e5_pipeline(up, w_up);
+    check_3e5_pipeline(down, w_down);
+    check_3e5_pipeline(tel, w_tel);
+    check_3e5_pipeline(left, w_left);
+    check_3e5_pipeline(right, w_right);
+}
+
+void test_integration_hiworld_console_0x3e5_ok_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    /* OK: can_log_buttons1.log frame 000040000000 */
+    static const uint8_t ok[6] = { 0x00, 0x00, 0x40, 0x00, 0x00, 0x00 };
+    static const uint8_t w_ok[] = { 0x5A, 0xA5, 0x02, 0x21, 0x24, 0x01, 0x47 };
+    check_3e5_pipeline(ok, w_ok);
 }

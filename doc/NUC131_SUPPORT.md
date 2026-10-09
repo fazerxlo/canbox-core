@@ -36,12 +36,13 @@ The `canbox-core` HAL implementation (`src/hal/hal_nuc131/`) maps the hardware p
 | **CAN0 TX** | `PD.7` | Output (MFP CAN0) | `hal_can_init()` | Connected to CAN transceiver TX |
 | **UART0 RX** | `PB.0` | Input (MFP UART0) | `hal_uart_init()` | Serial stream from Android Head Unit (Rx) |
 | **UART0 TX** | `PB.1` | Output (MFP UART0) | `hal_uart_init()` | Serial stream to Android Head Unit (Tx) |
-| **Status LED** | `PA.9` | Output Push-Pull | `GPIO_PIN_LED_STATUS` | Onboard heartbeat / diagnostic LED |
-| **CAN STBY** | `PA.12` | Output Push-Pull | `GPIO_PIN_CAN_STBY` | Transceiver standby/silent control (`0`=Normal, `1`=Standby) |
-| **ACC / HU Power** | `PA.8` | Output Push-Pull | `GPIO_PIN_HEADUNIT_POWER` | Switched $+12\text{V}$ ACC wakeup output to Head Unit |
-| **Reverse Trigger**| `PA.13` | Output Push-Pull | `GPIO_PIN_REVERSE_OUT` | Physical $+12\text{V}$ camera switch trigger wire |
-| **Illumination** | `PA.14` | Output Push-Pull | `GPIO_PIN_ILL_OUT` | Physical $+12\text{V}$ night dimming / ILL wire |
+| **CAN STBY** | `PC.3` | Output (Open-Drain) | `GPIO_PIN_CAN_STBY` | Transceiver standby/silent control (`0`=Normal, `1`=Standby) |
+| **ACC / HU Power** | `PA.8` | Output (Push-Pull) | `GPIO_PIN_HEADUNIT_POWER` | Switched $+12\text{V}$ ACC wakeup output to Head Unit |
+| **Illumination** | `PA.9` | Output (Push-Pull) | `GPIO_PIN_ILL_OUT` | Physical $+12\text{V}$ night dimming / ILL wire |
+| **Brake / Handbrake** | `PA.12` | Output (Push-Pull) | `GPIO_PIN_BRAKE_OUT` | Physical Handbrake trigger wire (permanently OFF: `0`) |
+| **Reverse Trigger**| `PA.13` | Output (Push-Pull) | `GPIO_PIN_REVERSE_OUT` | Physical $+12\text{V}$ camera switch trigger wire |
 | **Ignition Sense** | `PA.0` | Input (Pull-Down) | `GPIO_PIN_IGNITION_IN` | Hardware analog $+12\text{V}$ ignition input (via divider/opto) |
+| **SWD CLK / DIO** | `PA.15` / `PA.14` | Special Function | In-Circuit Debug | `CON2` SWD header (`ICE_CLK`, `ICE_DAT`) |
 
 ---
 
@@ -65,7 +66,7 @@ The NUC131 HAL layer satisfies the portability constraints of OpenCanbox Core: a
 * **Transmission:** Non-blocking byte transfer via `UART_WRITE(UART0, ...)` with FIFO empty polling.
 
 ### 4.3 GPIO Subsystem (`hal_gpio_nuc131.c`)
-* Digital outputs (`PA.8`, `PA.9`, `PA.12`, `PA.13`, `PA.14`) and input (`PA.0`) configured via `GPIO_SetMode()`.
+* Push-Pull digital outputs (`PA.8` ACC, `PA.9` ILL, `PA.12` BRAKE, `PA.13` REVERSE), Open-Drain output (`PC.3` CAN STBY), and input (`PA.0` IGN) configured via `GPIO_SetMode()`.
 * Direct atomic bit manipulation using `port->DOUT` and `port->PIN`.
 
 ### 4.4 System & Timing (`hal_system_nuc131.c`)

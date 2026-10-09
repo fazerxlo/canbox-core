@@ -38,6 +38,10 @@ void test_bagoo_ignore_preceding_noise(void);
 // Peugeot 407 SPEC_01 test declarations
 void test_peugeot_407_stalk_buttons_press_and_release(void);
 void test_peugeot_407_stalk_rotary_encoder(void);
+void test_peugeot_407_stalk_0x21f_buttons_and_rotary(void);
+void test_peugeot_407_stalk_tip_0x221_trip_button(void);
+void test_peugeot_407_console_0x3e5_buttons(void);
+void test_peugeot_407_console_0x3e5_edge_cases(void);
 void test_peugeot_407_verification_vector_1_vol_up(void);
 void test_peugeot_407_verification_vector_2_climate(void);
 void test_peugeot_407_hvac_defrost_and_recirc(void);
@@ -158,6 +162,10 @@ int main(void) {
     // Peugeot 407 SPEC_01 Unit Tests & Verification Vectors
     RUN_TEST(test_peugeot_407_stalk_buttons_press_and_release);
     RUN_TEST(test_peugeot_407_stalk_rotary_encoder);
+    RUN_TEST(test_peugeot_407_stalk_0x21f_buttons_and_rotary);
+    RUN_TEST(test_peugeot_407_stalk_tip_0x221_trip_button);
+    RUN_TEST(test_peugeot_407_console_0x3e5_buttons);
+    RUN_TEST(test_peugeot_407_console_0x3e5_edge_cases);
     RUN_TEST(test_peugeot_407_verification_vector_1_vol_up);
     RUN_TEST(test_peugeot_407_verification_vector_2_climate);
     RUN_TEST(test_peugeot_407_hvac_defrost_and_recirc);

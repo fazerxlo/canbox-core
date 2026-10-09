@@ -64,6 +64,10 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void);
 void test_integration_hiworld_radar_pipeline(void);
 void test_integration_hiworld_reverse_pipeline(void);
 void test_integration_hiworld_reverse_quiescent_no_blinking_or_trajectory(void);
+void test_integration_hiworld_native_stalk_0x21f_pipeline(void);
+void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void);
+void test_integration_hiworld_console_0x3e5_full_pipeline(void);
+void test_integration_hiworld_console_0x3e5_ok_pipeline(void);
 
 // 3. Bagoo Protocol Integration Tests (test_integration_bagoo.c)
 void test_integration_bagoo_steering_wheel_volume_up_pipeline(void);
@@ -72,6 +76,8 @@ void test_integration_bagoo_hu_uart_to_canbox_version_query(void);
 
 // 4. Real CAN Log Scenario Tests (test_scenario_*.c)
 void test_scenario_ignition_off_after_power_on(void);
+void test_scenario_ignition_silence_watchdog_forces_sleep_from_on(void);
+void test_scenario_ignition_economy_mode_forces_radio_off(void);
 void test_scenario_lights_off_side_light_on_headlights_on(void);
 
 int main(void) {
@@ -96,6 +102,10 @@ int main(void) {
     RUN_TEST(test_integration_hiworld_radar_pipeline);
     RUN_TEST(test_integration_hiworld_reverse_pipeline);
     RUN_TEST(test_integration_hiworld_reverse_quiescent_no_blinking_or_trajectory);
+    RUN_TEST(test_integration_hiworld_native_stalk_0x21f_pipeline);
+    RUN_TEST(test_integration_hiworld_stalk_tip_0x221_trip_pipeline);
+    RUN_TEST(test_integration_hiworld_console_0x3e5_full_pipeline);
+    RUN_TEST(test_integration_hiworld_console_0x3e5_ok_pipeline);
 
     // 3. Bagoo Protocol Integration Tests
     RUN_TEST(test_integration_bagoo_steering_wheel_volume_up_pipeline);
@@ -104,6 +114,8 @@ int main(void) {
 
     // 4. Real CAN Log Scenarios
     RUN_TEST(test_scenario_ignition_off_after_power_on);
+    RUN_TEST(test_scenario_ignition_silence_watchdog_forces_sleep_from_on);
+    RUN_TEST(test_scenario_ignition_economy_mode_forces_radio_off);
     RUN_TEST(test_scenario_lights_off_side_light_on_headlights_on);
 
     return UNITY_END();

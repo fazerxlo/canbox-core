@@ -64,6 +64,12 @@ void hu_protocol_send_wheel_key(const vehicle_wheel_t *wheel) {
     }
 }
 
+void hu_protocol_send_panel_key(const vehicle_panel_key_t *panel_key) {
+    if (s_active_driver && s_active_driver->send_panel_key) {
+        s_active_driver->send_panel_key(panel_key);
+    }
+}
+
 void hu_protocol_send_doors(const vehicle_doors_t *doors) {
     if (s_active_driver && s_active_driver->send_doors) {
         s_active_driver->send_doors(doors);

@@ -51,6 +51,8 @@ static void bagoo_send_wheel_key(const vehicle_wheel_t *wheel) {
         case WHEEL_KEY_MUTE:         key_code = 0x06; break;
         case WHEEL_KEY_PHONE_ACCEPT: key_code = 0x19; break;
         case WHEEL_KEY_PHONE_HANGUP: key_code = 0x15; break;
+        case WHEEL_KEY_SCROLL_UP:    key_code = 0x13; break;
+        case WHEEL_KEY_SCROLL_DOWN:  key_code = 0x14; break;
         default:                     key_code = 0x00; break;
     }
 
@@ -126,6 +128,7 @@ const hu_protocol_driver_t g_hu_protocol_bagoo = {
     .init = bagoo_init,
     .feed_byte = bagoo_feed_byte,
     .send_wheel_key = bagoo_send_wheel_key,
+    .send_panel_key = NULL,
     .send_doors = bagoo_send_doors,
     .send_climate = NULL,
     .send_telemetry = bagoo_send_telemetry,

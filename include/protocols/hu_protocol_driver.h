@@ -23,6 +23,7 @@ typedef struct {
     void           (*init)(void);
     void           (*feed_byte)(uint8_t byte);
     void           (*send_wheel_key)(const vehicle_wheel_t *wheel);
+    void           (*send_panel_key)(const vehicle_panel_key_t *panel_key);
     void           (*send_doors)(const vehicle_doors_t *doors);
     void           (*send_climate)(const vehicle_climate_t *climate);
     void           (*send_telemetry)(uint16_t speed, uint16_t rpm, int16_t angle);

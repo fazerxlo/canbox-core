@@ -21,7 +21,10 @@ typedef enum {
     WHEEL_KEY_VOICE,
     WHEEL_KEY_PHONE_ACCEPT,
     WHEEL_KEY_PHONE_HANGUP,
-    WHEEL_KEY_PHONE_REJECT = WHEEL_KEY_PHONE_HANGUP
+    WHEEL_KEY_PHONE_REJECT = WHEEL_KEY_PHONE_HANGUP,
+    WHEEL_KEY_SCROLL_UP,
+    WHEEL_KEY_SCROLL_DOWN,
+    WHEEL_KEY_TRIP
 } wheel_key_t;
 
 typedef wheel_key_t steering_key_t;
@@ -32,6 +35,13 @@ typedef struct {
 } vehicle_wheel_t;
 
 typedef vehicle_wheel_t wheel_state_t;
+
+typedef struct {
+    uint8_t key_code;    // Fascia / Console panel key code (0x00 when idle/released)
+    uint8_t press_state; // 0: Released, 1: Pressed
+} vehicle_panel_key_t;
+
+typedef vehicle_panel_key_t panel_key_state_t;
 
 typedef struct {
     bool door_driver;
@@ -68,6 +78,8 @@ typedef struct {
     bool high_beam;       // High beam / Main beam
     bool front_fog;       // Front fog lights
     bool rear_fog;        // Rear fog lights
+    bool illumination;    // Instrument cluster / interior night illumination active
+    uint8_t brightness;   // Cluster / Backlight brightness level (0..15)
 } vehicle_lights_t;
 
 typedef vehicle_lights_t lights_state_t;
@@ -153,6 +165,7 @@ typedef vehicle_alerts_t alerts_state_t;
 typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
+    vehicle_panel_key_t      panel_key;
     vehicle_climate_t        climate;
     vehicle_lights_t         lights;
     vehicle_tpms_t           tpms;
@@ -165,6 +178,7 @@ typedef struct {
     int16_t                  steering_angle_deg;
     bool                     reverse_gear;
     bool                     handbrake;
+    bool                     economy_mode;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);
@@ -181,6 +195,7 @@ void can_router_periodic_100ms(void);
 const vehicle_state_t *can_router_get_state(void);
 bool can_router_reset_trip(uint8_t trip_index);
 bool can_router_query_alert_journal(void);
+bool can_router_is_bus_sleeping(void);
 
 #ifdef __cplusplus
 }
