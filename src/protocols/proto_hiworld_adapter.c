@@ -6,6 +6,7 @@
 #include "core/can_router.h"
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
+#include "core/canbox_version.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -72,7 +73,7 @@ static void uart_tx_adapter(const uint8_t *buf, size_t len) {
 static void ensure_hiworld_initialized(void) {
     if (!s_hiworld_initialized) {
         proto_hiworld_init(on_hiworld_packet_received);
-        hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+        hiworld_conn_init(&s_hw_conn_ctx, canbox_get_version(), uart_tx_adapter, on_can_config_callback);
         s_hiworld_hb_tick = 0;
         s_hiworld_initialized = true;
     }
@@ -80,7 +81,7 @@ static void ensure_hiworld_initialized(void) {
 
 static void hiworld_init(void) {
     proto_hiworld_init(on_hiworld_packet_received);
-    hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+    hiworld_conn_init(&s_hw_conn_ctx, canbox_get_version(), uart_tx_adapter, on_can_config_callback);
     s_hiworld_hb_tick = 0;
     s_hiworld_initialized = true;
 }

@@ -3,7 +3,7 @@
 **Target Vehicle Platform:** Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps)  
 **Target Head Unit Protocol:** Hiworld PSA (`0x5A 0xA5` Framing, Additive Checksum, UART 38,400 baud, 8N1)  
 **Target Head Unit Application:** `com.qf.vehicle` (Peugeot Hiworld `wc` Driver / QF Canbus System)  
-**Reference Protocol Specifications:** `commands_and_payload_structure.md`, `doc/CANBOX_SPEC_HIWORLD_407_*.md`  
+**Reference Protocol Specifications:** `commands_and_payload_structure.md`, `doc/CANBOX_SPEC_HIWORLD_407_*.md`, `doc/FIRMWARE_BUILD_AND_FLASH_GUIDE.md`  
 **Firmware Core Project:** `canbox-core` (Pure C99 Embedded Automotive Firmware, Zero Heap)  
 **Last Updated:** October 2026  
 
@@ -90,7 +90,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 
 | Status | CMD | Name / Category | Wire LEN | Vehicle CAN ID | Core Files / Drivers | Test Verification & Notes |
 | :---: | :---: | :--- | :---: | :---: | :--- | :--- |
-| `[x]` | `0xF0` | **Version String Report** | Variable | N/A (Firmware) | `src/protocols/hiworld_connection.c` | `test_hiworld_verification_vector_2_version_report`<br>Reports build string e.g. `H1H2PA123A-240717` |
+| `[x]` | `0xF0` | **Version String Report** | Variable | N/A (Firmware) | `src/core/canbox_version.c`<br>`src/protocols/hiworld_connection.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_hiworld_verification_vector_2_version_report`<br>`test_canbox_embedded_firmware_version`<br>Dynamically embedded `CANBOX-CORE-V<YYYYMMDD.hhmmss>` generated at build time via `tools/generate_version.py` (buffer expanded to 64 bytes) |
 | `[x]` | `0x11` | **Steering Wheel Keys (SWC)** | `0x0A` (10) | `0x21F`<br>`0x221`<br>`0x0F6` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_stalk_0x21f_buttons_and_rotary`<br>`test_peugeot_407_stalk_tip_0x221_trip_button`<br>`test_integration_hiworld_native_stalk_0x21f_pipeline`<br>`test_integration_hiworld_stalk_tip_0x221_trip_pipeline`<br>`test_peugeot_407_stalk_buttons_press_and_release`<br>`test_peugeot_407_stalk_rotary_encoder`<br>`test_integration_hiworld_steering_wheel_volume_up_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md` |
 | `[x]` | `0x12` | **Doors & Apertures Status** | `0x0B` (11) | `0x220`<br>`0x036` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_doors_hiworld_vector_1_driver_front`<br>`test_integration_hiworld_door_status_pipeline`<br>10 payload bytes: FL, FR, RL, RR, trunk, bonnet, handbrake |
 | `[x]` | `0x13` | **Instantaneous Trip Telemetry** | `0x0B` (11) | `0x221` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_trip_hiworld_vector_1_instant_fuel`<br>`test_integration_hiworld_trip_pipeline`<br>Instant fuel ($0.1\text{ L/100km}$), DTE range, target distance |
@@ -302,9 +302,13 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 - **Protocol Heartbeat Ping (`0xFF`):**
   - Emitted at 1.0 Hz (1000 ms cadence / 10 periodic ticks) in `src/protocols/proto_hiworld_adapter.c` (`5A A5 01 FF 01 00`).
   - Rate throttled down from 10 Hz to prevent serial queue saturation.
+- **Embedded Firmware Version (`0xF0`):**
+  - Generated dynamically at build time via `tools/generate_version.py` into macro `CANBOX_BUILD_VERSION` as `CANBOX-CORE-V<YYYYMMDD.hhmmss>`.
+  - Stored in expanded 64-byte `ctx->fw_version` buffer in `hiworld_connection_ctx_t`.
+  - Sent upon handshake (`0x24`), explicit version query (`0x30`), and initial discovery beacon (`HIWORLD_LINK_WAIT_MODEL`). Displayed in Android Head Unit Factory / CAN settings.
 - **Lifecycle Recovery (Scenarios A, B, C, D):**
   - Full operational recovery documented in `doc/CANBOX_SPEC_HIWORLD_GENERIC_CONNECTION_PHASE.md`.
-- **Verification:** `test_hiworld_verification_vector_1_car_type_set`, `test_integration_hiworld_runtime_car_selection_and_handshake`, `test_integration_hiworld_telemetry_periodic_pipeline`.
+- **Verification:** `test_hiworld_verification_vector_1_car_type_set`, `test_hiworld_verification_vector_2_version_report`, `test_canbox_embedded_firmware_version`, `test_integration_hiworld_runtime_car_selection_and_handshake`, `test_integration_hiworld_telemetry_periodic_pipeline`.
 
 ---
 
