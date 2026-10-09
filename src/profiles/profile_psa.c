@@ -373,14 +373,49 @@ static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, veh
     }
 }
 
+static psa_isotp_rx_ctx_t s_rd4_isotp_ctx;
+
+static void psa_decode_etat_autoradio_0x165_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_decode_radio_power_0x165(frame, state);
+    psa_rd4_process_can_0x165(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_etat_tuner_0x225_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x225(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_info_tuner_0x265_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x265(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_nom_station_0x2a5_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x2a5(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_texte_radio_0x0a4_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x0a4(&state->media.radio, &s_rd4_isotp_ctx, frame->data, frame->dlc);
+}
+
+static void psa_decode_cd_changer_0x3a6_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc);
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
+    { PSA_CAN_ID_TEXTE_RADIO,        psa_decode_texte_radio_0x0a4_profile },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
     { 0x0F6,                         psa_decode_bsi_slow_0x0f6 },
     { PSA_CAN_ID_STALK_21F,          psa_decode_stalk_0x21f_profile },
     { PSA_CAN_ID_CONSOLE_3E5,        psa_decode_console_0x3e5_profile },
     { PSA_CAN_ID_ALERT_JOURNAL,      psa_decode_alert_journal_0x120_profile },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
+    { PSA_CAN_ID_ETAT_AUTORADIO,     psa_decode_etat_autoradio_0x165_profile },
     { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
     { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },
     { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
@@ -389,18 +424,22 @@ static const profile_can_rule_t s_psa_rules[] = {
     { 0x1E3,                         psa_decode_hvac_0x1e3_profile },
     { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
     { PSA_CAN_ID_TRIP_INSTANT,       psa_decode_trip_0x221_profile },
-    { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
+    { PSA_CAN_ID_ETAT_TUNER,         psa_decode_etat_tuner_0x225_profile },
+    { PSA_CAN_ID_INFO_TUNER,         psa_decode_info_tuner_0x265_profile },
     { PSA_CAN_ID_TRIP2_ODB,          psa_decode_trip2_0x261_profile },
+    { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
+    { PSA_CAN_ID_NOM_STATION,        psa_decode_nom_station_0x2a5_profile },
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
     { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
-    { 0x165,                         psa_decode_radio_power_0x165 },
+    { PSA_CAN_ID_CD_CHANGER,         psa_decode_cd_changer_0x3a6_profile },
 };
 
 static void psa_init(void) {
     psa_stalk_init(NULL);
     psa_console_init(NULL);
     psa_journal_iso_tp_init(&s_journal_ctx);
+    psa_rd4_media_init(NULL, &s_rd4_isotp_ctx);
 }
 
 static bool psa_reset_trip(uint8_t trip_index) {

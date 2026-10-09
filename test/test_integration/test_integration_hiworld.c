@@ -822,3 +822,141 @@ void test_integration_hiworld_console_0x3e5_ok_pipeline(void) {
     static const uint8_t w_ok[] = { 0x5A, 0xA5, 0x02, 0x21, 0x24, 0x01, 0x47 };
     check_3e5_pipeline(ok, w_ok);
 }
+
+void test_integration_hiworld_rd4_radio_tuner_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Source Tuner (0x165)
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xCC, 0x54, 0x10, 0x02 }
+    };
+    can_router_process_can(&frame_165);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 2. Tuner Frequency (0x225): FM1, Preset 1, RDS Lock, 102.50 MHz
+    can_frame_t frame_225 = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x20, 0x01, 0x90, 0x04, 0x1A }
+    };
+    can_router_process_can(&frame_225);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 3. Station Name (0x2A5): "RMF FM  "
+    can_frame_t frame_2a5 = {
+        .id = 0x2A5,
+        .dlc = 8,
+        .data = { 'R', 'M', 'F', ' ', 'F', 'M', ' ', ' ' }
+    };
+    can_router_process_can(&frame_2a5);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(19, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[4]); /* FM1 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[5]); /* 1025 & 0xFF (Little Endian for Hiworld) */
+    TEST_ASSERT_EQUAL_HEX8(0x04, rx_buf[6]); /* 1025 >> 8 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[9]);
+    TEST_ASSERT_EQUAL_STRING_LEN("RMF FM  ", (char *)&rx_buf[10], 8);
+}
+
+void test_integration_hiworld_rd4_radiotext_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // Inject ISO-TP multi-frame stream for "Queen - Bohemian Rhapsody" (29 bytes with 4-byte prefix)
+    const uint8_t can_ff[]  = { 0x10, 0x1D, 0x10, 0x00, 0x00, 0x00, 0x51, 0x75 };
+    const uint8_t can_cf1[] = { 0x21, 0x65, 0x65, 0x6E, 0x20, 0x2D, 0x20, 0x42 };
+    const uint8_t can_cf2[] = { 0x22, 0x6F, 0x68, 0x65, 0x6D, 0x69, 0x61, 0x6E };
+    const uint8_t can_cf3[] = { 0x23, 0x20, 0x52, 0x68, 0x61, 0x70, 0x73, 0x6F };
+    const uint8_t can_cf4[] = { 0x24, 0x64, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+    can_frame_t frame = { .id = 0x0A4, .dlc = 8 };
+
+    memcpy(frame.data, can_ff, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf1, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf2, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf3, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf4, 8);
+    can_router_process_can(&frame);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(30, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(25, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x86, rx_buf[3]);
+    TEST_ASSERT_EQUAL_STRING_LEN("Queen - Bohemian Rhapsody", (char *)&rx_buf[4], 25);
+}
+
+void test_integration_hiworld_rd4_cd_changer_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // CAN 0x3A6: Disc 2, Track 14, Total 20, 03:45, Random
+    can_frame_t frame = {
+        .id = 0x3A6,
+        .dlc = 8,
+        .data = { 0x00, 0x02, 0x0E, 0x14, 0x03, 0x2D, 0x01, 0x00 }
+    };
+    can_router_process_can(&frame);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(16, rx_len);
+
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x02, 0x02, 0x00, 0x00, 0x0E, 0x03, 0x2D, 0x01, 0x01, 0x00, 0x14, 0xF9
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, 16);
+}
+
+void test_integration_hiworld_rd4_downlink_resume_queries(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Send Tuner Resume Query: forwardType(0x0F) -> 5A A5 00 0F 0E
+    const uint8_t q_tuner[] = { 0x5A, 0xA5, 0x00, 0x0F, 0x0E };
+    for (size_t i = 0; i < sizeof(q_tuner); i++) {
+        can_router_process_uart_byte(q_tuner[i]);
+    }
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= 19);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+
+    // 2. Send Media Resume Query: forwardType(0x11) -> 5A A5 00 11 10
+    const uint8_t q_media[] = { 0x5A, 0xA5, 0x00, 0x11, 0x10 };
+    for (size_t i = 0; i < sizeof(q_media); i++) {
+        can_router_process_uart_byte(q_media[i]);
+    }
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(16, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[3]);
+}

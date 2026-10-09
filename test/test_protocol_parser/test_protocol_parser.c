@@ -73,6 +73,11 @@ void test_peugeot_407_hiworld_doors_boundary_checks(void);
 void test_peugeot_407_steering_wheel_angle(void);
 void test_peugeot_407_jbl_amplifier(void);
 void test_peugeot_407_cd_changer_and_rds(void);
+void test_peugeot_407_rd4_vector_1_fm_tuner(void);
+void test_peugeot_407_rd4_vector_2_isotp_radiotext(void);
+void test_peugeot_407_rd4_vector_3_cd_changer(void);
+void test_peugeot_407_rd4_source_and_wavebands(void);
+void test_peugeot_407_rd4_frequency_and_ta_stability(void);
 
 // Peugeot 407 SPEC_02 test declarations
 void test_psa_extended_tpms_numeric(void);
@@ -199,6 +204,11 @@ int main(void) {
     RUN_TEST(test_peugeot_407_steering_wheel_angle);
     RUN_TEST(test_peugeot_407_jbl_amplifier);
     RUN_TEST(test_peugeot_407_cd_changer_and_rds);
+    RUN_TEST(test_peugeot_407_rd4_vector_1_fm_tuner);
+    RUN_TEST(test_peugeot_407_rd4_vector_2_isotp_radiotext);
+    RUN_TEST(test_peugeot_407_rd4_vector_3_cd_changer);
+    RUN_TEST(test_peugeot_407_rd4_source_and_wavebands);
+    RUN_TEST(test_peugeot_407_rd4_frequency_and_ta_stability);
 
     // Peugeot 407 SPEC_02 Extended Unit Tests & Verification Vectors
     RUN_TEST(test_psa_extended_tpms_numeric);

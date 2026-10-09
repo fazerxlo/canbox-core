@@ -162,6 +162,44 @@ typedef struct {
 
 typedef vehicle_alerts_t alerts_state_t;
 
+#define PSA_RD4_MAX_RADIO_TEXT_LEN 64
+
+typedef struct {
+    uint8_t  source_mode;       /* Hiworld source code */
+    uint8_t  band;              /* 0x00=FM1, 0x01=FM2, 0x04=FMAST, 0x10=AM */
+    uint16_t freq_0_1mhz;       /* Frequency in 0.1 MHz units (FM) or kHz (AM) */
+    uint8_t  preset_slot;       /* 0=manual, 1..6 */
+    uint8_t  indicators;        /* TA, ST, RDS, SCAN, REG, RDTEXT, AUTO.P */
+    uint8_t  power_status;      /* 0=off, 1=playing, 2=seeking, 3=mute */
+    char     station_name[9];   /* 8 ASCII chars + null terminator */
+    char     radio_text[PSA_RD4_MAX_RADIO_TEXT_LEN + 1];
+    uint8_t  radio_text_len;
+    bool     radio_text_updated;
+    bool     updated;
+} vehicle_radio_t;
+
+typedef struct {
+    uint8_t  active_disc;       /* 1..6 */
+    uint8_t  discs_loaded_mask; /* Bit 0..5 */
+    uint8_t  disc_format;       /* 0=CDDA, 1=MP3 */
+    uint16_t track_num;         /* 1..999 */
+    uint16_t total_tracks;      /* 1..999 */
+    uint8_t  elapsed_min;       /* 0..59 */
+    uint8_t  elapsed_sec;       /* 0..59 */
+    uint8_t  play_modes;        /* Bit 0: RND, Bit 1: SCAN, Bit 2: RPT */
+    uint8_t  play_status;       /* 0=stop, 1=play, 2=pause */
+    bool     updated;
+} vehicle_cdc_t;
+
+typedef struct {
+    vehicle_radio_t radio;
+    vehicle_cdc_t   cdc;
+} vehicle_media_t;
+
+typedef vehicle_radio_t psa_rd4_radio_state_t;
+typedef vehicle_cdc_t   psa_rd4_cdc_state_t;
+typedef vehicle_media_t psa_rd4_media_state_t;
+
 typedef struct {
     vehicle_doors_t          doors;
     vehicle_wheel_t          wheel;
@@ -172,6 +210,7 @@ typedef struct {
     vehicle_trip_t           trip;
     vehicle_radar_t          radar;
     vehicle_alerts_t         alerts;
+    vehicle_media_t          media;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;

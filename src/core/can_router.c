@@ -53,6 +53,12 @@ void can_router_init(void) {
     memset(s_prev_alert_items, 0, sizeof(s_prev_alert_items));
     s_can_inactivity_ticks = 0;
     s_can_bus_sleeping = false;
+    s_current_state.media.radio.source_mode = 0xFF;
+    memset(s_current_state.media.radio.station_name, ' ', 8);
+    s_current_state.media.radio.station_name[8] = '\0';
+    s_last_sent_state.media.radio.source_mode = 0xFF;
+    memset(s_last_sent_state.media.radio.station_name, ' ', 8);
+    s_last_sent_state.media.radio.station_name[8] = '\0';
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
     hal_gpio_write(GPIO_PIN_ILL_OUT, false);
     hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false);
@@ -298,6 +304,32 @@ void can_router_process_can(const can_frame_t *frame) {
 
         s_last_sent_state.alerts = s_current_state.alerts;
     }
+
+    // Immediately push radio tuner & source updates on change
+    if (s_current_state.media.radio.updated) {
+        s_current_state.media.radio.updated = false;
+        if (memcmp(&s_current_state.media.radio, &s_last_sent_state.media.radio, sizeof(vehicle_radio_t)) != 0) {
+            hu_protocol_send_radio_state(&s_current_state.media.radio);
+            s_last_sent_state.media.radio = s_current_state.media.radio;
+        }
+    }
+
+    // Immediately push dynamic RDS RadioText on change
+    if (s_current_state.media.radio.radio_text_updated) {
+        s_current_state.media.radio.radio_text_updated = false;
+        hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+        s_last_sent_state.media.radio.radio_text_len = s_current_state.media.radio.radio_text_len;
+        memcpy(s_last_sent_state.media.radio.radio_text, s_current_state.media.radio.radio_text, sizeof(s_last_sent_state.media.radio.radio_text));
+    }
+
+    // Immediately push CD Changer (CDC) updates on change
+    if (s_current_state.media.cdc.updated) {
+        s_current_state.media.cdc.updated = false;
+        if (memcmp(&s_current_state.media.cdc, &s_last_sent_state.media.cdc, sizeof(vehicle_cdc_t)) != 0) {
+            hu_protocol_send_media_state(&s_current_state.media.cdc);
+            s_last_sent_state.media.cdc = s_current_state.media.cdc;
+        }
+    }
 }
 
 void can_router_process_uart_byte(uint8_t byte) {
@@ -370,6 +402,21 @@ void can_router_periodic_100ms(void) {
         if (s_bsi_alert_query_timeout_ticks == 0) {
             s_bsi_alert_query_pending = false;
             hu_protocol_send_alerts_summary(s_current_state.alerts.active_items, s_current_state.alerts.active_count);
+        }
+    }
+
+    // Periodic slow resync for Radio & Media states (60 seconds / 600 ticks)
+    static uint16_t s_media_resync_timer = 0;
+    if (++s_media_resync_timer >= 600) {
+        s_media_resync_timer = 0;
+        if (s_current_state.media.radio.power_status != 0) {
+            hu_protocol_send_radio_state(&s_current_state.media.radio);
+            if (s_current_state.media.radio.radio_text_len > 0) {
+                hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+            }
+        }
+        if (s_current_state.media.cdc.active_disc != 0) {
+            hu_protocol_send_media_state(&s_current_state.media.cdc);
         }
     }
 

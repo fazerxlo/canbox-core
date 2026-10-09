@@ -28,6 +28,10 @@ extern "C" {
 #define HIWORLD_CMD_WARNING_INFO      0x42
 #define HIWORLD_CMD_EXTENDED_ALERT    0xEA
 #define HIWORLD_CMD_TPMS_NUMERIC      0x66
+#define HIWORLD_CMD_SOUND_EFFECT      0x82
+#define HIWORLD_CMD_CAR_RADIO_STATE   0x84
+#define HIWORLD_CMD_RADIO_TEXT        0x86
+#define HIWORLD_CMD_CAR_MEDIA_STATE   0x97
 #define HIWORLD_CMD_HEARTBEAT         0xFF
 
 /* Alert transmission compilation parameters:

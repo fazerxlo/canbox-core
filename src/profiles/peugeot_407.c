@@ -1234,6 +1234,318 @@ size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len) {
     return 12;
 }
 
+void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp) {
+    if (media) {
+        memset(media, 0, sizeof(*media));
+        media->radio.source_mode = 0xFF; /* Standby / Off */
+        memset(media->radio.station_name, ' ', 8);
+        media->radio.station_name[8] = '\0';
+    }
+    if (isotp) {
+        memset(isotp, 0, sizeof(*isotp));
+    }
+}
+
+void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !data || dlc < 3) return;
+
+    uint8_t src = (data[2] >> 4) & 0x0F;
+    switch (src) {
+        case 0x1: /* Tuner */
+            radio->source_mode = radio->band;
+            radio->power_status = 0x01;
+            break;
+        case 0x2: /* Internal CD */
+            radio->source_mode = 0x30;
+            radio->power_status = 0x01;
+            break;
+        case 0x3: /* CDC */
+            radio->source_mode = 0x31;
+            radio->power_status = 0x01;
+            break;
+        case 0x4: /* AUX 1 */
+            radio->source_mode = 0x20;
+            radio->power_status = 0x01;
+            break;
+        case 0x5: /* AUX 2 */
+            radio->source_mode = 0x21;
+            radio->power_status = 0x01;
+            break;
+        default:
+            radio->source_mode = 0xFF;
+            radio->power_status = 0x00;
+            break;
+    }
+    radio->updated = true;
+}
+
+void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !data || dlc < 5) return;
+
+    /* Indicator flags: preserve TA (bit 7) if already set by 0x265 or set by 0x225 bit 2 */
+    uint8_t ta_flag = (radio->indicators & 0x80);
+    if (data[0] & 0x04) ta_flag = 0x80; /* TA from 0x225 */
+
+    radio->indicators = ta_flag;
+    if (data[0] & 0x20) radio->indicators |= 0x20; /* RDS */
+    if (data[0] & 0x40) radio->indicators |= 0x10; /* SCAN */
+    if (radio->radio_text_len > 0) radio->indicators |= 0x04; /* RDTEXT */
+
+    /* Seeking / Tuning status */
+    if (data[0] & 0x08) {
+        radio->power_status = 0x02; /* Seeking */
+    } else if (radio->power_status == 0x02) {
+        radio->power_status = 0x01; /* Restored to playing */
+    }
+
+    /* Preset memory: 0=manual, 1..6 */
+    radio->preset_slot = (data[1] >= 0x10) ? ((data[1] >> 4) & 0x0F) : (data[1] & 0x0F);
+
+    /* Band conversion */
+    uint8_t raw_band = data[2];
+    if (raw_band == 0x10 || raw_band == 0x90)      radio->band = 0x00; /* FM1 */
+    else if (raw_band == 0x20 || raw_band == 0xA0) radio->band = 0x01; /* FM2 */
+    else if (raw_band == 0x40 || raw_band == 0xC0) radio->band = 0x04; /* FM-AST */
+    else if (raw_band == 0x50 || raw_band == 0xD0) radio->band = 0x10; /* AM */
+
+    /* Frequency conversion: Raw to 0.1 MHz */
+    uint16_t raw_freq = ((uint16_t)data[3] << 8) | data[4];
+    if (radio->band < 0x10) {
+        /* FM: Freq * 10 = (raw / 2) + 500 */
+        radio->freq_0_1mhz = (raw_freq / 2) + 500;
+    } else {
+        /* AM: kHz direct */
+        radio->freq_0_1mhz = raw_freq;
+    }
+
+    if (radio->source_mode < 0x20) {
+        radio->source_mode = radio->band;
+    }
+    radio->updated = true;
+}
+
+void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !data || dlc < 1) return;
+    if (data[0] & 0x20) {
+        if (!(radio->indicators & 0x80)) {
+            radio->indicators |= 0x80;
+            radio->updated = true;
+        }
+    } else {
+        if (radio->indicators & 0x80) {
+            radio->indicators &= ~0x80;
+            radio->updated = true;
+        }
+    }
+}
+
+void psa_rd4_process_can_0x2a5(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !data || dlc < 8) return;
+    memcpy(radio->station_name, data, 8);
+    radio->station_name[8] = '\0';
+    radio->updated = true;
+}
+
+void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !isotp || !data || dlc < 2) return;
+
+    uint8_t pci = data[0] & 0xF0;
+
+    /* Single Frame (0x0N) */
+    if (pci == 0x00) {
+        uint8_t len = data[0] & 0x0F;
+        if (len > 0 && len <= (dlc - 1)) {
+            const uint8_t *payload = &data[1];
+            /* Strip 4-byte prefix 10 00 00 00 if present */
+            if (len > 4 && payload[0] == 0x10 && payload[1] == 0x00 && payload[2] == 0x00 && payload[3] == 0x00) {
+                payload += 4;
+                len -= 4;
+            }
+            if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
+            memcpy(radio->radio_text, payload, len);
+            radio->radio_text[len] = '\0';
+            radio->radio_text_len = len;
+            radio->radio_text_updated = true;
+            radio->indicators |= 0x04; /* RDTEXT */
+        }
+        isotp->active = false;
+        return;
+    }
+
+    /* First Frame (0x1N) */
+    if (pci == 0x10) {
+        uint16_t total_len = (((uint16_t)(data[0] & 0x0F)) << 8) | data[1];
+        if (total_len > sizeof(isotp->buffer)) total_len = sizeof(isotp->buffer);
+
+        uint8_t chunk_len = (dlc > 2) ? (uint8_t)(dlc - 2) : 0;
+        if (chunk_len > 0) {
+            memcpy(isotp->buffer, &data[2], chunk_len);
+        }
+        isotp->total_length    = total_len;
+        isotp->received_length = chunk_len;
+        isotp->next_sn         = 1;
+        isotp->active          = true;
+        return;
+    }
+
+    /* Consecutive Frame (0x2N) */
+    if (pci == 0x20 && isotp->active) {
+        uint8_t sn = data[0] & 0x0F;
+        if (sn == (isotp->next_sn & 0x0F)) {
+            uint8_t chunk_len = (dlc > 1) ? (uint8_t)(dlc - 1) : 0;
+            if (isotp->received_length + chunk_len > isotp->total_length) {
+                chunk_len = (uint8_t)(isotp->total_length - isotp->received_length);
+            }
+            if (chunk_len > 0) {
+                memcpy(&isotp->buffer[isotp->received_length], &data[1], chunk_len);
+                isotp->received_length += chunk_len;
+            }
+            isotp->next_sn = (isotp->next_sn + 1) & 0x0F;
+
+            /* Completed reassembly */
+            if (isotp->received_length >= isotp->total_length) {
+                const uint8_t *payload = isotp->buffer;
+                uint16_t len = isotp->total_length;
+
+                /* Strip 4-byte prefix 10 00 00 00 if present */
+                if (len > 4 && payload[0] == 0x10 && payload[1] == 0x00 && payload[2] == 0x00 && payload[3] == 0x00) {
+                    payload += 4;
+                    len -= 4;
+                }
+                if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
+
+                memcpy(radio->radio_text, payload, len);
+                radio->radio_text[len] = '\0';
+                radio->radio_text_len = (uint8_t)len;
+                radio->radio_text_updated = true;
+                radio->indicators |= 0x04; /* RDTEXT */
+                isotp->active = false;
+            }
+        } else {
+            /* Sequence error */
+            isotp->active = false;
+        }
+    }
+}
+
+void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 7) return;
+
+    cdc->active_disc       = data[1];
+    cdc->track_num         = data[2];
+    cdc->total_tracks      = data[3];
+    cdc->elapsed_min       = data[4];
+    cdc->elapsed_sec       = data[5];
+    cdc->play_modes        = data[6];
+
+    /* Disc slot bitmask */
+    if (cdc->active_disc >= 1 && cdc->active_disc <= 6) {
+        cdc->discs_loaded_mask |= (uint8_t)(1 << (cdc->active_disc - 1));
+        cdc->play_status = 0x01; /* Play */
+    } else {
+        cdc->play_status = 0x00; /* Stop */
+    }
+    cdc->disc_format = 0x00;
+    cdc->updated = true;
+}
+
+size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out) {
+    if (!radio || !out_buf || max_out < 19) return 0;
+
+    uint8_t len = 14;
+    out_buf[0] = 0x5A;
+    out_buf[1] = 0xA5;
+    out_buf[2] = len;
+    out_buf[3] = 0x84; /* HIWORLD_CMD_CAR_RADIO_STATE */
+
+    /* If in external source, send source code; otherwise send radio band */
+    if (radio->source_mode >= 0x20) {
+        out_buf[4] = radio->source_mode;
+    } else {
+        out_buf[4] = radio->band;
+    }
+
+    /* Frequency uint16_le: Head Unit decodes as Little Endian */
+    if (radio->source_mode < 0x20 && radio->power_status != 0) {
+        out_buf[5] = (uint8_t)(radio->freq_0_1mhz & 0xFF);
+        out_buf[6] = (uint8_t)((radio->freq_0_1mhz >> 8) & 0xFF);
+    } else {
+        out_buf[5] = 0x00;
+        out_buf[6] = 0x00;
+    }
+
+    out_buf[7] = radio->preset_slot;
+    out_buf[8] = radio->indicators;
+    out_buf[9] = radio->power_status;
+
+    /* 8-Byte ASCII Station Name (space padded) */
+    for (size_t i = 0; i < 8; i++) {
+        out_buf[10 + i] = (radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
+    }
+
+    /* Checksum: ((LEN + CMD + sum(DATA)) - 1) & 0xFF */
+    uint16_t sum = len + 0x84;
+    for (size_t i = 4; i < (size_t)(4 + len); i++) {
+        sum += out_buf[i];
+    }
+    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 5 + len;
+}
+
+size_t build_hiworld_radio_text(const char *text, uint8_t text_len, uint8_t *out_buf, size_t max_out) {
+    if (!text || text_len == 0 || !out_buf) return 0;
+
+    uint8_t len = text_len;
+    if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
+    if (max_out < (size_t)(5 + len)) return 0;
+
+    out_buf[0] = 0x5A;
+    out_buf[1] = 0xA5;
+    out_buf[2] = len;
+    out_buf[3] = 0x86; /* HIWORLD_CMD_RADIO_TEXT */
+
+    memcpy(&out_buf[4], text, len);
+
+    uint16_t sum = len + 0x86;
+    for (size_t i = 0; i < len; i++) {
+        sum += (uint8_t)text[i];
+    }
+    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 5 + len;
+}
+
+size_t build_hiworld_media_state(const vehicle_cdc_t *cdc, uint8_t *out_buf, size_t max_out) {
+    if (!cdc || !out_buf || max_out < 16) return 0;
+
+    uint8_t len = 0x0B; /* 11 payload bytes */
+    out_buf[0] = 0x5A;
+    out_buf[1] = 0xA5;
+    out_buf[2] = len;
+    out_buf[3] = 0x97; /* HIWORLD_CMD_CAR_MEDIA_STATE */
+
+    out_buf[4]  = cdc->active_disc;
+    out_buf[5]  = cdc->discs_loaded_mask;
+    out_buf[6]  = cdc->disc_format;
+    out_buf[7]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
+    out_buf[8]  = (uint8_t)(cdc->track_num & 0xFF);
+    out_buf[9]  = cdc->elapsed_min;
+    out_buf[10] = cdc->elapsed_sec;
+    out_buf[11] = cdc->play_modes;
+    out_buf[12] = cdc->play_status;
+    out_buf[13] = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
+    out_buf[14] = (uint8_t)(cdc->total_tracks & 0xFF);
+
+    uint16_t sum = len + 0x97;
+    for (size_t i = 4; i <= 14; i++) {
+        sum += out_buf[i];
+    }
+    out_buf[15] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 16;
+}
+
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */

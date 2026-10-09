@@ -13,6 +13,7 @@ extern "C" {
 /* PSA CAN Identifiers (Comfort CAN @ 125 kbps) */
 #define PSA_CAN_ID_REVERSE_IGNITION 0x036
 #define PSA_CAN_ID_FAST_DYNAMIC     0x0B6
+#define PSA_CAN_ID_TEXTE_RADIO      0x0A4
 #define PSA_CAN_ID_RADAR_0E1        0x0E1
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
 #define PSA_CAN_ID_BSI_SLOW_DATA    0x0F6
@@ -21,22 +22,28 @@ extern "C" {
 #define PSA_CAN_ID_ALERT_QUERY      0x39B
 #define PSA_CAN_ID_BSI_GAUGES       0x161
 #define PSA_CAN_ID_FUEL_RANGE_TEMP  0x165
+#define PSA_CAN_ID_ETAT_AUTORADIO   0x165
 #define PSA_CAN_ID_CONSOLE_3E5      0x3E5
 #define PSA_CAN_ID_ALERTS_INDICATORS 0x168
 #define PSA_CAN_ID_JBL_AMPLIFIER    0x1A0
 #define PSA_CAN_ID_ALERT_MESSAGE    0x1A1
 #define PSA_CAN_ID_TRIP1            0x1A5
+#define PSA_CAN_ID_VOLUME_RADIO     0x1A5
 #define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
+#define PSA_CAN_ID_REGLAGES_SON     0x1E5
 #define PSA_CAN_ID_STALK_21F        0x21F
 #define PSA_CAN_ID_DOORS_BODY_220   0x220
 #define PSA_CAN_ID_DOORS_BODY       0x220
 #define PSA_CAN_ID_TRIP_INSTANT     0x221
+#define PSA_CAN_ID_ETAT_TUNER       0x225
 #define PSA_CAN_ID_REAR_RADAR_AAS   0x260
 #define PSA_CAN_ID_TRIP2_ODB        0x261
+#define PSA_CAN_ID_INFO_TUNER       0x265
 #define PSA_CAN_ID_FRONT_RADAR_AAS  0x270
 #define PSA_CAN_ID_TRIP1_ODB        0x2A1
 #define PSA_CAN_ID_TRIP2            0x2A5
+#define PSA_CAN_ID_NOM_STATION      0x2A5
 #define PSA_CAN_ID_TPMS_STATUS_1E1  0x1E1
 #define PSA_CAN_ID_TPMS_DIRECT_361  0x361
 #define PSA_CAN_ID_TPMS_PRESSURES_3A1 0x3A1
@@ -363,6 +370,27 @@ size_t build_raise_cd_changer(const cd_changer_state_t *st, uint8_t *out, size_t
 
 void psa_decode_rds_name_0x396(const uint8_t *data, uint8_t dlc, char out_name[9]);
 size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len);
+
+/* Static ISO-TP Multi-frame Reassembler */
+typedef struct {
+    uint8_t  buffer[PSA_RD4_MAX_RADIO_TEXT_LEN + 8];
+    uint16_t total_length;
+    uint16_t received_length;
+    uint8_t  next_sn;
+    bool     active;
+} psa_isotp_rx_ctx_t;
+
+void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp);
+void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x2a5(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
+
+size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out);
+size_t build_hiworld_radio_text(const char *text, uint8_t text_len, uint8_t *out_buf, size_t max_out);
+size_t build_hiworld_media_state(const vehicle_cdc_t *cdc, uint8_t *out_buf, size_t max_out);
 
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification

@@ -1174,6 +1174,220 @@ void test_peugeot_407_cd_changer_and_rds(void) {
     TEST_ASSERT_EQUAL_UINT32(12, len_rds);
 }
 
+void test_peugeot_407_rd4_vector_1_fm_tuner(void) {
+    vehicle_media_t media;
+    psa_isotp_rx_ctx_t isotp;
+    psa_rd4_media_init(&media, &isotp);
+
+    // 1. Source: Tuner (0x165)
+    const uint8_t can_165[] = { 0xCC, 0x54, 0x10, 0x02 };
+    psa_rd4_process_can_0x165(&media.radio, can_165, sizeof(can_165));
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.radio.power_status);
+
+    // 2. Tuner Status (0x225): FM1, Preset 1, RDS Lock, 102.50 MHz (raw 1050 = 0x041A)
+    const uint8_t can_225[] = { 0x20, 0x01, 0x90, 0x04, 0x1A };
+    psa_rd4_process_can_0x225(&media.radio, can_225, sizeof(can_225));
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.radio.band);
+    TEST_ASSERT_EQUAL_UINT16(1025, media.radio.freq_0_1mhz);
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.preset_slot);
+    TEST_ASSERT_EQUAL_UINT8(0x20, media.radio.indicators);
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.radio.power_status);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.radio.source_mode);
+
+    // 3. Station Name (0x2A5): "RMF FM  "
+    const uint8_t can_2a5[] = { 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D, 0x20, 0x20 };
+    psa_rd4_process_can_0x2a5(&media.radio, can_2a5, sizeof(can_2a5));
+    TEST_ASSERT_EQUAL_STRING("RMF FM  ", media.radio.station_name);
+
+    // 4. Hiworld Output (Cmd 0x84): 19 wire bytes
+    uint8_t out[32];
+    size_t out_len = build_hiworld_radio_state(&media.radio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(19, out_len);
+
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[4]); /* FM1 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[5]); /* 1025 & 0xFF (Little Endian for Hiworld) */
+    TEST_ASSERT_EQUAL_HEX8(0x04, out[6]); /* 1025 >> 8 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[7]); /* Preset 1 */
+    TEST_ASSERT_EQUAL_HEX8(0x20, out[8]); /* RDS indicator */
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[9]); /* Playing */
+    TEST_ASSERT_EQUAL_STRING_LEN("RMF FM  ", (char *)&out[10], 8);
+
+    /* Verify checksum matches ((0x0E + 0x84 + sum(payload) - 1) & 0xFF) */
+    uint16_t sum = out[2] + out[3];
+    for (size_t i = 0; i < 14; i++) {
+        sum += out[4 + i];
+    }
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)((sum - 1) & 0xFF), out[18]);
+}
+
+void test_peugeot_407_rd4_vector_2_isotp_radiotext(void) {
+    vehicle_media_t media;
+    psa_isotp_rx_ctx_t isotp;
+    psa_rd4_media_init(&media, &isotp);
+
+    // Dynamic RDS RadioText: "Queen - Bohemian Rhapsody" (25 chars) with prefix 10 00 00 00 (Total 29 chars = 0x01D)
+    const uint8_t ff[]  = { 0x10, 0x1D, 0x10, 0x00, 0x00, 0x00, 0x51, 0x75 };
+    const uint8_t cf1[] = { 0x21, 0x65, 0x65, 0x6E, 0x20, 0x2D, 0x20, 0x42 };
+    const uint8_t cf2[] = { 0x22, 0x6F, 0x68, 0x65, 0x6D, 0x69, 0x61, 0x6E };
+    const uint8_t cf3[] = { 0x23, 0x20, 0x52, 0x68, 0x61, 0x70, 0x73, 0x6F };
+    const uint8_t cf4[] = { 0x24, 0x64, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+    psa_rd4_process_can_0x0a4(&media.radio, &isotp, ff, sizeof(ff));
+    TEST_ASSERT_TRUE(isotp.active);
+    TEST_ASSERT_FALSE(media.radio.radio_text_updated);
+
+    psa_rd4_process_can_0x0a4(&media.radio, &isotp, cf1, sizeof(cf1));
+    TEST_ASSERT_TRUE(isotp.active);
+    psa_rd4_process_can_0x0a4(&media.radio, &isotp, cf2, sizeof(cf2));
+    TEST_ASSERT_TRUE(isotp.active);
+    psa_rd4_process_can_0x0a4(&media.radio, &isotp, cf3, sizeof(cf3));
+    TEST_ASSERT_TRUE(isotp.active);
+
+    psa_rd4_process_can_0x0a4(&media.radio, &isotp, cf4, sizeof(cf4));
+    TEST_ASSERT_FALSE(isotp.active);
+    TEST_ASSERT_TRUE(media.radio.radio_text_updated);
+    TEST_ASSERT_EQUAL_UINT8(25, media.radio.radio_text_len);
+    TEST_ASSERT_EQUAL_STRING("Queen - Bohemian Rhapsody", media.radio.radio_text);
+    TEST_ASSERT_EQUAL_UINT8(0x04, media.radio.indicators & 0x04); /* RDTEXT bit */
+
+    // Hiworld Output (Cmd 0x86): 5 + 25 = 30 wire bytes
+    uint8_t out[64];
+    size_t out_len = build_hiworld_radio_text(media.radio.radio_text, media.radio.radio_text_len, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(30, out_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(25, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x86, out[3]);
+    TEST_ASSERT_EQUAL_STRING_LEN("Queen - Bohemian Rhapsody", (char *)&out[4], 25);
+
+    uint16_t sum = out[2] + out[3];
+    for (size_t i = 0; i < 25; i++) {
+        sum += out[4 + i];
+    }
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)((sum - 1) & 0xFF), out[29]);
+}
+
+void test_peugeot_407_rd4_vector_3_cd_changer(void) {
+    vehicle_media_t media;
+    psa_rd4_media_init(&media, NULL);
+
+    // CAN 0x3A6: Disc 2, Track 14, Total 20, Min 3, Sec 45, Play Flags 0x01 (Random)
+    const uint8_t can_3a6[] = { 0x00, 0x02, 0x0E, 0x14, 0x03, 0x2D, 0x01, 0x00 };
+    psa_rd4_process_can_0x3a6(&media.cdc, can_3a6, sizeof(can_3a6));
+
+    TEST_ASSERT_EQUAL_UINT8(2, media.cdc.active_disc);
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.cdc.discs_loaded_mask);
+    TEST_ASSERT_EQUAL_UINT16(14, media.cdc.track_num);
+    TEST_ASSERT_EQUAL_UINT16(20, media.cdc.total_tracks);
+    TEST_ASSERT_EQUAL_UINT8(3, media.cdc.elapsed_min);
+    TEST_ASSERT_EQUAL_UINT8(45, media.cdc.elapsed_sec);
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.cdc.play_modes);
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.cdc.play_status);
+
+    // Hiworld Output (Cmd 0x97): 16 wire bytes
+    uint8_t out[32];
+    size_t out_len = build_hiworld_media_state(&media.cdc, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(16, out_len);
+
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x02, 0x02, 0x00, 0x00, 0x0E, 0x03, 0x2D, 0x01, 0x01, 0x00, 0x14, 0xF9
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 16);
+}
+
+void test_peugeot_407_rd4_source_and_wavebands(void) {
+    vehicle_media_t media;
+    psa_isotp_rx_ctx_t isotp;
+    psa_rd4_media_init(&media, &isotp);
+
+    // 1. CD Internal Drive Source
+    const uint8_t can_cd[] = { 0xCC, 0x54, 0x20, 0x02 };
+    psa_rd4_process_can_0x165(&media.radio, can_cd, sizeof(can_cd));
+    TEST_ASSERT_EQUAL_UINT8(0x30, media.radio.source_mode);
+
+    // 2. AUX 1 Source
+    const uint8_t can_aux1[] = { 0xCC, 0x54, 0x40, 0x02 };
+    psa_rd4_process_can_0x165(&media.radio, can_aux1, sizeof(can_aux1));
+    TEST_ASSERT_EQUAL_UINT8(0x20, media.radio.source_mode);
+
+    // 3. AUX 2 Source
+    const uint8_t can_aux2[] = { 0xCC, 0x54, 0x50, 0x02 };
+    psa_rd4_process_can_0x165(&media.radio, can_aux2, sizeof(can_aux2));
+    TEST_ASSERT_EQUAL_UINT8(0x21, media.radio.source_mode);
+
+    // 4. CDC Source
+    const uint8_t can_cdc[] = { 0xCC, 0x54, 0x30, 0x02 };
+    psa_rd4_process_can_0x165(&media.radio, can_cdc, sizeof(can_cdc));
+    TEST_ASSERT_EQUAL_UINT8(0x31, media.radio.source_mode);
+
+    // 5. AM Tuner: 1440 kHz, Band 0x50
+    const uint8_t can_am[] = { 0x00, 0x02, 0x50, 0x05, 0xA0 };
+    psa_rd4_process_can_0x225(&media.radio, can_am, sizeof(can_am));
+    TEST_ASSERT_EQUAL_UINT8(0x10, media.radio.band);
+    TEST_ASSERT_EQUAL_UINT16(1440, media.radio.freq_0_1mhz);
+    TEST_ASSERT_EQUAL_UINT8(2, media.radio.preset_slot);
+
+    // 6. Seeking flag on 0x225 (Byte 0 Bit 3 = 0x08)
+    const uint8_t can_seek[] = { 0x08, 0x00, 0x10, 0x03, 0x98 };
+    psa_rd4_process_can_0x225(&media.radio, can_seek, sizeof(can_seek));
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.radio.power_status);
+
+    // Restoration from seeking
+    const uint8_t can_locked[] = { 0x00, 0x00, 0x10, 0x03, 0x98 };
+    psa_rd4_process_can_0x225(&media.radio, can_locked, sizeof(can_locked));
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.radio.power_status);
+
+    // 7. Single frame RadioText on 0x0A4
+    const uint8_t can_sf[] = { 0x07, 'T', 'E', 'S', 'T', ' ', 'O', 'K' };
+    psa_rd4_process_can_0x0a4(&media.radio, &isotp, can_sf, sizeof(can_sf));
+    TEST_ASSERT_EQUAL_UINT8(7, media.radio.radio_text_len);
+    TEST_ASSERT_EQUAL_STRING("TEST OK", media.radio.radio_text);
+}
+
+void test_peugeot_407_rd4_frequency_and_ta_stability(void) {
+    vehicle_media_t media;
+    psa_isotp_rx_ctx_t isotp;
+    psa_rd4_media_init(&media, &isotp);
+
+    // 1. Source Tuner (0x165)
+    const uint8_t can_165[] = { 0xC8, 0xC0, 0x10, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_165, sizeof(can_165));
+
+    // 2. Station Name (0x2A5): " RMF FM "
+    const uint8_t can_2a5[] = { 0x20, 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D, 0x20 };
+    psa_rd4_process_can_0x2a5(&media.radio, can_2a5, sizeof(can_2a5));
+
+    // 3. Tuner Frequency (0x225): 96.0 MHz (raw 0x0398 = 920 -> 960 in 0.1 MHz)
+    // CAN payload from real dump: 20 10 10 03 98
+    const uint8_t can_225[] = { 0x20, 0x10, 0x10, 0x03, 0x98 };
+    psa_rd4_process_can_0x225(&media.radio, can_225, sizeof(can_225));
+    TEST_ASSERT_EQUAL_UINT16(960, media.radio.freq_0_1mhz);
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.preset_slot);
+
+    // 4. TA set by 0x265 (Byte 0 bit 5 = 0x20): payload b4 10 00 01
+    const uint8_t can_265[] = { 0xB4, 0x10, 0x00, 0x01 };
+    psa_rd4_process_can_0x265(&media.radio, can_265, sizeof(can_265));
+    TEST_ASSERT_EQUAL_HEX8(0xA0, media.radio.indicators & 0xA0); /* Both TA (0x80) and RDS (0x20) set */
+
+    // 5. Subsequent 0x225 arrival: must NOT clear TA set by 0x265!
+    media.radio.updated = false;
+    psa_rd4_process_can_0x225(&media.radio, can_225, sizeof(can_225));
+    TEST_ASSERT_EQUAL_HEX8(0xA0, media.radio.indicators & 0xA0); /* TA remains set (no flickering!) */
+
+    // 6. Hiworld Serialization (Cmd 0x84): verify Little-Endian frequency bytes
+    uint8_t out[32];
+    size_t out_len = build_hiworld_radio_state(&media.radio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(19, out_len);
+    // 960 (0x03C0) in Little Endian: out[5] = 0xC0, out[6] = 0x03
+    TEST_ASSERT_EQUAL_HEX8(0xC0, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x03, out[6]);
+    TEST_ASSERT_EQUAL_HEX8(0xA0, out[8]); /* Indicators: TA + RDS */
+}
+
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification Tests
  * -------------------------------------------------------------------------- */

@@ -63,6 +63,12 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if (packet->cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY) {
         /* Head Unit requested alert/diagnostic log refresh (forwardType 0x2F) */
         can_router_query_alert_journal();
+    } else if (packet->cmd == 0x0F) {
+        /* Head Unit resume query forwardType(0x0F): immediate retransmit of radio state */
+        hu_protocol_send_radio_state(NULL);
+    } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
+        /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */
+        hu_protocol_send_media_state(NULL);
     }
 }
 
@@ -483,6 +489,92 @@ static void hiworld_send_alerts_summary(const vehicle_alert_item_t *alerts, uint
 #endif
 }
 
+static vehicle_radio_t s_cached_radio_state;
+static vehicle_cdc_t   s_cached_cdc_state;
+static bool            s_cached_radio_valid = false;
+static bool            s_cached_cdc_valid = false;
+
+static void hiworld_send_radio_state(const vehicle_radio_t *radio) {
+    if (radio != NULL) {
+        s_cached_radio_state = *radio;
+        s_cached_radio_valid = true;
+    } else {
+        if (!s_cached_radio_valid) return;
+        radio = &s_cached_radio_state;
+    }
+
+    uint8_t payload[14];
+    memset(payload, 0, sizeof(payload));
+
+    if (radio->source_mode >= 0x20) {
+        payload[0] = radio->source_mode;
+    } else {
+        payload[0] = radio->band;
+    }
+
+    if (radio->source_mode < 0x20 && radio->power_status != 0) {
+        payload[1] = (uint8_t)(radio->freq_0_1mhz & 0xFF);
+        payload[2] = (uint8_t)((radio->freq_0_1mhz >> 8) & 0xFF);
+    } else {
+        payload[1] = 0x00;
+        payload[2] = 0x00;
+    }
+
+    payload[3] = radio->preset_slot;
+    payload[4] = radio->indicators;
+    payload[5] = radio->power_status;
+
+    for (size_t i = 0; i < 8; i++) {
+        payload[6 + i] = (radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
+    }
+
+    uint8_t tx_buf[24];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_RADIO_STATE, payload, sizeof(payload), tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_radio_text(const char *text, uint8_t len) {
+    if (!text || len == 0) return;
+    if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
+
+    uint8_t tx_buf[80];
+    size_t tx_len = proto_hiworld_serialize(HIWORLD_CMD_RADIO_TEXT, (const uint8_t *)text, len, tx_buf, sizeof(tx_buf));
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
+static void hiworld_send_media_state(const vehicle_cdc_t *cdc) {
+    if (cdc != NULL) {
+        s_cached_cdc_state = *cdc;
+        s_cached_cdc_valid = true;
+    } else {
+        if (!s_cached_cdc_valid) return;
+        cdc = &s_cached_cdc_state;
+    }
+
+    uint8_t payload[11];
+    payload[0]  = cdc->active_disc;
+    payload[1]  = cdc->discs_loaded_mask;
+    payload[2]  = cdc->disc_format;
+    payload[3]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
+    payload[4]  = (uint8_t)(cdc->track_num & 0xFF);
+    payload[5]  = cdc->elapsed_min;
+    payload[6]  = cdc->elapsed_sec;
+    payload[7]  = cdc->play_modes;
+    payload[8]  = cdc->play_status;
+    payload[9]  = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
+    payload[10] = (uint8_t)(cdc->total_tracks & 0xFF);
+
+    uint8_t tx_buf[20];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_MEDIA_STATE, payload, sizeof(payload), tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -503,5 +595,8 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_reverse = NULL,
     .send_alert_single = hiworld_send_alert_single,
     .send_alerts_summary = hiworld_send_alerts_summary,
+    .send_radio_state = hiworld_send_radio_state,
+    .send_radio_text = hiworld_send_radio_text,
+    .send_media_state = hiworld_send_media_state,
     .send_heartbeat = hiworld_send_heartbeat,
 };
