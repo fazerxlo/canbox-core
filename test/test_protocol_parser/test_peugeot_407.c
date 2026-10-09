@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "profiles/peugeot_407.h"
+#include "core/vehicle_profile.h"
 #include "protocols/hu_protocol.h"
 #include "protocols/hu_protocol_driver.h"
 #include "hal/hal_gpio.h"
@@ -2307,5 +2308,69 @@ void test_peugeot_407_custom_downlink_0x2f_response(void) {
     memset(&sent_query, 0, sizeof(sent_query));
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_query));
     TEST_ASSERT_EQUAL_HEX32(PSA_CAN_ID_ALERT_QUERY, sent_query.id);
+}
+
+void test_can_id_filter_enforcement(void) {
+    can_router_init();
+    vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+
+    const vehicle_profile_t *prof = vehicle_profile_get_active();
+    TEST_ASSERT_NOT_NULL(prof);
+
+    /* 1. Verify all active profile rule CAN IDs are accepted by the O(1) bitmask */
+    for (uint8_t i = 0; i < prof->rule_count; i++) {
+        uint32_t id = prof->rules[i].can_id;
+        if (id <= 0x7FF) {
+            TEST_ASSERT_TRUE_MESSAGE(can_router_is_id_allowed(id), "Valid profile CAN ID must be allowed");
+        }
+    }
+
+    /* 2. Verify unmapped standard CAN IDs (e.g., 0x7FF, 0x111, 0x217, 0x260) are rejected */
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x7FF));
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x111));
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x217));
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x260));
+
+    /* 3. Verify boundary / out-of-range IDs (> 0x7FF) are rejected */
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x800));
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x18DAF110));
+
+    /* 4. Inject unmapped standard frame into can_router_process_can:
+     * Ensure vehicle state cache is untouched */
+    const vehicle_state_t *st_before = can_router_get_state();
+    uint16_t rpm_before = st_before->rpm;
+    bool drv_door_before = st_before->doors.door_driver;
+
+    can_frame_t unmapped_frame = {
+        .id = 0x7FF,
+        .dlc = 8,
+        .data = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }
+    };
+    can_router_process_can(&unmapped_frame);
+
+    const vehicle_state_t *st_after = can_router_get_state();
+    TEST_ASSERT_EQUAL_UINT16(rpm_before, st_after->rpm);
+    TEST_ASSERT_EQUAL_INT(drv_door_before, st_after->doors.door_driver);
+
+    /* 5. Inject 29-bit extended frame (even with matching ID value) - must be rejected */
+    can_frame_t ext_frame = {
+        .id = 0x0B6, /* RPM frame ID, but marked extended */
+        .dlc = 8,
+        .is_extended = true,
+        .data = { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&ext_frame);
+    TEST_ASSERT_EQUAL_UINT16(rpm_before, can_router_get_state()->rpm);
+
+    /* 6. Verify dynamic profile switching updates the filter */
+    vehicle_profile_set_active(VEHICLE_PROFILE_VAG_PQ35);
+    TEST_ASSERT_TRUE(can_router_is_id_allowed(0x5C0)); /* VAG wheel keys */
+    TEST_ASSERT_TRUE(can_router_is_id_allowed(0x470)); /* VAG doors */
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(PSA_CAN_ID_STALK_21F)); /* PSA stalk must not be in VAG */
+
+    /* Revert back to PSA profile */
+    vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+    TEST_ASSERT_TRUE(can_router_is_id_allowed(PSA_CAN_ID_STALK_21F));
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x5C0));
 }
 

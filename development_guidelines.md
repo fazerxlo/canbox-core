@@ -17,6 +17,11 @@ This document specifies the architecture, engineering constraints, timing standa
    - Zero dynamic memory allocation (`malloc`, `calloc`, `free` are strictly prohibited).
    - Handlers must be non-blocking with execution times deterministic and minimized.
 
+3. **Dynamic $O(1)$ CAN ID Pre-filtering (Zero Allocation):**
+   - Vehicle buses broadcast dozens of unmapped cyclic frames (ECU telemetry, powertrain diagnostics, unhandled body nodes).
+   - To eliminate linear rule iteration and protect the differential state cache from unnecessary `memcmp` operations, Layer 3 (`src/core/can_router.c`) maintains a static 256-byte bitmask (`s_allowed_ids_bitmask[256]`) representing all 11-bit standard CAN IDs (0 to 2047 / 0x7FF).
+   - Automatically generated on initialization and upon profile switches via `can_router_rebuild_filter()`, incoming frames are validated in constant time ($O(1)$, 2–3 CPU cycles). Extended (29-bit) frames or unmapped standard frames are dropped immediately before profile dispatch.
+
 ---
 
 ## 2. Dispatch Frequency Standards

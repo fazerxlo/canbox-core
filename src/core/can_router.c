@@ -17,6 +17,30 @@ static uint8_t         s_prev_alert_count = 0;
 static uint16_t        s_can_inactivity_ticks = 0;
 static bool            s_can_bus_sleeping = false;
 
+/* 256 bytes bitmask for 11-bit standard CAN IDs (0..2047): O(1) early rejection */
+static uint8_t         s_allowed_ids_bitmask[256];
+
+void can_router_rebuild_filter(void) {
+    memset(s_allowed_ids_bitmask, 0, sizeof(s_allowed_ids_bitmask));
+    const vehicle_profile_t *prof = vehicle_profile_get_active();
+    if (!prof || !prof->rules) {
+        return;
+    }
+    for (uint8_t i = 0; i < prof->rule_count; i++) {
+        uint32_t id = prof->rules[i].can_id;
+        if (id <= 0x7FF) {
+            s_allowed_ids_bitmask[id >> 3] |= (uint8_t)(1U << (id & 7));
+        }
+    }
+}
+
+bool can_router_is_id_allowed(uint32_t can_id) {
+    if (can_id > 0x7FF) {
+        return false;
+    }
+    return (s_allowed_ids_bitmask[can_id >> 3] & (uint8_t)(1U << (can_id & 7))) != 0;
+}
+
 void can_router_init(void) {
     memset(&s_current_state, 0, sizeof(s_current_state));
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
@@ -35,6 +59,7 @@ void can_router_init(void) {
     hal_gpio_write(GPIO_PIN_CAN_STBY, false);
     vehicle_profile_init();
     hu_protocol_init();
+    can_router_rebuild_filter();
 }
 
 void can_router_process_can(const can_frame_t *frame) {
@@ -46,6 +71,11 @@ void can_router_process_can(const can_frame_t *frame) {
         s_can_bus_sleeping = false;
     }
     s_can_inactivity_ticks = 0;
+
+    // Reject extended (29-bit) or unmapped standard CAN IDs early (O(1) static bitmask)
+    if (frame->is_extended || !can_router_is_id_allowed(frame->id)) {
+        return;
+    }
 
     vehicle_profile_process_frame(frame, &s_current_state);
 

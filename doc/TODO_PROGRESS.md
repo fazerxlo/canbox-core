@@ -78,7 +78,8 @@ flowchart LR
 | **11. RD4 Audio & Multimedia Passthrough**| 4 | 0 | 2 | 2 | 0 | **0%** |
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 0 | 0 | 1 | 0 | **0%** (Pending CAN Frame) |
 | **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
-| **Overall** | **44** | **32** | **6** | **4** | **2** | **73%** |
+| **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
+| **Overall** | **45** | **33** | **6** | **4** | **2** | **73%** |
 
 ---
 
@@ -310,6 +311,16 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Full operational recovery documented in `doc/CANBOX_SPEC_HIWORLD_GENERIC_CONNECTION_PHASE.md`.
 - **Verification:** `test_hiworld_verification_vector_1_car_type_set`, `test_hiworld_verification_vector_2_version_report`, `test_canbox_embedded_firmware_version`, `test_integration_hiworld_runtime_car_selection_and_handshake`, `test_integration_hiworld_telemetry_periodic_pipeline`.
 
+### 4.11 Dynamic CAN ID Pre-filtering & Routing Engine (Layer 3)
+- **Static Bitmask Cache (Zero Heap):**
+  - 256-byte static bitmask (`uint8_t s_allowed_ids_bitmask[256]`) mapping all 11-bit standard CAN IDs ($0 \dots 2047 / 0x7FF$).
+  - Auto-generated on startup in `can_router_init()` and dynamically updated on profile switches via `vehicle_profile_set_active()` $\to$ `can_router_rebuild_filter()`.
+- **Constant-Time O(1) Early Rejection:**
+  - Rejects unmapped standard CAN frames and 29-bit extended frames before invoking profile decoders or executing differential state comparisons (`memcmp`).
+  - Preserves transceiver bus wake-up and inactivity watchdog (`s_can_inactivity_ticks`) upon detecting any bus traffic prior to rejection.
+- **Verification:**
+  - Unit test `test_can_id_filter_enforcement` verifying profile rule ID acceptance, rejection of unmapped standard IDs (`0x7FF`, `0x111`, `0x260`), rejection of extended frames, and filter rebuild upon profile switching.
+
 ---
 
 ## 5. Critical PSA Alert DTC Mapping Reference
@@ -388,7 +399,7 @@ All test commands run on host desktop without hardware connected:
 
 | Test Scope | CLI Command | Current Status | Coverage |
 | :--- | :--- | :---: | :--- |
-| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **91 / 91 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table |
+| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **93 / 93 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table, dynamic CAN ID filter |
 | **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **27 / 27 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline |
 | **STM32 Target Build** | `~/.platformio/penv/bin/pio run -e stm32_cbox` | **BUILD OK** | Bare-metal ARM Cortex-M3 flash binary |
 | **ESP32 Target Build** | `~/.platformio/penv/bin/pio run -e esp32_cbox` | **BUILD OK** | Dual-core Xtensa FreeRTOS flash binary |
