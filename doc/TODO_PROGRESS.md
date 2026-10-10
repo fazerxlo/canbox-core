@@ -263,16 +263,20 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 ### 4.9 Physical Hardware Synthesis & Low-Power Management (GPIO)
 - **ACC (Switched Head Unit Power):**
   - Synthesized via `GPIO_PIN_HEADUNIT_POWER` (PB9 on STM32 `volvo_od2`, PA8 on NUC131 `vw_nc03`, GPIO 18 on ESP32).
-  - Primary Control Frame: CAN `0x036` (`COMMANDES_BSI`, 100 ms).
-    - Byte 4 Bits [2:0] (`PHASE_VIE`):
-      - `0x01`: **Ignition ON** (Wakeup / Run `+APC`) — Radio turns ON and stays awake (`VEHICLE_IGNITION_ON`, ACC ON).
-      - `0x02`: **Ignition OFF** (Going to sleep) — Initiates shutdown / accessory timer (`VEHICLE_IGNITION_OFF`, ACC OFF).
-      - `0x03`: **Wakeup transition** — Brief (~40 ms) pulse during key turn.
-      - `0x00`: **Deep Sleep / Standby** — Head unit enters deep sleep mode (`VEHICLE_IGNITION_OFF`, ACC OFF).
-    - Byte 2 Bit 7 (`MODE_ECO` = `0x80`):
-      - `1`: **Economy Mode** — Forces radio and head unit power OFF immediately to protect battery.
-  - RD4 Radio Awakening: CAN `0x165` Byte 0 Bit 7 (`0x80`). When key is OFF, turning on the factory RD4 radio promotes ignition state to `VEHICLE_IGNITION_ACC` to power the head unit. Shuts down when radio switches OFF (`(data[0] & 0xC0) == 0`). Overridden to OFF if Economy Mode (`0x036` Byte 2 Bit 7) is active.
-  - Battery Reconnect: BSI sends `0x036` Byte 4 = `0x02` (Ignition OFF) for ~14s before dropping to `0x00` (`dump_connect_battery_only.log`); ACC wire stays strictly 0V throughout.
+  - Declarative Power Formula with Radio Presence & Deep Sleep Gating:
+    - If `economy_mode` $\to$ `VEHICLE_IGNITION_OFF` (ACC OFF).
+    - Else if `radio_present` (CAN `0x165` detected on bus):
+      - If `radio_sleep` (`(data[0] & 0xC0) == 0`, e.g. `0x08 80 00 00`) $\to$ `VEHICLE_IGNITION_OFF` (ACC OFF).
+      - Else if `radio_on` (`data[0] & 0x80`) $\to$ `VEHICLE_IGNITION_ON` / `ACC` (ACC ON).
+      - Else $\to$ follows `ignition_on`.
+    - Else (no factory radio on bus, e.g. aftermarket HU installation) $\to$ follows `ignition_on`.
+    - `ignition_on`: CAN `0x036` Byte 4 Bits [2:0] == `0x01` (Run `+APC`) or `0x03` (Crank pulse).
+    - `radio_present`: Received CAN `0x165` on bus.
+    - `radio_on`: CAN `0x165` Byte 0 Bit 7 == `1` (RD4 radio active).
+    - `radio_sleep`: CAN `0x165` Byte 0 Bits [7:6] == `0` (RD4 radio in sleep / standby).
+    - `economy_mode`: CAN `0x036` Byte 2 Bit 7 == `1` (`MODE_ECO` battery protection).
+  - Battery Reconnect (`dump_connect_battery_only.log`): BSI sends `0x036` Byte 4 = `0x02` (Ignition OFF) for ~14s before dropping to `0x00`; `radio_on` is false, so ACC stays strictly 0V.
+  - Radio Awakening & Sleep (`dump_ign_off_rd4_on_off.log`, `dump_2026-10-10_09-53-15.log`): When key is OFF, pressing RD4 knob asserts `radio_on`, turning ACC ON; when radio enters sleep (`0x08`), ACC drops to 0V even if stale ignition pulses (`0x01`) linger.
 - **ILL (Night Dimming & Brightness):**
   - Synthesized via `GPIO_PIN_ILL_OUT` (PC13 on STM32 `volvo_od2`, PA9 on NUC131 `vw_nc03`, GPIO 5 on ESP32).
   - Triggers: CAN `0x036` Byte 3 Bit 5 (`0x20` cluster illumination) OR CAN `0x128` Byte 0 (`0x80` sidelights / `0x40` low beam).

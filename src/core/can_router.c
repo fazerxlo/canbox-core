@@ -309,6 +309,10 @@ void can_router_periodic_100ms(void) {
     if (++s_can_inactivity_ticks >= 30) {
         s_can_inactivity_ticks = 30; /* Clamp */
         if (!s_can_bus_sleeping) {
+            s_current_state.ignition_on = false;
+            s_current_state.radio_on = false;
+            s_current_state.radio_sleep = false;
+            s_current_state.economy_mode = false;
             s_current_state.ignition_state = VEHICLE_IGNITION_OFF;
             s_last_sent_state.ignition_state = VEHICLE_IGNITION_OFF;
             hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false);

@@ -172,19 +172,18 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
     TEST_ASSERT_FALSE(state->economy_mode);
 
-    // 2. Economy mode active on 0x036 (Byte 2 Bit 7 = 0x80): 0E 00 80 0F 01 00 00 A0
-    // Must immediately force ignition / radio OFF to protect battery
+    // 2. Economy mode active on 0x036 with key OFF (Byte 2 Bit 7 = 0x80, Byte 4 = 0x02): 0E 00 80 0F 02 00 00 A0
     can_frame_t frame_eco = {
         .id = 0x036,
         .dlc = 8,
-        .data = { 0x0E, 0x00, 0x80, 0x0F, 0x01, 0x00, 0x00, 0xA0 }
+        .data = { 0x0E, 0x00, 0x80, 0x0F, 0x02, 0x00, 0x00, 0xA0 }
     };
     can_router_process_can(&frame_eco);
     TEST_ASSERT_TRUE(state->economy_mode);
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Economy mode must force ignition OFF");
     TEST_ASSERT_FALSE_MESSAGE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER), "ACC power must be cut when Economy Mode is active");
 
-    // 3. Attempting to turn RD4 radio ON via 0x165 while in economy mode must be rejected
+    // 3. Attempting to turn RD4 radio ON via 0x165 while in economy mode must keep ACC OFF
     can_frame_t frame_radio_on = {
         .id = 0x165,
         .dlc = 4,
@@ -194,7 +193,15 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
-    // 4. Return to Normal mode with Ignition OFF (0x02): 0E 00 00 0F 02 00 00 A0
+    // Turn radio back OFF
+    can_frame_t frame_radio_off = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x48, 0xA0, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_radio_off);
+
+    // 4. Return to Normal mode with Ignition OFF (0x02) and Radio OFF: 0E 00 00 0F 02 00 00 A0
     can_frame_t frame_norm_off = {
         .id = 0x036,
         .dlc = 8,
@@ -215,4 +222,40 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     TEST_ASSERT_TRUE(state->economy_mode);
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // 7. Normal mode with RD4 radio turned OFF via 0x165 (0x48 transition, then 0x08 sleep)
+    can_router_process_can(&frame_norm_off); // Return to normal mode
+    can_router_process_can(&frame_radio_off); // 0x48: Audio turning off, screen goodbye
+    TEST_ASSERT_FALSE(state->radio_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // 8. RD4 radio entering deep sleep / standby (0x08 80 00 00)
+    can_frame_t frame_radio_sleep = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x08, 0x80, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_radio_sleep);
+    TEST_ASSERT_TRUE(state->radio_sleep);
+    TEST_ASSERT_FALSE(state->radio_on);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Radio in sleep mode must keep ACC OFF");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Even if 0x036 arrives with ignition ON while radio is in sleep mode, ACC stays OFF
+    can_frame_t frame_ign_with_radio_sleep = {
+        .id = 0x036,
+        .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x0F, 0x01, 0x00, 0x00, 0xA0 }
+    };
+    can_router_process_can(&frame_ign_with_radio_sleep);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Radio in sleep mode overrides stale ignition 0x01");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // 9. When radio powers back ON (0xC8), ACC turns ON
+    can_router_process_can(&frame_radio_on);
+    TEST_ASSERT_TRUE(state->radio_on);
+    TEST_ASSERT_FALSE(state->radio_sleep);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 }

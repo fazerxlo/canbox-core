@@ -179,6 +179,10 @@ typedef struct {
     bool                     reverse_gear;
     bool                     handbrake;
     bool                     economy_mode;
+    bool                     ignition_on;
+    bool                     radio_on;
+    bool                     radio_present;
+    bool                     radio_sleep;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);

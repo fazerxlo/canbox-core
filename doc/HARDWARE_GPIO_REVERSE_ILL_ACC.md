@@ -142,15 +142,44 @@ In many modern vehicles (including the Peugeot 407 CAN2004 architecture), physic
   2. OS saves active state to RAM and powers down display, audio power amplifier, and Wi-Fi/Bluetooth modules.
   3. Parasitic quiescent current drops below $5\text{ mA}$.
 
+#### Declarative Power Logic
+Firmware evaluates switched ACC power via a pure boolean function:
+```c
+if (economy_mode) {
+    ACC = OFF;
+} else if (radio_present) {
+    /* If OEM RD4 radio is present on the bus:
+     * Radio sleep mode ((data[0] & 0xC0) == 0) unconditionally forces ACC OFF.
+     * Radio active (data[0] & 0x80) asserts ACC ON.
+     * Otherwise follow ignition switch. */
+    if (radio_sleep) {
+        ACC = OFF;
+    } else if (radio_on) {
+        ACC = ON;
+    } else {
+        ACC = ignition_on ? ON : OFF;
+    }
+} else {
+    /* If OEM RD4 radio is not present (aftermarket HU installed), follow ignition switch */
+    ACC = ignition_on ? ON : OFF;
+}
+```
+- **`ignition_on`:** CAN `0x036` Byte 4 (`0x01` Run `+APC` or `0x03` Crank pulse).
+- **`radio_present`:** Becomes `true` upon receiving CAN `0x165`.
+- **`radio_on`:** CAN `0x165` Byte 0 Bit 7 (`0x80` RD4 factory radio audio active).
+- **`radio_sleep`:** CAN `0x165` Byte 0 Bits [7:6] == `0x00` (`(data[0] & 0xC0) == 0`, e.g. `0x08`, factory radio in deep sleep / standby).
+- **`economy_mode`:** CAN `0x036` Byte 2 Bit 7 (`0x80` BSI battery protection).
+
 #### Vehicle CAN Sources & Wakeup Triggers
 | CAN ID / Source | Byte Index | Value / Mask | Signal Name | Logic Definition |
 |:---|:---:|:---:|:---|:---|
-| **`0x036`** | Byte 4 Bits [2:0] | `0x01` | `PHASE_VIE`: Ignition ON (Run `+APC`) | `true` = `VEHICLE_IGNITION_ON` (Radio ON / ACC ON) |
-| **`0x036`** | Byte 4 Bits [2:0] | `0x02` | `PHASE_VIE`: Ignition OFF (Going to sleep) | `false` = `VEHICLE_IGNITION_OFF` (Shutdown / ACC OFF) |
-| **`0x036`** | Byte 4 Bits [2:0] | `0x03` | `PHASE_VIE`: Wakeup Transition (~40 ms) | Key turn transition pulse |
-| **`0x036`** | Byte 4 Bits [2:0] | `0x00` | `PHASE_VIE`: Deep Sleep / Standby | `false` = `VEHICLE_IGNITION_OFF` (Deep Sleep / ACC OFF) |
-| **`0x036`** | Byte 2 Bit 7 | `0x80` | `MODE_ECO`: Economy Mode | `1` = Forces radio / ACC OFF immediately to protect battery |
-| **`0x165`** | Byte 0 Bit 7 | `0x80` | RD4 Factory Radio Power State | `true` = Promotes to `VEHICLE_IGNITION_ACC` (unless Economy Mode) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x01` | `PHASE_VIE`: Ignition ON (Run `+APC`) | `true` = `ignition_on` (ACC ON if radio not in sleep) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x02` | `PHASE_VIE`: Ignition OFF (Going to sleep) | `false` = `ignition_on` (Shutdown / ACC OFF unless radio) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x03` | `PHASE_VIE`: Wakeup Transition (~40 ms) | `true` = `ignition_on` (Key turn transition pulse) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x00` | `PHASE_VIE`: Deep Sleep / Standby | `false` = `ignition_on` (Deep Sleep / ACC OFF) |
+| **`0x036`** | Byte 2 Bit 7 | `0x80` | `MODE_ECO`: Economy Mode | `1` = `economy_mode` (Blocks radio ACC to protect battery) |
+| **`0x165`** | Byte 0 Bit 7 | `0x80` | RD4 Factory Radio Power State | `1` = `radio_on` (Powers ACC when ignition OFF & eco OFF) |
+| **`0x165`** | Byte 0 Bits [7:6] | `0x00` | RD4 Deep Sleep / Standby State | `(data[0] & 0xC0) == 0` = `radio_sleep` (Forces ACC OFF) |
 | **Physical Pin `PB12`** | — | High Level | Hardware Ignition Wire Sense | Fallback if CAN is asleep |
 
 #### Real-World Operational Scenarios (CAN Log Ground Truth)
