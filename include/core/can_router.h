@@ -175,6 +175,9 @@ typedef struct {
     char     radio_text[PSA_RD4_MAX_RADIO_TEXT_LEN + 1];
     uint8_t  radio_text_len;
     bool     radio_text_updated;
+    uint16_t preset_freqs[6];   /* Preset 1..6 frequencies in 0.1 MHz (FM) or kHz (AM) */
+    char     preset_names[6][9];/* Preset 1..6 station names (8 chars + null) */
+    bool     preset_updated;
     bool     updated;
 } vehicle_radio_t;
 

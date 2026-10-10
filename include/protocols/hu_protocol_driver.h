@@ -39,6 +39,7 @@ typedef struct {
     void           (*send_alerts_summary)(const vehicle_alert_item_t *alerts, uint8_t count);
     void           (*send_radio_state)(const vehicle_radio_t *radio);
     void           (*send_radio_text)(const char *text, uint8_t len);
+    void           (*send_radio_presets)(const vehicle_radio_t *radio);
     void           (*send_media_state)(const vehicle_cdc_t *cdc);
     void           (*send_heartbeat)(void);
 } hu_protocol_driver_t;

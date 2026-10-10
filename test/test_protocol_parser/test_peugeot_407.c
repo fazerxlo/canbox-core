@@ -1423,6 +1423,100 @@ void test_peugeot_407_rd4_frequency_and_ta_stability(void) {
     TEST_ASSERT_EQUAL_HEX8(0x00, media.radio.indicators & 0x20); /* RDS cleared */
 }
 
+void test_peugeot_407_rd4_preset_memory_list(void) {
+    vehicle_media_t media;
+    psa_isotp_rx_ctx_t isotp;
+    psa_rd4_media_init(&media, &isotp);
+
+    // 1. Simulate tuning into 6 presets on FM1 (band 0x01)
+    // Preset 1: 87.5 MHz (raw 750 = 0x02EE)
+    const uint8_t can_p1[] = { 0x20, 0x10, 0x10, 0x02, 0xEE };
+    psa_rd4_process_can_0x225(&media.radio, can_p1, sizeof(can_p1));
+    // Preset 2: 96.0 MHz (raw 920 = 0x0398)
+    const uint8_t can_p2[] = { 0x20, 0x20, 0x10, 0x03, 0x98 };
+    psa_rd4_process_can_0x225(&media.radio, can_p2, sizeof(can_p2));
+    // Preset 3: 102.5 MHz (raw 1050 = 0x041A)
+    const uint8_t can_p3[] = { 0x20, 0x30, 0x10, 0x04, 0x1A };
+    psa_rd4_process_can_0x225(&media.radio, can_p3, sizeof(can_p3));
+
+    TEST_ASSERT_EQUAL_UINT16(875, media.radio.preset_freqs[0]);
+    TEST_ASSERT_EQUAL_UINT16(960, media.radio.preset_freqs[1]);
+    TEST_ASSERT_EQUAL_UINT16(1025, media.radio.preset_freqs[2]);
+    TEST_ASSERT_TRUE(media.radio.preset_updated);
+
+    // 2. Build Standard Frequency Mode (Cmd 0x85, 13 payload bytes -> 18 wire bytes)
+    uint8_t out[64];
+    size_t out_len = build_hiworld_radio_preset_freqs(&media.radio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(18, out_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0D, out[2]); /* Length 13 */
+    TEST_ASSERT_EQUAL_HEX8(0x85, out[3]); /* Opcode 0x85 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[4]); /* Band FM1 */
+
+    // Check Preset 1 (875 -> 0x036B uint16_be)
+    TEST_ASSERT_EQUAL_HEX8(0x03, out[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x6B, out[6]);
+    // Check Preset 2 (960 -> 0x03C0 uint16_be)
+    TEST_ASSERT_EQUAL_HEX8(0x03, out[7]);
+    TEST_ASSERT_EQUAL_HEX8(0xC0, out[8]);
+    // Check Preset 3 (1025 -> 0x0401 uint16_be)
+    TEST_ASSERT_EQUAL_HEX8(0x04, out[9]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[10]);
+
+    // Checksum check
+    uint16_t sum = out[2] + out[3];
+    for (size_t i = 0; i < 13; i++) {
+        sum += out[4 + i];
+    }
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)((sum - 1) & 0xFF), out[17]);
+
+    // 3. Extended Station Names Mode via native CAN 0x125 ISO-TP stream
+    // Proven multi-frame sequence captured from vehicle dump_2026-10-10_00-05-44.log:
+    const uint8_t can_125_ff[]  = { 0x10, 0x28, 0x10, 0x04, 0x00, 0x40, 0x4A, 0x45 };
+    const uint8_t can_125_cf1[] = { 0x21, 0x44, 0x59, 0x4E, 0x4B, 0x41, 0x20, 0xB0 };
+    const uint8_t can_125_cf2[] = { 0x22, 0x20, 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D };
+    const uint8_t can_125_cf3[] = { 0x23, 0x20, 0xB0, 0x52, 0x4D, 0x46, 0x20, 0x4D };
+    const uint8_t can_125_cf4[] = { 0x24, 0x41, 0x58, 0x58, 0xB0, 0x20, 0x54, 0x52 };
+    const uint8_t can_125_cf5[] = { 0x25, 0x4F, 0x4A, 0x4B, 0x41, 0x20, 0xB0 };
+
+    psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_ff, sizeof(can_125_ff));
+    psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf1, sizeof(can_125_cf1));
+    psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf2, sizeof(can_125_cf2));
+    psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf3, sizeof(can_125_cf3));
+    psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf4, sizeof(can_125_cf4));
+    psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf5, sizeof(can_125_cf5));
+
+    TEST_ASSERT_EQUAL_STRING("JEDYNKA ", media.radio.preset_names[0]);
+    TEST_ASSERT_EQUAL_STRING(" RMF FM ", media.radio.preset_names[1]);
+    TEST_ASSERT_EQUAL_STRING("RMF MAXX", media.radio.preset_names[2]);
+    TEST_ASSERT_EQUAL_STRING(" TROJKA ", media.radio.preset_names[3]);
+    TEST_ASSERT_EQUAL_STRING("        ", media.radio.preset_names[4]);
+    TEST_ASSERT_EQUAL_STRING("        ", media.radio.preset_names[5]);
+
+    // Build Extended Station Names Mode (Cmd 0x85, 49 payload bytes -> 54 wire bytes)
+    out_len = build_hiworld_radio_preset_names(&media.radio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(54, out_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x31, out[2]); /* Length 49 */
+    TEST_ASSERT_EQUAL_HEX8(0x85, out[3]); /* Opcode 0x85 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[4]); /* Band FM1 */
+
+    TEST_ASSERT_EQUAL_STRING_LEN("JEDYNKA ", (char *)&out[5], 8);
+    TEST_ASSERT_EQUAL_STRING_LEN(" RMF FM ", (char *)&out[13], 8);
+    TEST_ASSERT_EQUAL_STRING_LEN("RMF MAXX", (char *)&out[21], 8);
+    TEST_ASSERT_EQUAL_STRING_LEN(" TROJKA ", (char *)&out[29], 8);
+    TEST_ASSERT_EQUAL_STRING_LEN("        ", (char *)&out[37], 8);
+    TEST_ASSERT_EQUAL_STRING_LEN("        ", (char *)&out[45], 8);
+
+    sum = out[2] + out[3];
+    for (size_t i = 0; i < 49; i++) {
+        sum += out[4 + i];
+    }
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)((sum - 1) & 0xFF), out[53]);
+}
+
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification Tests
  * -------------------------------------------------------------------------- */

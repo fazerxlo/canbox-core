@@ -160,6 +160,12 @@ void hu_protocol_send_radio_text(const char *text, uint8_t len) {
     }
 }
 
+void hu_protocol_send_radio_presets(const vehicle_radio_t *radio) {
+    if (s_active_driver && s_active_driver->send_radio_presets) {
+        s_active_driver->send_radio_presets(radio);
+    }
+}
+
 void hu_protocol_send_media_state(const vehicle_cdc_t *cdc) {
     if (s_active_driver && s_active_driver->send_media_state) {
         s_active_driver->send_media_state(cdc);

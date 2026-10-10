@@ -124,7 +124,13 @@ Detailed signal specifications in the project are documented in [doc/CAN2004_rad
 
 ### Other RD4 Transmission Frames
 * **`0x1E0` (Head Unit Presence / Heartbeat):** Period 100 ms; observed bench payload `24 00 00 00 20`.
-* **`0x125` (CD Track & Station Lists):** ISO-TP segmented frame broadcasting the current station list or CD track titles to the EMF scroll menu.
+* **`0x125` (Radio Station & CD Track Lists):** Broadcasts station list / track lists to the EMF scroll menu.
+  - **Trigger:** Event-driven when user activates `LIST` mode (presses `LIST` button or scrolls stalk wheel); directly correlates with CAN `0x225` Byte 0 Bit 7 (`LIST = 1`, `0xA0`).
+  - **Transport:** Segmented ISO-TP (First Frame `0x10 <LEN>`, Consecutive Frames `0x21`..`0x2N`).
+  - **Payload Framing:**
+    - **Header (4 bytes):** `[Band, ItemCount, 0x00, Cursor/Flags]` (e.g. `10 04 00 40` for FM1, 4 items; `20 20 00 00` for FM2).
+    - **Entries (9 bytes each):** 8 ASCII bytes of station name or formatted frequency (e.g. `"JEDYNKA "`, `" RMF FM "`, `"RMF MAXX"`, `"102,9MHz"`, `"87.50   "`) followed by a 1-byte delimiter tag (`0xB0` for RDS station names, `0x70` for raw frequencies).
+  - **List Close / Dismissal:** Single frame `[CAN] ID:125 DLC:2 DATA: 01 00` emitted when menu closes, returning `0x225` Byte 0 to `0x20`.
 * **`0x325`, `0x365`, `0x3A5` (CD Drive Status):** Disc presence in slot, CD mechanism status, track number and elapsed playback time.
 
 ---

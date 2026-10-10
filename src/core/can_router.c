@@ -314,6 +314,14 @@ void can_router_process_can(const can_frame_t *frame) {
         }
     }
 
+    // Immediately push radio preset list updates on change
+    if (s_current_state.media.radio.preset_updated) {
+        s_current_state.media.radio.preset_updated = false;
+        hu_protocol_send_radio_presets(&s_current_state.media.radio);
+        memcpy(s_last_sent_state.media.radio.preset_freqs, s_current_state.media.radio.preset_freqs, sizeof(s_last_sent_state.media.radio.preset_freqs));
+        memcpy(s_last_sent_state.media.radio.preset_names, s_current_state.media.radio.preset_names, sizeof(s_last_sent_state.media.radio.preset_names));
+    }
+
     // Immediately push dynamic RDS RadioText on change
     if (s_current_state.media.radio.radio_text_updated) {
         s_current_state.media.radio.radio_text_updated = false;
@@ -411,6 +419,7 @@ void can_router_periodic_100ms(void) {
         s_media_resync_timer = 0;
         if (s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_state(&s_current_state.media.radio);
+            hu_protocol_send_radio_presets(&s_current_state.media.radio);
             if (s_current_state.media.radio.radio_text_len > 0) {
                 hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
             }

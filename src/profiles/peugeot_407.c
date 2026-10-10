@@ -1346,6 +1346,15 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
         }
     }
 
+    /* Cache frequency into preset slot (1..6) if valid preset active */
+    if (radio->preset_slot >= 1 && radio->preset_slot <= 6) {
+        uint8_t slot_idx = radio->preset_slot - 1;
+        if (radio->preset_freqs[slot_idx] != radio->freq_0_1mhz) {
+            radio->preset_freqs[slot_idx] = radio->freq_0_1mhz;
+            radio->preset_updated = true;
+        }
+    }
+
     if (radio->source_mode < 0x20) {
         radio->source_mode = radio->band;
     }
@@ -1387,6 +1396,115 @@ void psa_rd4_process_can_0x2a5(vehicle_radio_t *radio, const uint8_t *data, uint
         radio->station_name[8] = '\0';
     }
     radio->updated = true;
+}
+
+void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !isotp || !data || dlc < 2) return;
+
+    /* Check for list dismiss / close frame: 01 00 */
+    if (dlc == 2 && data[0] == 0x01 && data[1] == 0x00) {
+        isotp->active = false;
+        return;
+    }
+
+    uint8_t pci = data[0] & 0xF0;
+
+    /* Single Frame (0x0N) */
+    if (pci == 0x00) {
+        uint8_t len = data[0] & 0x0F;
+        if (len >= 13 && len <= (dlc - 1)) {
+            uint8_t raw_band = data[1];
+            if (raw_band == 0x10 || raw_band == 0x90)      radio->band = 0x01; /* FM1 */
+            else if (raw_band == 0x20 || raw_band == 0xA0) radio->band = 0x02; /* FM2 */
+            else if (raw_band == 0x40 || raw_band == 0xC0) radio->band = 0x04; /* FM-AST */
+            else if (raw_band == 0x50 || raw_band == 0xD0) radio->band = 0x10; /* AM */
+
+            uint8_t num_stations = (uint8_t)((len - 4) / 9);
+            if (num_stations > 6) num_stations = 6;
+
+            for (uint8_t i = 0; i < 6; i++) {
+                if (i < num_stations) {
+                    const uint8_t *src_entry = &data[1 + 4 + (i * 9)];
+                    for (uint8_t j = 0; j < 8; j++) {
+                        uint8_t ch = src_entry[j];
+                        radio->preset_names[i][j] = (ch >= 0x20 && ch <= 0x7E) ? (char)ch : ' ';
+                    }
+                    radio->preset_names[i][8] = '\0';
+                } else {
+                    memset(radio->preset_names[i], ' ', 8);
+                    radio->preset_names[i][8] = '\0';
+                }
+            }
+            radio->preset_updated = true;
+            radio->updated = true;
+        }
+        isotp->active = false;
+        return;
+    }
+
+    /* First Frame (0x1N) */
+    if (pci == 0x10) {
+        uint16_t total_len = (((uint16_t)(data[0] & 0x0F)) << 8) | data[1];
+        if (total_len > sizeof(isotp->buffer)) total_len = sizeof(isotp->buffer);
+
+        uint8_t chunk_len = (dlc > 2) ? (uint8_t)(dlc - 2) : 0;
+        if (chunk_len > 0) {
+            memcpy(isotp->buffer, &data[2], chunk_len);
+        }
+        isotp->total_length    = total_len;
+        isotp->received_length = chunk_len;
+        isotp->next_sn         = 1;
+        isotp->active          = true;
+        return;
+    }
+
+    /* Consecutive Frame (0x2N) */
+    if (pci == 0x20 && isotp->active) {
+        uint8_t sn = data[0] & 0x0F;
+        if (sn == (isotp->next_sn & 0x0F)) {
+            uint8_t chunk_len = (dlc > 1) ? (uint8_t)(dlc - 1) : 0;
+            if (isotp->received_length + chunk_len > isotp->total_length) {
+                chunk_len = (uint8_t)(isotp->total_length - isotp->received_length);
+            }
+            if (chunk_len > 0) {
+                memcpy(&isotp->buffer[isotp->received_length], &data[1], chunk_len);
+                isotp->received_length += chunk_len;
+            }
+            isotp->next_sn = (isotp->next_sn + 1) & 0x0F;
+
+            /* Completed reassembly */
+            if (isotp->received_length >= isotp->total_length) {
+                isotp->active = false;
+                uint16_t len = isotp->total_length;
+                if (len >= 13) {
+                    uint8_t raw_band = isotp->buffer[0];
+                    if (raw_band == 0x10 || raw_band == 0x90)      radio->band = 0x01; /* FM1 */
+                    else if (raw_band == 0x20 || raw_band == 0xA0) radio->band = 0x02; /* FM2 */
+                    else if (raw_band == 0x40 || raw_band == 0xC0) radio->band = 0x04; /* FM-AST */
+                    else if (raw_band == 0x50 || raw_band == 0xD0) radio->band = 0x10; /* AM */
+
+                    uint8_t num_stations = (uint8_t)((len - 4) / 9);
+                    if (num_stations > 6) num_stations = 6;
+
+                    for (uint8_t i = 0; i < 6; i++) {
+                        if (i < num_stations) {
+                            const uint8_t *src_entry = &isotp->buffer[4 + (i * 9)];
+                            for (uint8_t j = 0; j < 8; j++) {
+                                uint8_t ch = src_entry[j];
+                                radio->preset_names[i][j] = (ch >= 0x20 && ch <= 0x7E) ? (char)ch : ' ';
+                            }
+                            radio->preset_names[i][8] = '\0';
+                        } else {
+                            memset(radio->preset_names[i], ' ', 8);
+                            radio->preset_names[i][8] = '\0';
+                        }
+                    }
+                    radio->preset_updated = true;
+                    radio->updated = true;
+                }
+            }
+        }
+    }
 }
 
 void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
@@ -1587,6 +1705,59 @@ size_t build_hiworld_media_state(const vehicle_cdc_t *cdc, uint8_t *out_buf, siz
     out_buf[15] = (uint8_t)((sum - 1) & 0xFF);
 
     return 16;
+}
+
+size_t build_hiworld_radio_preset_freqs(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out) {
+    if (!radio || !out_buf || max_out < 18) return 0;
+
+    uint8_t len = 13; /* 1 byte band + 6 * 2 bytes freq uint16_be */
+    out_buf[0] = 0x5A;
+    out_buf[1] = 0xA5;
+    out_buf[2] = len;
+    out_buf[3] = 0x85; /* HIWORLD_CMD_CAR_RADIO_PRESET_FREQ */
+
+    out_buf[4] = radio->band;
+
+    for (size_t i = 0; i < 6; i++) {
+        uint16_t freq = radio->preset_freqs[i];
+        out_buf[5 + (i * 2)]     = (uint8_t)((freq >> 8) & 0xFF);
+        out_buf[5 + (i * 2) + 1] = (uint8_t)(freq & 0xFF);
+    }
+
+    uint16_t sum = len + 0x85;
+    for (size_t i = 4; i < (size_t)(4 + len); i++) {
+        sum += out_buf[i];
+    }
+    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 5 + len;
+}
+
+size_t build_hiworld_radio_preset_names(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out) {
+    if (!radio || !out_buf || max_out < 54) return 0;
+
+    uint8_t len = 49; /* 1 byte band + 6 * 8 bytes names */
+    out_buf[0] = 0x5A;
+    out_buf[1] = 0xA5;
+    out_buf[2] = len;
+    out_buf[3] = 0x85; /* HIWORLD_CMD_CAR_RADIO_PRESET_FREQ */
+
+    out_buf[4] = radio->band;
+
+    for (size_t i = 0; i < 6; i++) {
+        for (size_t j = 0; j < 8; j++) {
+            char c = radio->preset_names[i][j];
+            out_buf[5 + (i * 8) + j] = (c != '\0') ? (uint8_t)c : (uint8_t)' ';
+        }
+    }
+
+    uint16_t sum = len + 0x85;
+    for (size_t i = 4; i < (size_t)(4 + len); i++) {
+        sum += out_buf[i];
+    }
+    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 5 + len;
 }
 
 /* --------------------------------------------------------------------------

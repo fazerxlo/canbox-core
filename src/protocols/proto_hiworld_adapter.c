@@ -4,6 +4,7 @@
 #include "protocols/hiworld_car_mapping.h"
 #include "proto_hiworld.h"
 #include "core/can_router.h"
+#include "profiles/peugeot_407.h"
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
 #include "core/canbox_version.h"
@@ -575,6 +576,34 @@ static void hiworld_send_media_state(const vehicle_cdc_t *cdc) {
     }
 }
 
+static void hiworld_send_radio_presets(const vehicle_radio_t *radio) {
+    if (radio == NULL) {
+        if (!s_cached_radio_valid) return;
+        radio = &s_cached_radio_state;
+    }
+
+    /* Check if any preset name is set; if so send extended names frame (49B), else freqs (13B) */
+    bool has_names = false;
+    for (size_t i = 0; i < 6; i++) {
+        if (radio->preset_names[i][0] != '\0' && radio->preset_names[i][0] != ' ') {
+            has_names = true;
+            break;
+        }
+    }
+
+    uint8_t tx_buf[64];
+    size_t tx_len = 0;
+    if (has_names) {
+        tx_len = build_hiworld_radio_preset_names(radio, tx_buf, sizeof(tx_buf));
+    } else {
+        tx_len = build_hiworld_radio_preset_freqs(radio, tx_buf, sizeof(tx_buf));
+    }
+
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -597,6 +626,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_alerts_summary = hiworld_send_alerts_summary,
     .send_radio_state = hiworld_send_radio_state,
     .send_radio_text = hiworld_send_radio_text,
+    .send_radio_presets = hiworld_send_radio_presets,
     .send_media_state = hiworld_send_media_state,
     .send_heartbeat = hiworld_send_heartbeat,
 };

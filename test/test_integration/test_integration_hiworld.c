@@ -856,7 +856,7 @@ void test_integration_hiworld_rd4_radio_tuner_pipeline(void) {
     can_router_process_can(&frame_2a5);
 
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    TEST_ASSERT_EQUAL_UINT32(19, rx_len);
+    TEST_ASSERT_TRUE(rx_len >= 19);
     TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
     TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
@@ -959,4 +959,72 @@ void test_integration_hiworld_rd4_downlink_resume_queries(void) {
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
     TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[2]);
     TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[3]);
+}
+
+void test_integration_hiworld_rd4_preset_list_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Inject CAN 0x225 with Preset 1 active (87.5 MHz)
+    can_frame_t frame_225_p1 = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x20, 0x10, 0x10, 0x02, 0xEE }
+    };
+    can_router_process_can(&frame_225_p1);
+
+    // Should output Cmd 0x84 (Radio State) followed by Cmd 0x85 (Preset list freqs - 18 bytes)
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= (19 + 18));
+
+    // Find Cmd 0x85 in the stream
+    bool found_0x85 = false;
+    for (size_t i = 0; i < rx_len - 4; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x85) {
+            found_0x85 = true;
+            TEST_ASSERT_EQUAL_HEX8(0x0D, rx_buf[i+2]); /* Length 13 */
+            TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[i+4]); /* Band FM1 */
+            // Preset 1 frequency: 875 -> 0x036B
+            TEST_ASSERT_EQUAL_HEX8(0x03, rx_buf[i+5]);
+            TEST_ASSERT_EQUAL_HEX8(0x6B, rx_buf[i+6]);
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x85);
+
+    // 2. Inject native CAN 0x125 ISO-TP frames broadcasting station list
+    can_frame_t frame_125_ff  = { .id = 0x125, .dlc = 8, .data = { 0x10, 0x28, 0x10, 0x04, 0x00, 0x40, 0x4A, 0x45 } };
+    can_frame_t frame_125_cf1 = { .id = 0x125, .dlc = 8, .data = { 0x21, 0x44, 0x59, 0x4E, 0x4B, 0x41, 0x20, 0xB0 } };
+    can_frame_t frame_125_cf2 = { .id = 0x125, .dlc = 8, .data = { 0x22, 0x20, 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D } };
+    can_frame_t frame_125_cf3 = { .id = 0x125, .dlc = 8, .data = { 0x23, 0x20, 0xB0, 0x52, 0x4D, 0x46, 0x20, 0x4D } };
+    can_frame_t frame_125_cf4 = { .id = 0x125, .dlc = 8, .data = { 0x24, 0x41, 0x58, 0x58, 0xB0, 0x20, 0x54, 0x52 } };
+    can_frame_t frame_125_cf5 = { .id = 0x125, .dlc = 7, .data = { 0x25, 0x4F, 0x4A, 0x4B, 0x41, 0x20, 0xB0 } };
+
+    can_router_process_can(&frame_125_ff);
+    can_router_process_can(&frame_125_cf1);
+    can_router_process_can(&frame_125_cf2);
+    can_router_process_can(&frame_125_cf3);
+    can_router_process_can(&frame_125_cf4);
+    can_router_process_can(&frame_125_cf5);
+
+    // Should output Cmd 0x85 (Extended Station Names Mode - 54 bytes)
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= 54);
+
+    found_0x85 = false;
+    for (size_t i = 0; i < rx_len - 4; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x85) {
+            found_0x85 = true;
+            TEST_ASSERT_EQUAL_HEX8(0x31, rx_buf[i+2]); /* Length 49 */
+            TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[i+4]); /* Band FM1 */
+            TEST_ASSERT_EQUAL_STRING_LEN("JEDYNKA ", (char *)&rx_buf[i+5], 8);
+            TEST_ASSERT_EQUAL_STRING_LEN(" RMF FM ", (char *)&rx_buf[i+13], 8);
+            TEST_ASSERT_EQUAL_STRING_LEN("RMF MAXX", (char *)&rx_buf[i+21], 8);
+            TEST_ASSERT_EQUAL_STRING_LEN(" TROJKA ", (char *)&rx_buf[i+29], 8);
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x85);
 }

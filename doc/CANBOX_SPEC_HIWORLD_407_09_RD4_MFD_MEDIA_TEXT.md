@@ -42,16 +42,16 @@ The CAN Box intercepts these CAN frames, caches the radio/media state, and trans
 |   7. State Cache & Rate-Limited Serial Dispatcher                                       |
 +-----------------------------------------------------------------------------------------+
                                              │
-                       Hiworld UART Protocol (38,400 baud, 8N1)
+                        Hiworld UART Protocol (38,400 baud, 8N1)
                                              │
-      ┌──────────────────────────────────────┼──────────────────────────────────────┐
-      ▼                                      ▼                                      ▼
-+──────────────────────────+   +──────────────────────────+   +──────────────────────────+
-| Cmd 0x84 (CarRadioState) |   | Cmd 0x86 (RadioTextInfo) |   | Cmd 0x97 (CarMediaState) |
-| Band, Freq, Preset, RDS, |   | Dynamic RDS RadioText    |   | Disc Slot, Loaded Mask,  |
-| State, 8-Byte PS Name    |   | String (Song / Artist)   |   | Track uint16, MM:SS,     |
-| (Routes to OriginalTuner)|   | (Routes to tv_radio_text)|   | Play State, Total uint16 |
-+──────────────────────────+   +──────────────────────────+   +──────────────────────────+
+      ┌───────────────────┬───────────────────┴───────────────────┬───────────────────┐
+      ▼                   ▼                                       ▼                   ▼
++───────────────────+ +──────────────────────────+   +──────────────────────────+   +──────────────────────────+
+| Cmd 0x84          | | Cmd 0x85                 |   | Cmd 0x86 (RadioTextInfo) |   | Cmd 0x97 (CarMediaState) |
+| (CarRadioState)   | | (CarRadioPreFrequency)   |   | Dynamic RDS RadioText    |   | Disc Slot, Loaded Mask,  |
+| Band, Freq, Preset| | Preset 1..6 Frequencies  |   | String (Song / Artist)   |   | Track uint16, MM:SS,     |
+| RDS, PS Name      | | or 6x8-ASCII Names       |   | (Routes to tv_radio_text)|   | Play State, Total uint16 |
++───────────────────+ +──────────────────────────+   +──────────────────────────+   +──────────────────────────+
 ```
 
 ---
@@ -192,8 +192,8 @@ $$\text{Hiworld\_Freq} = f_{\text{MHz}} \times 10 = (R \times 0.5) + 500 = \frac
 * **Headunit Route:** Decoded by `PeugeotDataParser::parseRadioText()` directly into `mRadioText` and rendered by full-width scrolling marquee `tv_radio_text` on `OriginalTuner`.  
 * **Payload:** `Data[0..N]` contains raw ASCII/UTF-8 characters of song title, artist, or program announcement.
 
-> [!IMPORTANT]
-> Do NOT use `Cmd 0x85` for RadioText. `0x85` is reserved by the QingFang parser for `SportModeInfo` (Peugeot 508 Sport/Eco Mode).
+> [!NOTE]
+> Dynamic RDS RadioText uses `Cmd 0x86` (`RadioTextInfo`). `Cmd 0x85` is used for the Radio Station Preset Memory List (`CarRadioPreFrequency`) when payload length $> 6$, or `SportModeInfo` when payload length $\le 6$.
 
 ---
 
@@ -217,7 +217,36 @@ $$\text{Hiworld\_Freq} = f_{\text{MHz}} \times 10 = (R \times 0.5) + 500 = \frac
 
 ---
 
-### 3.4 Audio Settings & Tone Adjustments (`Cmd 0x82` — `SoundEffectInfo`)
+### 3.4 Radio Station Preset Memory List (`Cmd 0x85` — `CarRadioPreFrequency`)
+* **Command ID:** `0x85` (`-0x7bt` in signed byte)  
+* **Modes Supported:**
+  1. **Standard Frequency Mode (Payload: 13 bytes, Wire: 18 bytes):**
+     * `LEN`: `0x0D` (13 payload bytes)
+     * `Data[0]`: Band code (`0x00` = FM1, `0x01` = FM2, `0x02` = FM3, `0x04` = FM-AST, `0x10` = AM, etc.)
+     * `Data[1..2]`: Preset 1 Frequency (`uint16_be`, e.g. `875` $\to$ 87.5 MHz or `8750`)
+     * `Data[3..4]`: Preset 2 Frequency (`uint16_be`)
+     * `Data[5..6]`: Preset 3 Frequency (`uint16_be`)
+     * `Data[7..8]`: Preset 4 Frequency (`uint16_be`)
+     * `Data[9..10]`: Preset 5 Frequency (`uint16_be`)
+     * `Data[11..12]`: Preset 6 Frequency (`uint16_be`)
+  2. **Extended Station Names Mode (Payload: 49 bytes, Wire: 54 bytes):**
+     * `LEN`: `0x31` (49 payload bytes)
+     * **Data Source:** Decoded directly from native PSA CAN `0x125` ISO-TP station list broadcasts (triggered when `LIST` mode is open or stalk wheel scrolls).
+     * `Data[0]`: Band code (`0x00` = FM1, etc.)
+     * `Data[1..8]`: Preset 1 Station Name (8 ASCII bytes, e.g. `"JEDYNKA "`)
+     * `Data[9..16]`: Preset 2 Station Name (8 ASCII bytes, e.g. `" RMF FM "`)
+     * `Data[17..24]`: Preset 3 Station Name (8 ASCII bytes, e.g. `"RMF MAXX"`)
+     * `Data[25..32]`: Preset 4 Station Name (8 ASCII bytes, e.g. `" TROJKA "`)
+     * `Data[33..40]`: Preset 5 Station Name (8 ASCII bytes, e.g. `"102,9MHz"`)
+     * `Data[41..48]`: Preset 6 Station Name (8 ASCII bytes, e.g. `"87.50   "`)
+* **Headunit Route (`PeugeotDataParser.smali::parseCarRadioPreFrequency`):**
+  Populates `mPrefebArray[0..5]` in `PeugeotDataParser`. If payload length $\ge 0x31$ (49 bytes), parses ASCII station names. If payload length $< 0x31$, decodes 6 2-byte integers via `JavaDecodeUtil.byteArrToInt(..., isLittleEndian=false)` (`uint16_be`).
+* **Backward Compatibility:**
+  If payload length $\le 6$, `PeugeotDataParser` routes the packet to `parseCentralState` (`SportModeInfo` for Peugeot 508 Eco/Sport Mode), ensuring full dual-purpose compatibility.
+
+---
+
+### 3.5 Audio Settings & Tone Adjustments (`Cmd 0x82` — `SoundEffectInfo`)
 * **Command ID:** `0x82` (`-0x7et` in signed byte)  
 * **Length (`LEN`):** `0x08` (8 payload bytes)  
 * Maps master volume from CAN `0x1A5` and equalizer/fader/balance/tone from CAN `0x1E5`.

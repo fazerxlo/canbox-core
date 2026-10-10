@@ -78,6 +78,7 @@ void test_peugeot_407_rd4_vector_2_isotp_radiotext(void);
 void test_peugeot_407_rd4_vector_3_cd_changer(void);
 void test_peugeot_407_rd4_source_and_wavebands(void);
 void test_peugeot_407_rd4_frequency_and_ta_stability(void);
+void test_peugeot_407_rd4_preset_memory_list(void);
 
 // Peugeot 407 SPEC_02 test declarations
 void test_psa_extended_tpms_numeric(void);
@@ -209,6 +210,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_rd4_vector_3_cd_changer);
     RUN_TEST(test_peugeot_407_rd4_source_and_wavebands);
     RUN_TEST(test_peugeot_407_rd4_frequency_and_ta_stability);
+    RUN_TEST(test_peugeot_407_rd4_preset_memory_list);
 
     // Peugeot 407 SPEC_02 Extended Unit Tests & Verification Vectors
     RUN_TEST(test_psa_extended_tpms_numeric);

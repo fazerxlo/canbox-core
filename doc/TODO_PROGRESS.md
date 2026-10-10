@@ -75,11 +75,11 @@ flowchart LR
 | **8. BSI Vehicle Alerts & Diagnostics** | 5 | 5 | 0 | 0 | 0 | **100%** |
 | **9. Central Personalization & Settings** | 4 | 2 | 2 | 0 | 0 | **50%** |
 | **10. Date & Time Synchronization** | 2 | 1 | 1 | 0 | 0 | **50%** |
-| **11. RD4 Audio & Multimedia Passthrough**| 4 | 3 | 0 | 1 | 0 | **75%** |
+| **11. RD4 Audio & Multimedia Passthrough**| 4 | 4 | 0 | 0 | 0 | **100%** |
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 0 | 0 | 1 | 0 | **0%** (Pending CAN Frame) |
 | **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
 | **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
-| **Overall** | **45** | **36** | **4** | **3** | **2** | **80%** |
+| **Overall** | **45** | **37** | **4** | **2** | **2** | **82%** |
 
 ---
 
@@ -100,6 +100,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[x]` | `0x21` | **Console Panel Button Telemetry**| `0x02` (2) | `0x3E5` only | `src/profiles/peugeot_407.c` (`psa_decode_console_0x3e5_ex`)<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_console_0x3e5_buttons`<br>`test_peugeot_407_console_0x3e5_edge_cases`<br>`test_integration_hiworld_console_0x3e5_full_pipeline`<br>`test_integration_hiworld_console_0x3e5_ok_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md` section 3.3<br>Verified KeyIDs (OEM Canbox): AUDIO `0x31`, TRIP `0x40`, CLIM `0x28`, DARK `0x07`, OK `0x24`, ESC `0x25`, MENU `0x2E`, UP `0x17`, DOWN `0x18`, LEFT `0x19`, RIGHT `0x1A`. `0x3E5` 2-bit fields: B0 MENU[7:6] CLIM[1:0]; B1 TRIP[7:6] AUDIO[1:0]; B2 OK[7:6] ESC[5:4] DARK[3:2]; B5 UP[7:6] DOWN[5:4] RIGHT[3:2] LEFT[1:0]. Captured in `can_log_buttons*.log`: AUDIO, TRIP, CLIM, DARK, MENU, OK, ESC, UP; DOWN/LEFT/RIGHT bits from simulator docs (not yet captured). TEL decoded (B0[5:4] -> Hiworld `0x05` PHONE, unverified on vehicle, not yet captured); MODE pending (no KeyID). `0x167`/`0x0DF` decoders removed. CMD `0x22` and OEM idle `0x11` frame pending. |
 | `[x]` | `0x84` | **RD4 Radio / Audio Source State** | `0x0E` (14) | `0x165`<br>`0x225`<br>`0x2A5`<br>`0x265` | `src/profiles/peugeot_407.c` (`psa_rd4_process_can_0x165`, `psa_rd4_process_can_0x225`, `psa_rd4_process_can_0x2a5`, `build_hiworld_radio_state`)<br>`src/protocols/proto_hiworld_adapter.c`<br>`src/core/can_router.c` | `test_peugeot_407_rd4_vector_1_fm_tuner`<br>`test_peugeot_407_rd4_source_and_wavebands`<br>`test_peugeot_407_rd4_frequency_and_ta_stability`<br>`test_integration_hiworld_rd4_radio_tuner_pipeline`<br>`test_integration_hiworld_rd4_downlink_resume_queries`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md`<br>Decodes Source (`0x165`), Band/Freq/Preset/RDS (`0x225`), PS Name (`0x2A5`), TA (`0x265`); Little-Endian frequency wire format aligned with Android APK (`PeugeotDataParser.smali`); TA indicator stabilized across `0x225`/`0x265` frames (fixes flickering); Wavebands aligned with `OriginalTuner` UI (`0x01` FM1, `0x02` FM2, `0x04` FM-AST, `0x10` AM); Station name and RadioText automatically cleared on frequency change, loss of RDS lock, or empty `0x2A5` frames |
 | `[x]` | `0x86` | **RDS Dynamic RadioText Marquee** | $1\dots 64$ | `0x0A4` | `src/profiles/peugeot_407.c` (`psa_rd4_process_can_0x0a4`, `build_hiworld_radio_text`)<br>`src/protocols/proto_hiworld_adapter.c`<br>`src/core/can_router.c` | `test_peugeot_407_rd4_vector_2_isotp_radiotext`<br>`test_integration_hiworld_rd4_radiotext_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md`<br>ISO-TP reassembly strips prefix `10 00 00 00`; routes to `tv_radio_text` |
+| `[x]` | `0x85` | **RD4 Station Preset Memory List** | `0x0D` (18) / `0x31` (54) | `0x225`<br>`0x125` | `src/profiles/peugeot_407.c` (`psa_rd4_process_can_0x125`, `build_hiworld_radio_preset_freqs`, `build_hiworld_radio_preset_names`)<br>`src/protocols/proto_hiworld_adapter.c` (`hiworld_send_radio_presets`)<br>`src/core/can_router.c` | `test_peugeot_407_rd4_preset_memory_list`<br>`test_integration_hiworld_rd4_preset_list_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md` section 3.4<br>Supports Standard Frequency Mode (13 payload / 18 wire bytes, 6x `uint16_be`) and Extended Station Names Mode (49 payload / 54 wire bytes, 6x 8-ASCII station names decoded from native CAN `0x125` ISO-TP station list streams) mapped to `mPrefebArray` in `PeugeotDataParser.smali::parseCarRadioPreFrequency`; dual-purpose backwards-compatible with 508 Sport/Eco Mode (`parseCentralState`) when payload $\le 6$ |
 | `[x]` | `0x97` | **CD Changer (CDC) Playback State** | `0x0B` (11) | `0x3A6` | `src/profiles/peugeot_407.c` (`psa_rd4_process_can_0x3a6`, `build_hiworld_media_state`)<br>`src/protocols/proto_hiworld_adapter.c`<br>`src/core/can_router.c` | `test_peugeot_407_cd_changer_and_rds`<br>`test_peugeot_407_rd4_vector_3_cd_changer`<br>`test_integration_hiworld_rd4_cd_changer_pipeline`<br>`test_integration_hiworld_rd4_downlink_resume_queries`<br>Disc index ($1\dots 6$), loaded mask, track, elapsed mm:ss, play modes, play status decoded; Hiworld `0x97` adapter active |
 | `[x]` | `0x31` | **Dual-Zone Climate Status** | `0x0D` (13) | `0x1D0`<br>`0x1E3` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_hvac_hiworld`<br>Power, AC, auto, dual, defrost, fan (0..8), temps, AQS, airflow |
 | `[x]` | `0x41` | **Parking Radar Distance (OPS)** | `0x0D` (13) | `0x0E1` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center`<br>`test_integration_hiworld_radar_pipeline`<br>8 sensor bars (0..4 distance level); strictly CAN2004 `0x0E1` |
@@ -323,19 +324,23 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 - **Verification:**
   - Unit test `test_can_id_filter_enforcement` verifying profile rule ID acceptance, rejection of unmapped standard IDs (`0x7FF`, `0x111`, `0x260`), rejection of extended frames, and filter rebuild upon profile switching.
 
-### 4.12 RD4 Radio, Tuner, RDS Text & CD Synchronization (`0x84`, `0x86`, `0x97`)
+### 4.12 RD4 Radio, Tuner, RDS Text & CD Synchronization (`0x84`, `0x85`, `0x86`, `0x97`)
 - **CAN Ground Truth (`doc/CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md`):**
   - **RD4 Audio Source (`0x165` ETAT_AUTORADIO, 4 bytes, 50 ms):**
     - Byte 2[7:4] `INPUT_SOURCE`: `0x1` Tuner (FM/AM), `0x2` Internal CD, `0x3` CD Changer (CDC), `0x4` AUX 1, `0x5` AUX 2.
     - Decoded in `psa_rd4_process_can_0x165()` into `radio->source_mode` (`0x00..0x04`, `0x10`, `0x20`, `0x21`, `0x30`, `0x31`, `0xFF`).
   - **RD4 Tuner Status & Frequency (`0x225` ETAT_TUNER, 5-8 bytes, 100 ms):**
     - Byte 0: Indicators (Bit 2 TA `0x80`, Bit 5 RDS `0x20`, Bit 6 SCAN `0x10`, RDTEXT `0x04`), Seeking status (Bit 3 TUN -> `power_status = 0x02`).
-    - Byte 1: Preset memory slot (0=manual, 1..6).
+    - Byte 1: Preset memory slot (0=manual, 1..6). Caches tuned frequency into `preset_freqs[slot - 1]`.
     - Byte 2: Band (`0x10`/`0x90` FM1, `0x20`/`0xA0` FM2, `0x40`/`0xC0` FM-AST, `0x50`/`0xD0` AM).
     - Byte 3..4: Frequency uint16_be ($R$): FM: $\text{Freq (0.1 MHz)} = R/2 + 500$; AM: direct kHz.
     - Decoded in `psa_rd4_process_can_0x225()`.
   - **RDS Station Name (`0x2A5` NOM_STATION, 8 bytes, 100 ms):**
-    - 8-byte ASCII Program Service (PS) name, space padded. Decoded in `psa_rd4_process_can_0x2a5()`.
+    - 8-byte ASCII Program Service (PS) name, space padded. Decoded in `psa_rd4_process_can_0x2a5()` into `radio->station_name` for currently tuned station.
+  - **Station List Stream (`0x125` LIST_TUNER, ISO-TP segmented stream):**
+    - Event-driven ISO-TP multi-frame stream broadcasting the station list / memory presets when `LIST` mode is active (`0x225` Bit 7).
+    - 4-byte header (`[Band, Count, 0x00, Cursor/Flags]`) followed by 9-byte entries (8 ASCII characters name/frequency + 1 delimiter byte: `0xB0` for RDS station name, `0x70` for raw frequency string).
+    - Decoded in `psa_rd4_process_can_0x125()` directly populating `preset_names[0..5]` for Extended Station Names Mode. Single Frame `01 00` handled on list exit.
   - **Dynamic RDS RadioText (`0x0A4` TEXTE_RADIO, 8 bytes, event stream):**
     - ISO-TP reassembly (Single Frame, First Frame, Consecutive Frames) with automatic 4-byte `10 00 00 00` control prefix stripping.
     - Decoded in `psa_rd4_process_can_0x0a4()` into `radio->radio_text` (up to 64 chars).
@@ -344,6 +349,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
     - Decoded in `psa_rd4_process_can_0x3a6()` into `cdc->active_disc`, `cdc->discs_loaded_mask`, `cdc->play_status`.
 - **Hiworld Protocol Serialization:**
   - `CMD 0x84` (`CarRadioState`, 14 payload bytes / 19 wire bytes): Band/source, frequency in Little-Endian `uint16_le` (0.1 MHz/kHz) matching `PeugeotDataParser.smali::parseCarRadioState`, preset slot, stabilized indicator bitmask (TA bit preserved between `0x225` and `0x265`), power status, 8-byte PS station name. Serialized by `build_hiworld_radio_state()` and `hiworld_send_radio_state()`.
+  - `CMD 0x85` (`CarRadioPreFrequency`, 13 or 49 payload bytes / 18 or 54 wire bytes): Preset memory list (presets 1..6). If station names are cached via `0x125`, serializes 49-byte extended station name frame (`build_hiworld_radio_preset_names()`), otherwise serializes 13-byte standard frequency frame with 6x `uint16_be` (`build_hiworld_radio_preset_freqs()`). Serialized by `hiworld_send_radio_presets()`. Backwards-compatible with 508 Sport/Eco Mode (`parseCentralState`) when payload $\le 6$.
   - `CMD 0x86` (`RadioTextInfo`, $1\dots 64$ payload bytes / $5+\text{LEN}$ wire bytes): Dynamic RDS RadioText string routed to `tv_radio_text` marquee. Serialized by `build_hiworld_radio_text()` and `hiworld_send_radio_text()`.
   - `CMD 0x97` (`CarMediaState`, 11 payload bytes / 16 wire bytes): Active disc, loaded disc mask, track uint16, elapsed mm:ss, play modes, play status, total tracks uint16. Serialized by `build_hiworld_media_state()` and `hiworld_send_media_state()`.
 - **Downlink Queries & Resync:**
@@ -351,9 +357,9 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Media resume query `forwardType(0x11)` / `forwardType(0x12)`: immediately retransmits cached `0x97` media state.
   - Slow periodic heartbeat resync (60 seconds / 600 ticks in `can_router_periodic_100ms`).
 - **Verification:**
-  - Unit tests: `test_peugeot_407_rd4_vector_1_fm_tuner`, `test_peugeot_407_rd4_vector_2_isotp_radiotext`, `test_peugeot_407_rd4_vector_3_cd_changer`, `test_peugeot_407_rd4_source_and_wavebands`, `test_peugeot_407_rd4_frequency_and_ta_stability`.
-  - Integration pipeline: `test_integration_hiworld_rd4_radio_tuner_pipeline`, `test_integration_hiworld_rd4_radiotext_pipeline`, `test_integration_hiworld_rd4_cd_changer_pipeline`, `test_integration_hiworld_rd4_downlink_resume_queries`.
-  - Host Unit Tests: 98/98 passed. Integration Tests: 31/31 passed. Target builds: STM32 (0 warnings), ESP32 (0 warnings).
+  - Unit tests: `test_peugeot_407_rd4_vector_1_fm_tuner`, `test_peugeot_407_rd4_vector_2_isotp_radiotext`, `test_peugeot_407_rd4_vector_3_cd_changer`, `test_peugeot_407_rd4_source_and_wavebands`, `test_peugeot_407_rd4_frequency_and_ta_stability`, `test_peugeot_407_rd4_preset_memory_list`.
+  - Integration pipeline: `test_integration_hiworld_rd4_radio_tuner_pipeline`, `test_integration_hiworld_rd4_radiotext_pipeline`, `test_integration_hiworld_rd4_cd_changer_pipeline`, `test_integration_hiworld_rd4_downlink_resume_queries`, `test_integration_hiworld_rd4_preset_list_pipeline`.
+  - Host Unit Tests: 99/99 passed. Integration Tests: 32/32 passed. Target builds: STM32 (0 warnings), ESP32 (0 warnings).
 
 ---
 
@@ -414,9 +420,9 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   1. Add downlink command handlers for `0x7B` and `0x7D` in `src/protocols/proto_hiworld_adapter.c`.
   2. Synthesize PSA BSI configuration messages (`0x39B` / `0x2A8`).
 
-### Priority 4: RD4 Radio & CD Changer Media Passthrough (`CMD 0x84`, `0x86`, `0x97`) [COMPLETED]
+### Priority 4: RD4 Radio & CD Changer Media Passthrough (`CMD 0x84`, `0x85`, `0x86`, `0x97`) [COMPLETED]
 - **Status:** `[x]` Fully implemented and verified across unit and integration tests.
-- **Scope:** Uplink passing OEM radio tuner frequency (`0x225`), RDS station name (`0x2A5`), dynamic RadioText (`0x0A4`), and CD changer playback state (`0x3A6`) to the Android `OriginalTuner` and `OriginalMediaPlayer`, plus `forwardType(0x0F)` / `forwardType(0x11)` resume query handlers.
+- **Scope:** Uplink passing OEM radio tuner frequency (`0x225`), preset memory list (`0x85`), RDS station name (`0x2A5`), dynamic RadioText (`0x0A4`), and CD changer playback state (`0x3A6`) to the Android `OriginalTuner` and `OriginalMediaPlayer`, plus `forwardType(0x0F)` / `forwardType(0x11)` resume query handlers.
 
 ### Priority 5: Dynamic Guidelines & Steering Angle (SAS) Frame Discovery
 - **Status:** Placeholders completely removed.
@@ -430,8 +436,8 @@ All test commands run on host desktop without hardware connected:
 
 | Test Scope | CLI Command | Current Status | Coverage |
 | :--- | :--- | :--- | :--- |
-| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **97 / 97 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table, dynamic CAN ID filter, RD4 tuner/RadioText/CDC |
-| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **31 / 31 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline including RD4 radio, RadioText, CDC & resume queries |
+| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **99 / 99 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table, dynamic CAN ID filter, RD4 tuner/RadioText/CDC/Presets |
+| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **32 / 32 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline including RD4 radio, preset list, RadioText, CDC & resume queries |
 | **STM32 Target Build** | `~/.platformio/penv/bin/pio run -e stm32_cbox` | **BUILD OK** | Bare-metal ARM Cortex-M3 flash binary |
 | **ESP32 Target Build** | `~/.platformio/penv/bin/pio run -e esp32_cbox` | **BUILD OK** | Dual-core Xtensa FreeRTOS flash binary |
 | **Interactive Desktop Sim** | `CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec` | **OPERATIONAL** | Virtual CAN (`vcan0`) and pseudo-terminal (`pty`) emulator |

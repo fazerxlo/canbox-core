@@ -28,6 +28,7 @@ void hu_protocol_send_alert_single(const vehicle_alert_item_t *alert);
 void hu_protocol_send_alerts_summary(const vehicle_alert_item_t *alerts, uint8_t count);
 void hu_protocol_send_radio_state(const vehicle_radio_t *radio);
 void hu_protocol_send_radio_text(const char *text, uint8_t len);
+void hu_protocol_send_radio_presets(const vehicle_radio_t *radio);
 void hu_protocol_send_media_state(const vehicle_cdc_t *cdc);
 
 #ifdef __cplusplus
