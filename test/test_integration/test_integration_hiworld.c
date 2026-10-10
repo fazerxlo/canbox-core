@@ -922,10 +922,61 @@ void test_integration_hiworld_rd4_cd_changer_pipeline(void) {
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(16, rx_len);
 
+    /* 5A A5 0B 97 02 02 00 0E 00 03 2D 01 02 14 00 FA */
     const uint8_t expected[] = {
-        0x5A, 0xA5, 0x0B, 0x97, 0x02, 0x02, 0x00, 0x00, 0x0E, 0x03, 0x2D, 0x01, 0x01, 0x00, 0x14, 0xF9
+        0x5A, 0xA5, 0x0B, 0x97, 0x02, 0x02, 0x00, 0x0E, 0x00, 0x03, 0x2D, 0x01, 0x02, 0x14, 0x00, 0xFA
     };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, 16);
+}
+
+void test_integration_hiworld_rd4_cd_in_dash_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Audio Source switch to CD (CAN 0x165 -> 0x20 = CD)
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x20, 0x00 }
+    };
+    can_router_process_can(&frame_165);
+
+    // Emits Cmd 0x84 (Audio Source = 0x30 CD)
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= 19);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x30, rx_buf[4]); /* CD Source */
+
+    // 2. CD Disc Info (CAN 0x365: Total Tracks = 18 = 0x12)
+    can_frame_t frame_365 = {
+        .id = 0x365,
+        .dlc = 5,
+        .data = { 0x12, 0x26, 0x02, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_365);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 3. CD Play Telemetry (CAN 0x3A5: Track 5, Playing, 02 min 35 sec)
+    can_frame_t frame_3a5 = {
+        .id = 0x3A5,
+        .dlc = 6,
+        .data = { 0x05, 0x03, 0x19, 0x02, 0x23, 0x00 }
+    };
+    can_router_process_can(&frame_3a5);
+
+    // Emits Cmd 0x97 (Single in-dash CD: 5A A5 0B 97 00 00 00 05 00 02 23 00 02 12 00 DF)
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(16, rx_len);
+
+    const uint8_t expected_cd_ex1[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x05, 0x00, 0x02, 0x23, 0x00, 0x02, 0x12, 0x00, 0xDF
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_cd_ex1, rx_buf, 16);
 }
 
 void test_integration_hiworld_rd4_downlink_resume_queries(void) {

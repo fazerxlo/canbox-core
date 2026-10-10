@@ -407,6 +407,21 @@ static void psa_decode_texte_radio_0x0a4_profile(const can_frame_t *frame, vehic
     psa_rd4_process_can_0x0a4(&state->media.radio, &s_rd4_isotp_ctx, frame->data, frame->dlc);
 }
 
+static void psa_decode_cd_tray_0x325_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc);
+}
+
+static void psa_decode_cd_disc_info_0x365_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x365(&state->media.cdc, frame->data, frame->dlc);
+}
+
+static void psa_decode_cd_play_0x3a5_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc);
+}
+
 static void psa_decode_cd_changer_0x3a6_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc);
@@ -439,6 +454,9 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
     { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
+    { PSA_CAN_ID_CD_TRAY_325,        psa_decode_cd_tray_0x325_profile },
+    { PSA_CAN_ID_CD_DISC_INFO_365,   psa_decode_cd_disc_info_0x365_profile },
+    { PSA_CAN_ID_CD_PLAY_3A5,        psa_decode_cd_play_0x3a5_profile },
     { PSA_CAN_ID_CD_CHANGER,         psa_decode_cd_changer_0x3a6_profile },
 };
 

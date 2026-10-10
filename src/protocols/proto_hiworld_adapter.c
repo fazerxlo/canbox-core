@@ -557,17 +557,19 @@ static void hiworld_send_media_state(const vehicle_cdc_t *cdc) {
     }
 
     uint8_t payload[11];
-    payload[0]  = cdc->active_disc;
-    payload[1]  = cdc->discs_loaded_mask;
-    payload[2]  = cdc->disc_format;
-    payload[3]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
-    payload[4]  = (uint8_t)(cdc->track_num & 0xFF);
+    payload[0]  = cdc->active_disc & 0x0F;
+    payload[1]  = cdc->discs_loaded_mask & 0x3F;
+    payload[2]  = cdc->disc_format & 0x3F;
+    /* Track Number uint16_le (Data[3..4]) */
+    payload[3]  = (uint8_t)(cdc->track_num & 0xFF);
+    payload[4]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
     payload[5]  = cdc->elapsed_min;
     payload[6]  = cdc->elapsed_sec;
     payload[7]  = cdc->play_modes;
     payload[8]  = cdc->play_status;
-    payload[9]  = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
-    payload[10] = (uint8_t)(cdc->total_tracks & 0xFF);
+    /* Total Tracks uint16_le (Data[9..10]) */
+    payload[9]  = (uint8_t)(cdc->total_tracks & 0xFF);
+    payload[10] = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
 
     uint8_t tx_buf[20];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_MEDIA_STATE, payload, sizeof(payload), tx_buf, sizeof(tx_buf));

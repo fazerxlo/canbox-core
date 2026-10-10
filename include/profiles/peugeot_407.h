@@ -49,6 +49,9 @@ extern "C" {
 #define PSA_CAN_ID_TPMS_DIRECT_361  0x361
 #define PSA_CAN_ID_TPMS_PRESSURES_3A1 0x3A1
 #define PSA_CAN_ID_RDS_NAME         0x396
+#define PSA_CAN_ID_CD_TRAY_325      0x325
+#define PSA_CAN_ID_CD_DISC_INFO_365 0x365
+#define PSA_CAN_ID_CD_PLAY_3A5      0x3A5
 #define PSA_CAN_ID_CD_CHANGER       0x3A6
 
 /* --------------------------------------------------------------------------
@@ -388,6 +391,9 @@ void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint
 void psa_rd4_process_can_0x2a5(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
+void psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
 
 size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out);

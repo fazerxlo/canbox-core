@@ -1286,17 +1286,175 @@ void test_peugeot_407_rd4_vector_3_cd_changer(void) {
     TEST_ASSERT_EQUAL_UINT8(3, media.cdc.elapsed_min);
     TEST_ASSERT_EQUAL_UINT8(45, media.cdc.elapsed_sec);
     TEST_ASSERT_EQUAL_UINT8(0x01, media.cdc.play_modes);
-    TEST_ASSERT_EQUAL_UINT8(0x01, media.cdc.play_status);
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.cdc.play_status);
 
-    // Hiworld Output (Cmd 0x97): 16 wire bytes
+    // Hiworld Output (Cmd 0x97): 16 wire bytes (Little-Endian uint16_le tracks, Status 0x02 = Play)
     uint8_t out[32];
     size_t out_len = build_hiworld_media_state(&media.cdc, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(16, out_len);
 
+    /* 5A A5 0B 97 02 02 00 0E 00 03 2D 01 02 14 00 FA
+     * Checksum: (0x0B + 0x97 + 0x02 + 0x02 + 0x00 + 0x0E + 0x00 + 0x03 + 0x2D + 0x01 + 0x02 + 0x14 + 0x00) - 1 = 0xFB - 1 = 0xFA
+     */
     const uint8_t expected[] = {
-        0x5A, 0xA5, 0x0B, 0x97, 0x02, 0x02, 0x00, 0x00, 0x0E, 0x03, 0x2D, 0x01, 0x01, 0x00, 0x14, 0xF9
+        0x5A, 0xA5, 0x0B, 0x97, 0x02, 0x02, 0x00, 0x0E, 0x00, 0x03, 0x2D, 0x01, 0x02, 0x14, 0x00, 0xFA
     };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, 16);
+}
+
+void test_peugeot_407_rd4_cd_in_dash_playback(void) {
+    vehicle_media_t media;
+    psa_rd4_media_init(&media, NULL);
+
+    /* Single In-Dash CD:
+     * In OEM captures (dump_2026-10-10_11-12-22.log, dump_2026-10-10_12-07-47.log, dump_2026-10-10_12-09-48.log):
+     * active_disc = 0x00, discs_loaded_mask = 0x00.
+     * Track: 5 (0x05 0x00), Elapsed: 02:35 (0x02 0x23), Mode: 0x00, Status: Play (0x02), Total tracks: 18 (0x12 0x00)
+     * Expected wire frame: 5A A5 0B 97 00 00 00 05 00 02 23 00 02 12 00 DF
+     */
+
+    // 1. Audio Source CD: 0x165 -> 0x2 (Internal CD)
+    const uint8_t can_165[] = { 0xC8, 0xC0, 0x20, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_165, sizeof(can_165));
+    TEST_ASSERT_EQUAL_UINT8(0x30, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_UINT8(0x01, media.radio.power_status);
+
+    // 2. CD Disc Info: 0x365 -> Total 18 tracks (0x12)
+    const uint8_t can_365[] = { 0x12, 0x26, 0x02, 0x00, 0x00 };
+    psa_rd4_process_can_0x365(&media.cdc, can_365, sizeof(can_365));
+    TEST_ASSERT_EQUAL_UINT16(18, media.cdc.total_tracks);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.disc_format);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.active_disc);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.discs_loaded_mask);
+
+    // 3. CD Play Telemetry: 0x3A5 -> Track 5 in data[0], 0x19 (Playing), 02 min 35 sec
+    const uint8_t can_3a5[] = { 0x05, 0x03, 0x19, 0x02, 0x23, 0x00 };
+    psa_rd4_process_can_0x3a5(&media.cdc, can_3a5, sizeof(can_3a5));
+    TEST_ASSERT_EQUAL_UINT16(5, media.cdc.track_num);
+    TEST_ASSERT_EQUAL_UINT8(2, media.cdc.elapsed_min);
+    TEST_ASSERT_EQUAL_UINT8(35, media.cdc.elapsed_sec);
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.cdc.play_status);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.play_modes);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.active_disc);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.discs_loaded_mask);
+
+    // Build Hiworld Frame Cmd 0x97
+    uint8_t out[32];
+    size_t out_len = build_hiworld_media_state(&media.cdc, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(16, out_len);
+
+    const uint8_t expected_spec_in_dash[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x05, 0x00, 0x02, 0x23, 0x00, 0x02, 0x12, 0x00, 0xDF
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_spec_in_dash, out, 16);
+}
+
+void test_peugeot_407_rd4_cd_tray_mechanism(void) {
+    vehicle_media_t media;
+    psa_rd4_media_init(&media, NULL);
+
+    // 1. CD Inserted: CAN 0x325 -> data[1] = 0x03
+    const uint8_t can_insert[] = { 0x80, 0x03, 0x00 };
+    psa_rd4_process_can_0x325(&media.cdc, can_insert, sizeof(can_insert));
+    // For single in-dash CD, active_disc and magazine mask stay 0x00
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.discs_loaded_mask);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.active_disc);
+
+    // 2. CD Ejected: CAN 0x325 -> data[1] = 0x00
+    const uint8_t can_eject[] = { 0x80, 0x00, 0x00 };
+    psa_rd4_process_can_0x325(&media.cdc, can_eject, sizeof(can_eject));
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.discs_loaded_mask);
+    TEST_ASSERT_EQUAL_UINT8(0x0C, media.cdc.play_status); /* Eject status code */
+
+    // Check Hiworld wire output
+    uint8_t out[32];
+    size_t out_len = build_hiworld_media_state(&media.cdc, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(16, out_len);
+
+    /* Disc=0, Loaded=0, Format=0, Track=0, Min=0, Sec=0, Mode=0, Status=0x0C, Total=0
+     * Checksum: (0x0B + 0x97 + 0x00 + 0x00 + 0x00 + 0x00 + 0x00 + 0x00 + 0x00 + 0x00 + 0x0C + 0x00 + 0x00) - 1 = 0xAE - 1 = 0xAD
+     */
+    const uint8_t expected_eject[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0xAD
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_eject, out, 16);
+}
+
+void test_peugeot_407_rd4_cd_ground_truth_dump(void) {
+    vehicle_media_t media;
+    psa_rd4_media_init(&media, NULL);
+
+    /* Section 7 Example 6: Ground truth from dump_2026-10-10_11-12-22.log
+     * CAN 0x165 (dlc 4): C8 C0 20 00 -> Source 0x2 (Internal CD)
+     * CAN 0x365 (dlc 5): 0C 26 02 00 00 -> Total Tracks = 12 (0x0C)
+     * CAN 0x3A5 (dlc 6): 03 03 19 03 0C 00 -> Track 3, Playing, 03 min 12 sec
+     * Single drive (disc_slot = 0, loaded_mask = 0)
+     * Wire output: 5A A5 0B 97 00 00 00 03 00 03 0C 00 02 0C 00 C1
+     */
+    const uint8_t can_165[] = { 0xC8, 0xC0, 0x20, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_165, sizeof(can_165));
+    TEST_ASSERT_EQUAL_UINT8(0x30, media.radio.source_mode);
+
+    const uint8_t can_365[] = { 0x0C, 0x26, 0x02, 0x00, 0x00 };
+    psa_rd4_process_can_0x365(&media.cdc, can_365, sizeof(can_365));
+    TEST_ASSERT_EQUAL_UINT16(12, media.cdc.total_tracks);
+
+    const uint8_t can_3a5[] = { 0x03, 0x03, 0x19, 0x03, 0x0C, 0x00 };
+    psa_rd4_process_can_0x3a5(&media.cdc, can_3a5, sizeof(can_3a5));
+    TEST_ASSERT_EQUAL_UINT16(3, media.cdc.track_num);
+    TEST_ASSERT_EQUAL_UINT8(3, media.cdc.elapsed_min);
+    TEST_ASSERT_EQUAL_UINT8(12, media.cdc.elapsed_sec);
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.cdc.play_status);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.play_modes);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.active_disc);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.discs_loaded_mask);
+
+    uint8_t out[32];
+    size_t out_len = build_hiworld_media_state(&media.cdc, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(16, out_len);
+
+    const uint8_t expected_dump[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x03, 0x00, 0x03, 0x0C, 0x00, 0x02, 0x0C, 0x00, 0xC1
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump, out, 16);
+
+    /* Verification for dump_2026-10-10_12-07-47.log:
+     * CAN 0x3A5: 05 03 1E 00 07 00 -> Track 5, raw status 0x1E, 00 min 07 sec
+     * OEM CAN box: 5A A5 0B 97 00 00 00 05 00 00 07 00 02 0C 00 BB
+     */
+    const uint8_t can_3a5_log1[] = { 0x05, 0x03, 0x1E, 0x00, 0x07, 0x00 };
+    psa_rd4_process_can_0x3a5(&media.cdc, can_3a5_log1, sizeof(can_3a5_log1));
+    TEST_ASSERT_EQUAL_UINT16(5, media.cdc.track_num);
+    TEST_ASSERT_EQUAL_UINT8(0, media.cdc.elapsed_min);
+    TEST_ASSERT_EQUAL_UINT8(7, media.cdc.elapsed_sec);
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.cdc.play_status);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.play_modes);
+
+    out_len = build_hiworld_media_state(&media.cdc, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(16, out_len);
+    const uint8_t expected_dump_log1[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x07, 0x00, 0x02, 0x0C, 0x00, 0xBB
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_log1, out, 16);
+
+    /* Verification for dump_2026-10-10_12-09-48.log:
+     * CAN 0x3A5: 03 03 19 00 04 00 -> Track 3, raw status 0x19, 00 min 04 sec
+     * OEM CAN box: 5A A5 0B 97 00 00 00 03 00 00 04 00 02 0C 00 B6
+     */
+    const uint8_t can_3a5_log2[] = { 0x03, 0x03, 0x19, 0x00, 0x04, 0x00 };
+    psa_rd4_process_can_0x3a5(&media.cdc, can_3a5_log2, sizeof(can_3a5_log2));
+    TEST_ASSERT_EQUAL_UINT16(3, media.cdc.track_num);
+    TEST_ASSERT_EQUAL_UINT8(0, media.cdc.elapsed_min);
+    TEST_ASSERT_EQUAL_UINT8(4, media.cdc.elapsed_sec);
+    TEST_ASSERT_EQUAL_UINT8(0x02, media.cdc.play_status);
+    TEST_ASSERT_EQUAL_UINT8(0x00, media.cdc.play_modes);
+
+    out_len = build_hiworld_media_state(&media.cdc, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(16, out_len);
+    const uint8_t expected_dump_log2[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00, 0x02, 0x0C, 0x00, 0xB6
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_log2, out, 16);
 }
 
 void test_peugeot_407_rd4_source_and_wavebands(void) {

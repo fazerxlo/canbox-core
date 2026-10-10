@@ -1589,6 +1589,78 @@ void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
     }
 }
 
+void psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 2) return;
+
+    /* CAN 0x325: Internal CD Drive Mechanism & Disc Presence (DLC: 3)
+     * Byte 0: Mechanism status (0x00 = Idle/Normal, 0x80 = Tray/Disc active)
+     * Byte 1: Disc presence (0x03 = Disc Loaded/Present, 0x00 = Ejected/Empty)
+     * For internal in-dash CD, OEM Canbox keeps active_disc = 0x00, discs_loaded_mask = 0x00.
+     */
+    if (data[1] == 0x00) {
+        cdc->play_status = 0x0C; /* Eject */
+    }
+    cdc->updated = true;
+}
+
+void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 1) return;
+
+    /* CAN 0x365: Internal CD Disc Info (DLC: 5)
+     * Byte 0: Total tracks on disc (1..99)
+     * Byte 1: CD Format / Mechanism (0x26)
+     * Byte 2: Disc attributes (0x00 = Data, 0x02 = CD-DA Audio)
+     */
+    cdc->total_tracks = data[0];
+    if (dlc >= 3 && data[2] == 0x00) {
+        cdc->disc_format = 0x01; /* MP3 */
+    } else {
+        cdc->disc_format = 0x00; /* CD-DA */
+    }
+    cdc->active_disc = 0x00;
+    cdc->discs_loaded_mask = 0x00;
+    cdc->updated = true;
+}
+
+void psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 5) return;
+
+    /* CAN 0x3A5: Internal CD Track & Playback Telemetry (DLC: 6)
+     * Byte 0: Current track number (1..99)
+     * Byte 1: Track index / sub-index
+     * Byte 2: Drive status & modes (e.g. 0x19, 0x1E = Normal Play, 0x25 = Fast Forward/Seeking, 0x01 = Pause)
+     * Byte 3: Elapsed minutes (0..59)
+     * Byte 4: Elapsed seconds (0..59)
+     * Byte 5: Reserved (0x00)
+     */
+    cdc->track_num   = data[0];
+    cdc->elapsed_min = data[3];
+    cdc->elapsed_sec = data[4];
+
+    /* Drive status (Byte 2) */
+    uint8_t raw_status = data[2];
+    if (raw_status == 0x01) {
+        cdc->play_status = 0x01; /* Pause */
+    } else if (raw_status == 0x00) {
+        cdc->play_status = 0x06; /* Stop */
+    } else if (raw_status == 0x25) {
+        cdc->play_status = 0x02; /* Fast Forward / Seeking playback */
+    } else {
+        cdc->play_status = 0x02; /* Play (0x19, 0x1E, etc. all map to 0x02 Play) */
+    }
+
+    /* Mode flags (Repeat, Random, Scan)
+     * Bit 7: Scan, Bit 6: Disc Scan, Bit 5: Repeat Track (0x20), Bit 4: Repeat Disc (0x10), Bit 3: Random (0x08)
+     * In OEM captures, standard in-dash playback sends play_modes = 0x00.
+     */
+    cdc->play_modes = 0x00;
+
+    /* Single in-dash CD drive: active disc and magazine loaded mask are 0x00 */
+    cdc->active_disc = 0x00;
+    cdc->discs_loaded_mask = 0x00;
+    cdc->updated = true;
+}
+
 void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
     if (!cdc || !data || dlc < 7) return;
 
@@ -1602,9 +1674,9 @@ void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
     /* Disc slot bitmask */
     if (cdc->active_disc >= 1 && cdc->active_disc <= 6) {
         cdc->discs_loaded_mask |= (uint8_t)(1 << (cdc->active_disc - 1));
-        cdc->play_status = 0x01; /* Play */
+        cdc->play_status = 0x02; /* Play (Hiworld wire code 0x02 = Play) */
     } else {
-        cdc->play_status = 0x00; /* Stop */
+        cdc->play_status = 0x06; /* Stop (Hiworld wire code 0x06 = Stop) */
     }
     cdc->disc_format = 0x00;
     cdc->updated = true;
@@ -1686,17 +1758,19 @@ size_t build_hiworld_media_state(const vehicle_cdc_t *cdc, uint8_t *out_buf, siz
     out_buf[2] = len;
     out_buf[3] = 0x97; /* HIWORLD_CMD_CAR_MEDIA_STATE */
 
-    out_buf[4]  = cdc->active_disc;
-    out_buf[5]  = cdc->discs_loaded_mask;
-    out_buf[6]  = cdc->disc_format;
-    out_buf[7]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
-    out_buf[8]  = (uint8_t)(cdc->track_num & 0xFF);
+    out_buf[4]  = cdc->active_disc & 0x0F;
+    out_buf[5]  = cdc->discs_loaded_mask & 0x3F;
+    out_buf[6]  = cdc->disc_format & 0x3F;
+    /* Track Number uint16_le (Data[3..4] in spec, out_buf[7..8]) */
+    out_buf[7]  = (uint8_t)(cdc->track_num & 0xFF);
+    out_buf[8]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
     out_buf[9]  = cdc->elapsed_min;
     out_buf[10] = cdc->elapsed_sec;
     out_buf[11] = cdc->play_modes;
     out_buf[12] = cdc->play_status;
-    out_buf[13] = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
-    out_buf[14] = (uint8_t)(cdc->total_tracks & 0xFF);
+    /* Total Tracks uint16_le (Data[9..10] in spec, out_buf[13..14]) */
+    out_buf[13] = (uint8_t)(cdc->total_tracks & 0xFF);
+    out_buf[14] = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
 
     uint16_t sum = len + 0x97;
     for (size_t i = 4; i <= 14; i++) {
