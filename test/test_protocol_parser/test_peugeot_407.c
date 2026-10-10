@@ -1644,29 +1644,80 @@ void test_peugeot_407_hvac_hiworld(void) {
 void test_peugeot_407_trip_reset_frames(void) {
     can_frame_t frame;
 
-    // 1. Trip 1 Reset (Bit 7 = 0x80)
+    // 1. Trip 1 Reset (0x167: Byte 0 = 0x82, bytes 2..3 = 0xFFFF)
     TEST_ASSERT_TRUE(build_psa_trip_reset_frame(1, &frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
-    for (int i = 1; i < 8; i++) {
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x82, frame.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[3]);
 
-    // 2. Trip 2 Reset (Bit 6 = 0x40)
-    TEST_ASSERT_TRUE(build_psa_trip_reset_frame(2, &frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, frame.id);
+    // Trip 1 Reset Stop (0x167: Byte 0 = 0x02)
+    TEST_ASSERT_TRUE(build_psa_trip_reset_stop_frame(1, &frame));
+    TEST_ASSERT_EQUAL_HEX32(0x167, frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
-    for (int i = 1; i < 8; i++) {
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x02, frame.data[0]);
+
+    // 2. Trip 2 Reset (0x167: Byte 0 = 0x44, bytes 2..3 = 0xFFFF)
+    TEST_ASSERT_TRUE(build_psa_trip_reset_frame(2, &frame));
+    TEST_ASSERT_EQUAL_HEX32(0x167, frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x44, frame.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[3]);
+
+    // Trip 2 Reset Stop (0x167: Byte 0 = 0x04)
+    TEST_ASSERT_TRUE(build_psa_trip_reset_stop_frame(2, &frame));
+    TEST_ASSERT_EQUAL_HEX32(0x167, frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x04, frame.data[0]);
 
     // 3. Boundary & Error checks
     TEST_ASSERT_FALSE(build_psa_trip_reset_frame(0, &frame));
     TEST_ASSERT_FALSE(build_psa_trip_reset_frame(3, &frame));
     TEST_ASSERT_FALSE(build_psa_trip_reset_frame(1, NULL));
+    TEST_ASSERT_FALSE(build_psa_trip_reset_stop_frame(0, &frame));
+    TEST_ASSERT_FALSE(build_psa_trip_reset_stop_frame(1, NULL));
 
     // 4. Send reset status check
     TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(1));
     TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(2));
     TEST_ASSERT_EQUAL(HAL_STATUS_ERROR, psa_trip_send_reset(0));
+}
+
+void test_peugeot_407_mfd_detection_and_timeout(void) {
+    can_router_init();
+    TEST_ASSERT_FALSE(can_router_get_state()->mfd_present);
+
+    // 1. Receive 0x0DF (EMF display status)
+    can_frame_t f_0df = {
+        .id = 0x0DF,
+        .dlc = 3,
+        .data = { 0x10, 0x00, 0x50 }
+    };
+    can_router_process_can(&f_0df);
+    TEST_ASSERT_TRUE(can_router_get_state()->mfd_present);
+
+    // 2. Periodic ticks without MFD frame (19 ticks = 1.9s, still present)
+    for (int i = 0; i < 19; i++) {
+        can_router_periodic_100ms();
+    }
+    TEST_ASSERT_TRUE(can_router_get_state()->mfd_present);
+
+    // 3. 20th tick (2.0s reached) -> timeout, mfd_present goes false
+    can_router_periodic_100ms();
+    TEST_ASSERT_FALSE(can_router_get_state()->mfd_present);
+
+    // 4. Receive 0x167 (EMF command frame) -> mfd_present restored
+    can_frame_t f_167 = {
+        .id = 0x167,
+        .dlc = 8,
+        .data = { 0x09, 0x06, 0xFF, 0xFF, 0x7F, 0xFF, 0x00, 0x00 }
+    };
+    can_router_process_can(&f_167);
+    TEST_ASSERT_TRUE(can_router_get_state()->mfd_present);
 }
 
 /* --------------------------------------------------------------------------

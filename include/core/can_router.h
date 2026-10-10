@@ -183,6 +183,7 @@ typedef struct {
     bool                     radio_on;
     bool                     radio_present;
     bool                     radio_sleep;
+    bool                     mfd_present;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);

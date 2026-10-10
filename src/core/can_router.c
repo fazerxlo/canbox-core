@@ -16,6 +16,7 @@ static vehicle_alert_item_t s_prev_alert_items[CANBOX_MAX_ACTIVE_ALERTS];
 static uint8_t         s_prev_alert_count = 0;
 static uint16_t        s_can_inactivity_ticks = 0;
 static bool            s_can_bus_sleeping = false;
+static uint16_t        s_mfd_watchdog_ticks = 0;
 
 /* 256 bytes bitmask for 11-bit standard CAN IDs (0..2047): O(1) early rejection */
 static uint8_t         s_allowed_ids_bitmask[256];
@@ -53,6 +54,7 @@ void can_router_init(void) {
     memset(s_prev_alert_items, 0, sizeof(s_prev_alert_items));
     s_can_inactivity_ticks = 0;
     s_can_bus_sleeping = false;
+    s_mfd_watchdog_ticks = 0;
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
     hal_gpio_write(GPIO_PIN_ILL_OUT, false);
     hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false);
@@ -78,6 +80,10 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     vehicle_profile_process_frame(frame, &s_current_state);
+
+    if (s_current_state.mfd_present) {
+        s_mfd_watchdog_ticks = 0;
+    }
 
     // Immediately push illumination hardware trigger on lighting change
     bool ill_active = s_current_state.lights.side_light ||
@@ -326,6 +332,14 @@ void can_router_periodic_100ms(void) {
     // When bus is sleeping, halt all periodic transmissions and heartbeats
     if (s_can_bus_sleeping) {
         return;
+    }
+
+    // MFD / EMF liveness watchdog (2.0s / 20 ticks of silence on 0x0DF and 0x167)
+    if (s_current_state.mfd_present) {
+        if (++s_mfd_watchdog_ticks >= 20) {
+            s_current_state.mfd_present = false;
+            s_mfd_watchdog_ticks = 20;
+        }
     }
 
     // Broadcast periodic states (Vehicle speed, RPM)

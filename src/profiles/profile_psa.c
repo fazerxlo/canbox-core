@@ -174,6 +174,18 @@ static void psa_decode_radio_power_0x165(const can_frame_t *frame, vehicle_state
     psa_update_derived_power_state(state);
 }
 
+static void psa_decode_emf_heartbeat_0x0df(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)frame;
+    /* Periodic display state broadcast from OEM Multi-Function Display (EMF) */
+    state->mfd_present = true;
+}
+
+static void psa_decode_emf_commands_0x167(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)frame;
+    /* Periodic display commands / active page broadcast from OEM Multi-Function Display (EMF) */
+    state->mfd_present = true;
+}
+
 static void psa_decode_doors_0x220_profile(const can_frame_t *frame, vehicle_state_t *state) {
     psa_doors_body_t doors;
     psa_decode_doors_0x220(frame->data, frame->dlc, &doors);
@@ -402,6 +414,8 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
     { 0x165,                         psa_decode_radio_power_0x165 },
+    { PSA_CAN_ID_EMF_STATUS_0DF,     psa_decode_emf_heartbeat_0x0df },
+    { PSA_CAN_ID_EMF_COMMANDS_167,   psa_decode_emf_commands_0x167 },
 };
 
 static void psa_init(void) {

@@ -917,16 +917,42 @@ bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame) {
     }
 
     memset(out_frame, 0, sizeof(*out_frame));
-    out_frame->id          = PSA_CAN_ID_TRIP_INSTANT; /* 0x221 (MSG_DEMANDES_EMF) */
+    out_frame->id          = PSA_CAN_ID_EMF_COMMANDS_167; /* 0x167 (MSG_COMMANDES_EMF) */
     out_frame->dlc         = 8;
     out_frame->is_extended = false;
     out_frame->is_remote   = false;
 
     if (trip_index == 1) {
-        out_frame->data[0] = 0x80; /* Bit 7: Trip 1 Reset */
+        out_frame->data[0] = 0x82; /* Bit 7: Reset active, Bit 1: Trip 1 page */
     } else {
-        out_frame->data[0] = 0x40; /* Bit 6: Trip 2 Reset */
+        out_frame->data[0] = 0x44; /* Bit 6: Reset active, Bit 2: Trip 2 page */
     }
+    out_frame->data[1] = 0x00;
+    out_frame->data[2] = 0xFF;
+    out_frame->data[3] = 0xFF;
+
+    return true;
+}
+
+bool build_psa_trip_reset_stop_frame(uint8_t trip_index, can_frame_t *out_frame) {
+    if (!out_frame || (trip_index != 1 && trip_index != 2)) {
+        return false;
+    }
+
+    memset(out_frame, 0, sizeof(*out_frame));
+    out_frame->id          = PSA_CAN_ID_EMF_COMMANDS_167; /* 0x167 (MSG_COMMANDES_EMF) */
+    out_frame->dlc         = 8;
+    out_frame->is_extended = false;
+    out_frame->is_remote   = false;
+
+    if (trip_index == 1) {
+        out_frame->data[0] = 0x02; /* Reset cleared, Bit 1: Trip 1 page active */
+    } else {
+        out_frame->data[0] = 0x04; /* Reset cleared, Bit 2: Trip 2 page active */
+    }
+    out_frame->data[1] = 0x00;
+    out_frame->data[2] = 0xFF;
+    out_frame->data[3] = 0xFF;
 
     return true;
 }
@@ -937,7 +963,25 @@ hal_status_t psa_trip_send_reset(uint8_t trip_index) {
         return HAL_STATUS_ERROR;
     }
 
-    return hal_can_send(&frame);
+    hal_status_t status = hal_can_send(&frame);
+    if (status != HAL_STATUS_OK) {
+        return status;
+    }
+
+    /* Send termination frame (clears reset bit while preserving trip selection)
+     * so BSI resumes trip distance and fuel counters */
+    if (build_psa_trip_reset_stop_frame(trip_index, &frame)) {
+        hal_can_send(&frame);
+    }
+
+    /* Also send legacy 0x221 MSG_DEMANDES_EMF reset pulse for compatibility */
+    memset(&frame, 0, sizeof(frame));
+    frame.id = PSA_CAN_ID_TRIP_INSTANT; /* 0x221 */
+    frame.dlc = 8;
+    frame.data[0] = (trip_index == 1) ? 0x80 : 0x40;
+    hal_can_send(&frame);
+
+    return HAL_STATUS_OK;
 }
 
 /* --------------------------------------------------------------------------

@@ -62,6 +62,7 @@ void test_peugeot_407_trip_hiworld_bsi_slow_data_0x0f6(void);
 void test_peugeot_407_trip_hiworld_speed_fallback(void);
 void test_peugeot_407_trip_hiworld_boundary_and_null_safety(void);
 void test_peugeot_407_trip_reset_frames(void);
+void test_peugeot_407_mfd_detection_and_timeout(void);
 void test_peugeot_407_verification_vector_4_doors(void);
 void test_peugeot_407_doors_all_open_with_handbrake(void);
 void test_peugeot_407_doors_hiworld_vector_1_driver_front(void);
@@ -188,6 +189,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_trip_hiworld_speed_fallback);
     RUN_TEST(test_peugeot_407_trip_hiworld_boundary_and_null_safety);
     RUN_TEST(test_peugeot_407_trip_reset_frames);
+    RUN_TEST(test_peugeot_407_mfd_detection_and_timeout);
     RUN_TEST(test_peugeot_407_verification_vector_4_doors);
     RUN_TEST(test_peugeot_407_doors_all_open_with_handbrake);
     RUN_TEST(test_peugeot_407_doors_hiworld_vector_1_driver_front);

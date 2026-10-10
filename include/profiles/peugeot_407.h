@@ -17,7 +17,9 @@ extern "C" {
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
 #define PSA_CAN_ID_BSI_SLOW_DATA    0x0F6
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
+#define PSA_CAN_ID_EMF_STATUS_0DF   0x0DF
 #define PSA_CAN_ID_ALERT_JOURNAL    0x120
+#define PSA_CAN_ID_EMF_COMMANDS_167 0x167
 #define PSA_CAN_ID_ALERT_QUERY      0x39B
 #define PSA_CAN_ID_BSI_GAUGES       0x161
 #define PSA_CAN_ID_FUEL_RANGE_TEMP  0x165
@@ -269,6 +271,7 @@ void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_
 void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
 void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
 bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame);
+bool build_psa_trip_reset_stop_frame(uint8_t trip_index, can_frame_t *out_frame);
 hal_status_t psa_trip_send_reset(uint8_t trip_index);
 
 /* --------------------------------------------------------------------------
