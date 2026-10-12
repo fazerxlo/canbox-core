@@ -78,6 +78,12 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if (packet->cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY) {
         /* Head Unit requested alert/diagnostic log refresh (forwardType 0x2F) */
         can_router_query_alert_journal();
+    } else if (packet->cmd == HIWORLD_CMD_UPGRADE_TRIGGER) {
+        /* Head Unit requested firmware update (e.g. 5A A5 03 E0 00 00 E2) */
+        /* Write persistent magic token to reserved SRAM */
+        *(volatile uint32_t *)0x20000000 = 0x55AA55AA;
+        /* Reboot into bootloader */
+        hal_system_reboot();
     }
 }
 

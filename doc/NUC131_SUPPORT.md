@@ -6,11 +6,11 @@ This document captures the hardware integration, peripheral mapping, and build a
 
 ## 1. Target MCU Overview
 
-* **Microcontroller:** Nuvoton NUC131 (e.g. `NUC131XE3AE`, `NUC131SD2AE`)
-* **Core:** ARM Cortex-M0 running at 50 MHz (PLL from internal 22.1184 MHz HIRC / external crystal)
+* **Microcontroller:** Nuvoton NUC131 (e.g. `NUC131SD2AE`, `NUC131SC2AE`)
+* **Core:** ARM Cortex-M0 running at 48–50 MHz (PLL from internal 22.1184 MHz HIRC / external crystal)
 * **Memory:**
-  * 16 KB SRAM
-  * 128 KB APROM Flash (Application ROM)
+  * 8 KB – 16 KB SRAM (`0x20000000`–`0x20001FFF`)
+  * 64 KB – 68 KB APROM Flash (Application ROM)
   * 4 KB LDROM (ISP Bootloader)
 * **Automotive Peripherals:**
   * Bosch C_CAN 2.0B Controller with 32 message objects
@@ -22,27 +22,28 @@ This document captures the hardware integration, peripheral mapping, and build a
 ## 2. Reference Sources
 
 * **PlatformIO Platform:** [`fazerxlo/nuvoton_nuc131`](https://github.com/fazerxlo/nuvoton_nuc131) — PlatformIO platform definition, compiler scripts, and CMSIS/BSP integration.
-* **Reference Commercial Firmware:** `fazerxlo/canbox/vw_nc03` — Verified OEM CAN box firmware layout for VW/PSA aftermarket adapters using NUC131.
+* **Bootloader Architecture & Flash Swapping:** `doc/BOOTLOADER_REPLACEMENT.md` — Complete specification of the native Hiworld IAP bootloader, packaging engine (`tools/pack_hiworld_iap.py`), and OpenOCD SWD unlocking procedures.
 
 ---
 
 ## 3. Hardware Pinout & Peripheral Mapping
 
-The `canbox-core` HAL implementation (`src/hal/hal_nuc131/`) maps the hardware pins to match automotive CAN box PCB designs:
+The `canbox-core` HAL implementation (`src/hal/hal_nuc131/`) and Hiworld bootloader (`src/hiworld_bootloader/`) map hardware pins to match automotive CAN box PCB designs (specifically Raise PSA-RZ-15-0121-B1):
 
 | Function / Signal | NUC131 Pin | Direction / Mode | HAL Identifier | Notes |
 | :--- | :---: | :---: | :--- | :--- |
-| **CAN0 RX** | `PD.6` | Input (MFP CAN0) | `hal_can_init()` | Connected to CAN transceiver (TJA1050/SN65) RX |
+| **CAN0 RX** | `PD.6` | Input (MFP CAN0) | `hal_can_init()` | Connected to CAN transceiver (TJA1050/SN65) RX (`SYS_GPD_MFP = 0x000000C0`) |
 | **CAN0 TX** | `PD.7` | Output (MFP CAN0) | `hal_can_init()` | Connected to CAN transceiver TX |
-| **UART0 RX** | `PB.0` | Input (MFP UART0) | `hal_uart_init()` | Serial stream from Android Head Unit (Rx) |
-| **UART0 TX** | `PB.1` | Output (MFP UART0) | `hal_uart_init()` | Serial stream to Android Head Unit (Tx) |
-| **CAN STBY** | `PC.3` | Output (Open-Drain) | `GPIO_PIN_CAN_STBY` | Transceiver standby/silent control (`0`=Normal, `1`=Standby) |
+| **UART0 RX** | `PB.0` | Input (MFP UART0) | `hal_uart_init()` | Serial stream from Android Head Unit (Rx @ 38,400 baud, 8N1) |
+| **UART0 TX** | `PB.1` | Output (Push-Pull 1) | `hal_uart_init()` | Serial stream to Android Head Unit (Tx @ 38,400 baud, 8N1) |
+| **CAN STBY** | `PC.3` | Output (Push-Pull) | `GPIO_PIN_CAN_STBY` | Transceiver standby active-low control (`0`=Normal/Active, `1`=Standby). Driven `0` to silence buzzer |
+| **Transceiver Enable** | `PC.0, PC.1, PC.2, PC.6, PC.7` | Output (Push-Pull) | `GPIOC_DOUT` | Driven HIGH (`1`) push-pull (`GPIOC_DOUT = 0x000000C7`, `GPIOC_PMD = 0x0000F045`) |
+| **Buzzer Pins** | `PB.3`, `PB.12` | Output (Push-Pull) | `GPIOB_DOUT` | Held HIGH (`1`) push-pull (`GPIOB_DOUT = 0x0000113F`, `GPIOB_PMD = 0x43030FF4`) to silence parking chime circuit |
 | **ACC / HU Power** | `PA.8` | Output (Push-Pull) | `GPIO_PIN_HEADUNIT_POWER` | Switched $+12\text{V}$ ACC wakeup output to Head Unit |
 | **Illumination** | `PA.9` | Output (Push-Pull) | `GPIO_PIN_ILL_OUT` | Physical $+12\text{V}$ night dimming / ILL wire |
-| **Brake / Handbrake** | `PA.12` | Output (Push-Pull) | `GPIO_PIN_BRAKE_OUT` | Physical Handbrake trigger wire (permanently OFF: `0`) |
+| **Brake / Handbrake** | `PA.12` | Output (Push-Pull) | `GPIO_PIN_BRAKE_OUT` | Physical Handbrake trigger wire (held `0`) |
 | **Reverse Trigger**| `PA.13` | Output (Push-Pull) | `GPIO_PIN_REVERSE_OUT` | Physical $+12\text{V}$ camera switch trigger wire |
-| **Ignition Sense** | `PA.0` | Input (Pull-Down) | `GPIO_PIN_IGNITION_IN` | Hardware analog $+12\text{V}$ ignition input (via divider/opto) |
-| **SWD CLK / DIO** | `PA.15` / `PA.14` | Special Function | In-Circuit Debug | `CON2` SWD header (`ICE_CLK`, `ICE_DAT`) |
+| **SWD CLK / DIO** | `ICE_CLK` / `ICE_DAT` | Special Function | In-Circuit Debug | SWD test pads (`SWD DPIDR = 0x0BB11477`) |
 
 ---
 
@@ -77,12 +78,14 @@ The NUC131 HAL layer satisfies the portability constraints of OpenCanbox Core: a
 
 ## 5. PlatformIO Configuration (`platformio.ini`)
 
-The project configures the environment `nuc131_cbox` using the custom platform repository:
+The project configures the bootloader and application environments using custom linker scripts:
 
 ```ini
-[env:nuc131_cbox]
+[env:nuc131_bootloader]
 platform = https://github.com/fazerxlo/nuvoton_nuc131.git
 board = nuvoton_nuc131
+board_build.ldscript = ldscripts/nuc131_bootloader.ld
+board_build.custom_startup = yes
 test_ignore = *
 build_flags = 
     -Iinclude
@@ -90,21 +93,19 @@ build_flags =
     -DPLATFORM_NUC131
     -Wall -Wextra -std=c99
 build_src_filter = 
-    +<main.c>
-    +<core/*>
-    +<profiles/*>
-    +<protocols/*>
-    +<hal/hal_nuc131/*>
+    +<hiworld_bootloader/startup_bootloader.S>
+    +<hiworld_bootloader/hiworld_iap_nuc131.c>
 
 [env:raise_nuc131]
 platform = https://github.com/fazerxlo/nuvoton_nuc131.git
 board = nuvoton_nuc131
+board_build.ldscript = ldscripts/nuc131_app.ld
+board_build.custom_startup = yes
 test_ignore = *
 build_flags = 
     -Iinclude
     -Isrc
     -DPLATFORM_NUC131
-    -DAPP_BASE_OFFSET=0x8000
     -Wall -Wextra -std=c99
 build_src_filter = 
     +<main.c>
@@ -122,25 +123,34 @@ build_src_filter =
 Compile the NUC131 targets using the PlatformIO CLI:
 
 ```bash
-# Generic target
-pio run -e nuc131_cbox
+# Hiworld IAP Bootloader (APROM 0x00000000 - 0x00001FFF, 8 KB)
+pio run -e nuc131_bootloader
 
-# Drop-in commercial Raise target (0x00008000 bootloader offset)
+# canbox-core Application (APROM 0x00002000 - 0x0000FFFF, 56 KB)
 pio run -e raise_nuc131
+
+# Pack application into Hiworld IAP container for Head Unit USB update
+python3 tools/pack_hiworld_iap.py .pio/build/raise_nuc131/program.bin -o can_app.iap
 ```
 
-### 6.2 Typical Resource Utilization (NUC131XE3AE)
-* **RAM:** ~2.3 KB used of 16 KB total (~14%)
-* **Flash:** ~56.5 KB used of 128 KB total (~43%)
+### 6.2 Typical Resource Utilization (NUC131SD2AE)
+* **Bootloader Flash:** ~1.85 KB of 8 KB partition (1.4% total MCU flash)
+* **Application Flash:** ~15.0 KB of 56 KB partition (11.4% total MCU flash)
+* **Application SRAM:** ~1.8 KB of 8 KB available SRAM (11.1%)
 
 ### 6.3 Flashing Options
-1. **Nu-Link (ICP / SWD):** Connect SWD lines (`ICE_CLK`, `ICE_DAT`, `RESET`, `GND`, `VCC`) to a Nuvoton Nu-Link programmer and flash using Nu-Link ICP Programming Tool or OpenOCD.
-2. **ISP over UART / USB (`tool-nuvoton-isp`):** When booting into LDROM (holding boot pin or via command), the chip accepts binary firmware over UART0.
+1. **OpenOCD + ST-Link V2 (SWD):**
+   - Mass erase factory lock: `openocd -f openocd_nuc131.cfg -c "init; halt; numicro chip_erase; shutdown"`
+   - Flash bootloader: `openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/nuc131_bootloader/program.bin 0x00000000; shutdown"`
+   - Flash application: `openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/raise_nuc131/program.bin 0x00002000; reset run; shutdown"`
+2. **Head Unit In-Application Programming (IAP):**
+   - Copy `can_app.iap` to `/canmcuupdata/can_app.iap` on a USB drive and trigger CAN Update from Head Unit settings.
 
 ---
 
 ## 7. Current Status
 
 * ✅ Clean build with zero warnings under `-Wall -Wextra -std=c99`.
-* ✅ Complete HAL coverage for CAN, UART, GPIO, and System Tick.
-* ✅ Fully decoupled from MCU-specific headers in core and profile layers.
+* ✅ Complete HAL coverage for CAN, UART, GPIO, and System Tick (calibrated 1000 Hz SysTick).
+* ✅ Dual-partition memory layout with hardware interrupt bounce trampolines verified on physical board.
+* ✅ Transceiver standby and buzzer GPIO states aligned with ground-truth factory MMIO configuration (buzzer completely silenced).
