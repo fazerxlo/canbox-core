@@ -141,6 +141,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[-]` | `0x81` | **Cruise Presets Group 1 Setup** | `0x0A` (10) | `0x39B` (Tx) | Documented in `commands_and_payload_structure.md` | Uploads speed memory presets 1..6 |
 | `[x]` | `0x85` | **Historical Alarm Replay Query**| `0x02` (2) | `0x39B` (Tx) | `src/protocols/proto_hiworld_adapter.c` | Triggers alert journal replay (mapped along with `0x2F`) |
 | `[x]` | `0x94` | **Software Reset / Link Ping** | `0x01` (1) | N/A (Internal) | `src/protocols/hiworld_connection.c` | Link liveness check / software reboot |
+| `[x]` | **ALL**| **Universal Downlink ACK (`0xFF`)**| `0x02` (2) | N/A (UART Tx) | `src/protocols/proto_hiworld_adapter.c`<br>`src/protocols/hiworld_connection.c` | Implemented universal ACK response `[0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]` for all valid downlink frames (`CmdID != 0xFE && CmdID != 0xFF`), matching OEM commercial firmware specification |
 | `[ ]` | `0xC2` | **MCU Firmware Flash Transfer** | `0x0A` (10) | N/A (Bootloader)| Target-specific bootloader (STM32/ESP32 IAP) |
 
 ---
@@ -266,16 +267,20 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 ### 4.9 Physical Hardware Synthesis & Low-Power Management (GPIO)
 - **ACC (Switched Head Unit Power):**
   - Synthesized via `GPIO_PIN_HEADUNIT_POWER` (PB9 on STM32 `volvo_od2`, PA8 on NUC131 `vw_nc03`, GPIO 18 on ESP32).
-  - Primary Control Frame: CAN `0x036` (`COMMANDES_BSI`, 100 ms).
-    - Byte 4 Bits [2:0] (`PHASE_VIE`):
-      - `0x01`: **Ignition ON** (Wakeup / Run `+APC`) — Radio turns ON and stays awake (`VEHICLE_IGNITION_ON`, ACC ON).
-      - `0x02`: **Ignition OFF** (Going to sleep) — Initiates shutdown / accessory timer (`VEHICLE_IGNITION_OFF`, ACC OFF).
-      - `0x03`: **Wakeup transition** — Brief (~40 ms) pulse during key turn.
-      - `0x00`: **Deep Sleep / Standby** — Head unit enters deep sleep mode (`VEHICLE_IGNITION_OFF`, ACC OFF).
-    - Byte 2 Bit 7 (`MODE_ECO` = `0x80`):
-      - `1`: **Economy Mode** — Forces radio and head unit power OFF immediately to protect battery.
-  - RD4 Radio Awakening: CAN `0x165` Byte 0 Bit 7 (`0x80`). When key is OFF, turning on the factory RD4 radio promotes ignition state to `VEHICLE_IGNITION_ACC` to power the head unit. Shuts down when radio switches OFF (`(data[0] & 0xC0) == 0`). Overridden to OFF if Economy Mode (`0x036` Byte 2 Bit 7) is active.
-  - Battery Reconnect: BSI sends `0x036` Byte 4 = `0x02` (Ignition OFF) for ~14s before dropping to `0x00` (`dump_connect_battery_only.log`); ACC wire stays strictly 0V throughout.
+  - Declarative Power Formula with Radio Presence & Deep Sleep Gating:
+    - If `economy_mode` $\to$ `VEHICLE_IGNITION_OFF` (ACC OFF).
+    - Else if `radio_present` (CAN `0x165` detected on bus):
+      - If `radio_sleep` (`(data[0] & 0xC0) == 0`, e.g. `0x08 80 00 00`) $\to$ `VEHICLE_IGNITION_OFF` (ACC OFF).
+      - Else if `radio_on` (`data[0] & 0x80`) $\to$ `VEHICLE_IGNITION_ON` / `ACC` (ACC ON).
+      - Else $\to$ follows `ignition_on`.
+    - Else (no factory radio on bus, e.g. aftermarket HU installation) $\to$ follows `ignition_on`.
+    - `ignition_on`: CAN `0x036` Byte 4 Bits [2:0] == `0x01` (Run `+APC`) or `0x03` (Crank pulse).
+    - `radio_present`: Received CAN `0x165` on bus.
+    - `radio_on`: CAN `0x165` Byte 0 Bit 7 == `1` (RD4 radio active).
+    - `radio_sleep`: CAN `0x165` Byte 0 Bits [7:6] == `0` (RD4 radio in sleep / standby).
+    - `economy_mode`: CAN `0x036` Byte 2 Bit 7 == `1` (`MODE_ECO` battery protection).
+  - Battery Reconnect (`dump_connect_battery_only.log`): BSI sends `0x036` Byte 4 = `0x02` (Ignition OFF) for ~14s before dropping to `0x00`; `radio_on` is false, so ACC stays strictly 0V.
+  - Radio Awakening & Sleep (`dump_ign_off_rd4_on_off.log`, `dump_2026-10-10_09-53-15.log`): When key is OFF, pressing RD4 knob asserts `radio_on`, turning ACC ON; when radio enters sleep (`0x08`), ACC drops to 0V even if stale ignition pulses (`0x01`) linger.
 - **ILL (Night Dimming & Brightness):**
   - Synthesized via `GPIO_PIN_ILL_OUT` (PC13 on STM32 `volvo_od2`, PA9 on NUC131 `vw_nc03`, GPIO 5 on ESP32).
   - Triggers: CAN `0x036` Byte 3 Bit 5 (`0x20` cluster illumination) OR CAN `0x128` Byte 0 (`0x80` sidelights / `0x40` low beam).
@@ -370,6 +375,16 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Integration pipeline: `test_integration_hiworld_rd4_radio_tuner_pipeline`, `test_integration_hiworld_rd4_radiotext_pipeline`, `test_integration_hiworld_rd4_cd_changer_pipeline`, `test_integration_hiworld_rd4_cd_in_dash_pipeline` (including CD-to-Radio stop notification and sentinel suppression), `test_integration_hiworld_rd4_downlink_resume_queries`, `test_integration_hiworld_rd4_preset_list_pipeline`.
   - Host Unit Tests: 102/102 passed. Integration Tests: 33/33 passed. Target builds: STM32 (0 warnings), ESP32 (0 warnings).
 
+### 4.13 Commercial Hardware Target Integration & Cadence Harmonization
+- **Drop-In Bare-Metal Targets (`platformio.ini`):**
+  - `[env:hiworld_stm32f105]`: Target STM32F105RB / STM32F107VC (ARM Cortex-M3 Connectivity Line) with `0x08007000` flash offset / 28 KB factory IAP displacement (`VECT_TAB_OFFSET=0x7000`), dual bxCAN hardware support, and 38,400 baud USART2.
+  - `[env:raise_nuc131]`: Target Nuvoton NUC131SD2AE (ARM Cortex-M0) with `0x00008000` flash offset / 32 KB APROM displacement, C_CAN controller, and active-low `PC3` transceiver standby drive.
+- **Universal Downlink Acknowledgment:**
+  - Implemented automatic ACK packet generation (`TX [0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]`) for all valid incoming Head Unit downlink commands (`cmd != 0xFE && cmd != 0xFF`), matching commercial Hiworld MCU firmware behavior.
+- **Cadence & Resync Harmonization:**
+  - Added 60-second periodic bulk resync timer (`s_bulk_resync_timer`) to recover vehicle aperture/status upon silent Android Head Unit OS restarts.
+  - Aligned event-driven SWC bypass, 100 ms telemetry cadence, and 1000 ms active door keepalive.
+
 ---
 
 ## 5. Critical PSA Alert DTC Mapping Reference
@@ -445,9 +460,10 @@ All test commands run on host desktop without hardware connected:
 
 | Test Scope | CLI Command | Current Status | Coverage |
 | :--- | :--- | :--- | :--- |
-| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **99 / 99 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table, dynamic CAN ID filter, RD4 tuner/RadioText/CDC/Presets |
-| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **32 / 32 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline including RD4 radio, preset list, RadioText, CDC & resume queries |
+| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **102 / 102 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table, dynamic CAN ID filter, RD4 tuner/RadioText/CDC/Presets |
+| **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **33 / 33 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline including RD4 radio, preset list, RadioText, CDC & resume queries |
 | **STM32 Target Build** | `~/.platformio/penv/bin/pio run -e stm32_cbox` | **BUILD OK** | Bare-metal ARM Cortex-M3 flash binary |
+| **Hiworld STM32F105 Target** | `~/.platformio/penv/bin/pio run -e hiworld_stm32f105` | **BUILD OK** | Drop-in OEM Canbox flash binary (`0x08007000` offset, 28 KB IAP bootloader) |
 | **ESP32 Target Build** | `~/.platformio/penv/bin/pio run -e esp32_cbox` | **BUILD OK** | Dual-core Xtensa FreeRTOS flash binary |
 | **Interactive Desktop Sim** | `CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec` | **OPERATIONAL** | Virtual CAN (`vcan0`) and pseudo-terminal (`pty`) emulator |
 

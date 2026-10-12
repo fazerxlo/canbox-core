@@ -95,6 +95,23 @@ build_src_filter =
     +<profiles/*>
     +<protocols/*>
     +<hal/hal_nuc131/*>
+
+[env:raise_nuc131]
+platform = https://github.com/fazerxlo/nuvoton_nuc131.git
+board = nuvoton_nuc131
+test_ignore = *
+build_flags = 
+    -Iinclude
+    -Isrc
+    -DPLATFORM_NUC131
+    -DAPP_BASE_OFFSET=0x8000
+    -Wall -Wextra -std=c99
+build_src_filter = 
+    +<main.c>
+    +<core/*>
+    +<profiles/*>
+    +<protocols/*>
+    +<hal/hal_nuc131/*>
 ```
 
 ---
@@ -102,10 +119,14 @@ build_src_filter =
 ## 6. Build & Flashing
 
 ### 6.1 Compiling the Firmware
-Compile the NUC131 target using the PlatformIO CLI:
+Compile the NUC131 targets using the PlatformIO CLI:
 
 ```bash
+# Generic target
 pio run -e nuc131_cbox
+
+# Drop-in commercial Raise target (0x00008000 bootloader offset)
+pio run -e raise_nuc131
 ```
 
 ### 6.2 Typical Resource Utilization (NUC131XE3AE)

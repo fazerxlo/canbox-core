@@ -115,6 +115,31 @@ static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_
     }
 }
 
+static inline void psa_update_derived_power_state(vehicle_state_t *state) {
+    if (state->economy_mode) {
+        state->ignition_state = VEHICLE_IGNITION_OFF;
+    } else if (state->radio_present) {
+        /* When factory radio is present:
+         * If radio is in sleep / standby mode ((data[0] & 0xC0) == 0), ACC is OFF.
+         * If radio is active (knob turned on, bit 7), ACC is ON.
+         * Otherwise (shutting down / transition), follow ignition status. */
+        if (state->radio_sleep) {
+            state->ignition_state = VEHICLE_IGNITION_OFF;
+        } else if (state->radio_on) {
+            state->ignition_state = state->ignition_on ? VEHICLE_IGNITION_ON : VEHICLE_IGNITION_ACC;
+        } else {
+            state->ignition_state = state->ignition_on ? VEHICLE_IGNITION_ON : VEHICLE_IGNITION_OFF;
+        }
+    } else {
+        /* No factory radio detected on bus: ACC follows ignition switch */
+        if (state->ignition_on) {
+            state->ignition_state = VEHICLE_IGNITION_ON;
+        } else {
+            state->ignition_state = VEHICLE_IGNITION_OFF;
+        }
+    }
+}
+
 static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc < 2) return;
 
@@ -131,40 +156,22 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
     }
 
     if (frame->dlc >= 5) {
-        if (state->economy_mode) {
-            /* Economy mode: forces radio / head unit power OFF immediately to protect battery */
-            state->ignition_state = VEHICLE_IGNITION_OFF;
-        } else {
-            uint8_t phase_vie = frame->data[4] & 0x07;
-            if (phase_vie == 0x01) {
-                /* 0x01: Ignition ON (Wakeup / Run +APC) — Radio turns ON and stays awake */
-                state->ignition_state = VEHICLE_IGNITION_ON;
-            } else if (phase_vie == 0x02 || phase_vie == 0x00) {
-                /* 0x02: Ignition OFF (Going to sleep) — Initiates shutdown / accessory timer */
-                /* 0x00: Deep Sleep / Standby — Head unit enters deep sleep mode */
-                /* Radio power OFF unless RD4 radio (0x165) specifically activated ACC */
-                if (state->ignition_state != VEHICLE_IGNITION_ACC) {
-                    state->ignition_state = VEHICLE_IGNITION_OFF;
-                }
-            } else if (phase_vie == 0x03) {
-                /* 0x03: Wakeup transition — Brief (~40 ms) pulse during key turn */
-            }
-        }
+        uint8_t phase_vie = frame->data[4] & 0x07;
+        /* 0x01: Run (+APC), 0x03: Wakeup / Key turn pulse */
+        state->ignition_on = (phase_vie == 0x01 || phase_vie == 0x03);
     }
+
+    psa_update_derived_power_state(state);
 }
 
 static void psa_decode_radio_power_0x165(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 4) return;
-    if (state->economy_mode) {
-        state->ignition_state = VEHICLE_IGNITION_OFF;
-        return;
-    }
-    bool radio_on = (frame->data[0] & 0x80) != 0;
-    if (radio_on && state->ignition_state == VEHICLE_IGNITION_OFF) {
-        state->ignition_state = VEHICLE_IGNITION_ACC;
-    } else if (!radio_on && (frame->data[0] & 0x40) == 0 && state->ignition_state == VEHICLE_IGNITION_ACC) {
-        state->ignition_state = VEHICLE_IGNITION_OFF;
-    }
+    if (frame->dlc < 1) return;
+    state->radio_present = true;
+    /* Bit 7 = 1 indicates factory RD4 radio audio is powered ON */
+    state->radio_on = (frame->data[0] & 0x80) != 0;
+    /* (Bits [7:6] == 0) indicates radio is in deep sleep / standby (e.g. 0x08) */
+    state->radio_sleep = ((frame->data[0] & 0xC0) == 0);
+    psa_update_derived_power_state(state);
 }
 
 static void psa_decode_doors_0x220_profile(const can_frame_t *frame, vehicle_state_t *state) {

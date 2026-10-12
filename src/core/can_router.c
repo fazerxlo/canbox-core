@@ -8,6 +8,7 @@ static vehicle_state_t s_current_state;
 static vehicle_state_t s_last_sent_state;
 static uint16_t        s_tpms_periodic_timer = 0;
 static uint8_t         s_doors_periodic_timer = 0;
+static uint16_t        s_bulk_resync_timer = 0;
 
 static bool            s_initial_alerts_scanned = false;
 static bool            s_bsi_alert_query_pending = false;
@@ -46,6 +47,7 @@ void can_router_init(void) {
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
     s_tpms_periodic_timer = 0;
     s_doors_periodic_timer = 0;
+    s_bulk_resync_timer = 0;
     s_initial_alerts_scanned = false;
     s_bsi_alert_query_pending = false;
     s_bsi_alert_query_timeout_ticks = 0;
@@ -362,6 +364,10 @@ void can_router_periodic_100ms(void) {
     if (++s_can_inactivity_ticks >= 30) {
         s_can_inactivity_ticks = 30; /* Clamp */
         if (!s_can_bus_sleeping) {
+            s_current_state.ignition_on = false;
+            s_current_state.radio_on = false;
+            s_current_state.radio_sleep = false;
+            s_current_state.economy_mode = false;
             s_current_state.ignition_state = VEHICLE_IGNITION_OFF;
             s_last_sent_state.ignition_state = VEHICLE_IGNITION_OFF;
             hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, false);
@@ -413,6 +419,13 @@ void can_router_periodic_100ms(void) {
         if (s_current_state.tpms.valid) {
             hu_protocol_send_tpms(&s_current_state.tpms);
         }
+    }
+
+    // Periodic bulk state resync at 60 seconds (600 * 100ms = 60s)
+    // Ensures Android Head Unit recovers state after a silent reboot or app restart
+    if (++s_bulk_resync_timer >= 600) {
+        s_bulk_resync_timer = 0;
+        hu_protocol_send_doors(&s_current_state.doors);
     }
 
     // BSI alert query timeout check (500ms / 5 ticks)

@@ -29,6 +29,21 @@ static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
 static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     if (!packet) return;
 
+    /* Acknowledge downlink command per Hiworld specification:
+     * For every valid packet received with CmdID != 0xFE and CmdID != 0xFF,
+     * the MCU returns an acknowledgment frame:
+     * TX [0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]
+     * Note: CAR_TYPE_SET (0x24) is already acknowledged in hiworld_connection.c
+     */
+    if (packet->cmd != 0xFE && packet->cmd != 0xFF && packet->cmd != HIWORLD_CMD_CAR_TYPE_SET) {
+        uint8_t ack_payload[1] = { packet->cmd };
+        uint8_t tx_ack[6];
+        size_t ack_len = proto_hiworld_serialize(HIWORLD_CMD_HEARTBEAT, ack_payload, 1, tx_ack, sizeof(tx_ack));
+        if (ack_len > 0) {
+            hal_uart_write(tx_ack, ack_len);
+        }
+    }
+
     if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
         /* ForwardEcuSetting:
          * 4-byte variant (standard Android QF/Hiworld APK):

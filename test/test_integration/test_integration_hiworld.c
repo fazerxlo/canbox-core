@@ -1037,11 +1037,18 @@ void test_integration_hiworld_rd4_downlink_resume_queries(void) {
     }
 
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    TEST_ASSERT_TRUE(rx_len >= 19);
+    TEST_ASSERT_TRUE(rx_len >= (6 + 19));
+    /* Universal ACK frame: 5A A5 01 FF 0F 0E */
     TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
-    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
-    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x0F, rx_buf[4]);
+    /* Radio State response: 5A A5 0E 84 ... */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[9]);
 
     // 2. Send Media Resume Query: forwardType(0x11) -> 5A A5 00 11 10
     const uint8_t q_media[] = { 0x5A, 0xA5, 0x00, 0x11, 0x10 };
@@ -1050,11 +1057,18 @@ void test_integration_hiworld_rd4_downlink_resume_queries(void) {
     }
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    TEST_ASSERT_EQUAL_UINT32(16, rx_len);
+    TEST_ASSERT_EQUAL_UINT32(6 + 16, rx_len);
+    /* Universal ACK frame: 5A A5 01 FF 11 10 */
     TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
-    TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[2]);
-    TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x11, rx_buf[4]);
+    /* Media State response: 5A A5 0B 97 ... */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[9]);
 }
 
 void test_integration_hiworld_rd4_preset_list_pipeline(void) {
