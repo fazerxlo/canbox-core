@@ -75,12 +75,12 @@ flowchart LR
 | **8. BSI Vehicle Alerts & Diagnostics** | 5 | 5 | 0 | 0 | 0 | **100%** |
 | **9. Central Personalization & Settings** | 4 | 2 | 2 | 0 | 0 | **50%** |
 | **10. Date & Time Synchronization** | 2 | 1 | 1 | 0 | 0 | **50%** |
-| **11. RD4 Audio & Multimedia Passthrough**| 4 | 4 | 0 | 0 | 0 | **100%** |
+| **11. RD4 Audio & Multimedia Passthrough (inc. Virtual CDC)**| 5 | 5 | 0 | 0 | 0 | **100%** |
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 0 | 0 | 1 | 0 | **0%** (Pending CAN Frame) |
 | **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
 | **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
 | **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 0 | **100%** |
-| **Overall** | **47** | **39** | **4** | **2** | **2** | **83%** |
+| **Overall** | **48** | **40** | **4** | **2** | **2** | **83%** |
 
 ---
 
@@ -142,6 +142,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[-]` | `0x81` | **Cruise Presets Group 1 Setup** | `0x0A` (10) | `0x39B` (Tx) | Documented in `commands_and_payload_structure.md` | Uploads speed memory presets 1..6 |
 | `[x]` | `0x85` | **Historical Alarm Replay Query**| `0x02` (2) | `0x39B` (Tx) | `src/protocols/proto_hiworld_adapter.c` | Triggers alert journal replay (mapped along with `0x2F`) |
 | `[x]` | `0x94` | **Software Reset / Link Ping** | `0x01` (1) | N/A (Internal) | `src/protocols/hiworld_connection.c` | Link liveness check / software reboot |
+| `[x]` | `0xAD` | **Virtual CD Changer (CDC) Control**| `0x03` (3) | `0x162`<br>`0x1A2`<br>`0x1E2`<br>`0x1A0`<br>`0x0E2`<br>`0x531`<br>`0x21F` (Tx)<br>`0x131` (Rx) | `src/profiles/psa_virtual_cdc.c`<br>`src/profiles/profile_psa.c`<br>`src/protocols/proto_hiworld_adapter.c`<br>`src/core/can_router.c` | `test_peugeot_407_virtual_cdc_initial_state`<br>`test_peugeot_407_virtual_cdc_downlink_controls`<br>`test_peugeot_407_virtual_cdc_periodic_transmission`<br>`test_integration_hiworld_virtual_cdc_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md`<br>Controls RD4 external CDC emulation: verified against Blaupunkt PSA CD Changer specification and `CDCEmu` firmware: 100ms `0x162` status (`0xA0`, playing bit, magic byte `0x06` for RD4 source registration), 500ms `0x1A2`/`0x1E2`/`0x1A0`, 1000ms `0x531`/`0x0E2`, two-way `0x131` command parsing from RD4, COM2000 stalk `0x21F` pulse injection, and runtime enable/disable toggle via SubCmd `0x01` (enabled by default) |
 | `[x]` | **ALL**| **Universal Downlink ACK (`0xFF`)**| `0x02` (2) | N/A (UART Tx) | `src/protocols/proto_hiworld_adapter.c`<br>`src/protocols/hiworld_connection.c` | Implemented universal ACK response `[0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]` for all valid downlink frames (`CmdID != 0xFE && CmdID != 0xFF`), matching OEM commercial firmware specification |
 | `[-]` | `0xC2` / `0xE0` | **MCU Firmware Flash Transfer / IAP** | Variable | N/A (Bootloader)| `doc/BOOTLOADER_REPLACEMENT.md` | Full native Hiworld IAP bootloader specification for Raise NUC131 hardware: FMC hardware vector remap (`ISPCMD=0x2E`), 136-byte container de-obfuscation, sequence-addressed flash writes, and `pack_hiworld_iap.py` pack tool |
 
@@ -376,10 +377,41 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Head Unit resume query `forwardType(0x0F)`: immediately retransmits cached `0x84` radio state and `0x86` radio text.
   - Media resume query `forwardType(0x11)` / `forwardType(0x12)`: immediately retransmits cached `0x97` media state.
   - Slow periodic heartbeat resync (60 seconds / 600 ticks in `can_router_periodic_100ms`).
+- **Virtual CD Changer (CDC) Emulation Engine (`src/profiles/psa_virtual_cdc.c`, `include/profiles/psa_virtual_cdc.h`):**
+  - **Blaupunkt / CDCEmu Ground-Truth CAN Architecture (125 kbps):**
+    - Emulates the PSA Blaupunkt 5/6-disc CD Changer using the exact CAN ID set verified from `CDCEmu` and real PSA recordings (`lights_off_side_light_on_headlights_on.csv`):
+      - `CAN 0x162` (DLC 7, 100 ms periodic): `[Byte0, Byte1, 0x06, DiscNum, 0x00, 0x06, 0x00]`.
+        - `Byte 0 = 0xA0`: Bit 7 (`radio_enabled`), Bit 5 (`0x20`).
+        - `Byte 1`: Status icon (`3` = Play, `2` = Pause, `1` = Stop, `6` = None) | `0x02` (playing bit).
+        - `Byte 5 = 0x06`: Magic byte required by RD4 radio firmware to add CD Changer to the active source list!
+      - `CAN 0x1A2` (DLC 5, 500 ms periodic): `[total_tracks (99), 0x58, 0x00, 0x00, 0x00]`.
+      - `CAN 0x1E2` (DLC 7, 500 ms periodic): `[track_num, 0x05, 0x00, elapsed_min, elapsed_sec, 0x00, 0x00]`.
+      - `CAN 0x1A0` (DLC 2, 500 ms periodic): `[0x92, 0x00]` (Bit 5 Intro, Bit 2 Random, Byte 1 Bit 7 Repeat).
+      - `CAN 0x531` (DLC 8, 1000 ms periodic): `[0x09, 0, 0, 0, 0, 0, 0, 0]` (CDC Device alive wakeup).
+      - `CAN 0x0E2` (DLC 8, 1000 ms periodic): `[0, 0, 0, active_disc << 4, 0, 0x03, 0x33, 0x33]` (Disc slot magazine status).
+    - **Two-Way Control (`CAN 0x131` from RD4):**
+      - RD4 sends `0x131` (`[Flags, Modes, TargetDisc, 0x00, TargetTrack]`): decoded in `psa_virtual_cdc_process_can_0x131()` to track radio power (`0x80`), source selection (`0x02`), and stalk Next/Prev track pulses (`0x20`/`0x40`).
+    - **Display Safety:** Completely avoids `0x165`, `0x1A5`, and `0x1E5` (outputs from the RD4 to the MDF display), eliminating any display flickering or volume popup collisions.
+  - **Downlink Command Dispatch (`Cmd 0xAD` / `HIWORLD_CMD_VIRTUAL_CDC`):**
+    - Intercepts wire frames from Android Head Unit (`5A A5 03 AD <SubCmd> <Param> <CS>`):
+      - `SubCmd 0x01`, `Param 0x00` / `0x01`: Enable/Disable Virtual CDC Emulation (`psa_virtual_cdc_set_enabled`, enabled by default).
+      - `SubCmd 0x02`, `Param 0x01`: Audio Start (Play) -> Enables CDC playback (`status_icon = 3`, playing bit `0x02`), triggers RD4 source routing.
+      - `SubCmd 0x02`, `Param 0x00`: Audio Stop (Standby) -> Sets CDC engine to pause/standby (`status_icon = 2`), preserves `0x162` presence broadcast.
+      - `SubCmd 0x0E`, `Param 0x01..0x06`: Select Disc Slot index -> updates `active_disc`.
+      - `SubCmd 0x0F`, `Param 0x00..0x3B`: Set Elapsed Seconds -> updates `elapsed_sec`.
+      - `SubCmd 0x10`, `Param 0x01..0x63`: Set Track Number -> updates `track_num`.
+    - Handles Android APK length convention (`len = 3` including command opcode) in `proto_hiworld.c`.
+  - **Automatic Source Switching & Virtual COM2000 Stalk Pulse Injection:**
+    - On CDC activation, checks cached RD4 tuner mode (`source_mode < 0x20`):
+      - Injects momentary `SOURCE` key pulse on virtual COM2000 stalk: `CAN 0x21F` (`[0x04, 0x00, 0x00]`) for 60 ms, followed by release (`[0x00, 0x00, 0x00]`).
+      - RD4 detects active CDC heartbeat on CAN bus and un-mutes Quadlock Part B (Pins 4, 10, 11).
+      - Emits Hiworld `Cmd 0x84` (`0x31` = CDC) to notify Head Unit context of active audio routing.
+  - **Detailed Specification Document:**
+    - Documented in `doc/CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md`.
 - **Verification:**
-  - Unit tests: `test_peugeot_407_rd4_vector_1_fm_tuner`, `test_peugeot_407_rd4_vector_2_isotp_radiotext`, `test_peugeot_407_rd4_vector_3_cd_changer`, `test_peugeot_407_rd4_cd_in_dash_playback`, `test_peugeot_407_rd4_cd_tray_mechanism`, `test_peugeot_407_rd4_cd_ground_truth_dump`, `test_peugeot_407_rd4_source_and_wavebands`, `test_peugeot_407_rd4_frequency_and_ta_stability`, `test_peugeot_407_rd4_preset_memory_list`, `test_peugeot_407_aux_mode_suppression`.
-  - Integration pipeline: `test_integration_hiworld_rd4_radio_tuner_pipeline`, `test_integration_hiworld_rd4_radiotext_pipeline`, `test_integration_hiworld_rd4_cd_changer_pipeline`, `test_integration_hiworld_rd4_cd_in_dash_pipeline`, `test_integration_hiworld_rd4_downlink_resume_queries`, `test_integration_hiworld_rd4_preset_list_pipeline`, `test_integration_hiworld_rd4_aux_mode_pipeline`.
-  - Host Unit Tests: 103/103 passed. Integration Tests: 34/34 passed. Target builds: STM32 (0 warnings), ESP32 (0 warnings).
+  - Unit tests: `test_peugeot_407_rd4_vector_1_fm_tuner`, `test_peugeot_407_rd4_vector_2_isotp_radiotext`, `test_peugeot_407_rd4_vector_3_cd_changer`, `test_peugeot_407_rd4_cd_in_dash_playback`, `test_peugeot_407_rd4_cd_tray_mechanism`, `test_peugeot_407_rd4_cd_ground_truth_dump`, `test_peugeot_407_rd4_source_and_wavebands`, `test_peugeot_407_rd4_frequency_and_ta_stability`, `test_peugeot_407_rd4_preset_memory_list`, `test_peugeot_407_aux_mode_suppression`, `test_peugeot_407_virtual_cdc_initial_state`, `test_peugeot_407_virtual_cdc_downlink_controls`, `test_peugeot_407_virtual_cdc_periodic_transmission`.
+  - Integration pipeline: `test_integration_hiworld_rd4_radio_tuner_pipeline`, `test_integration_hiworld_rd4_radiotext_pipeline`, `test_integration_hiworld_rd4_cd_changer_pipeline`, `test_integration_hiworld_rd4_cd_in_dash_pipeline`, `test_integration_hiworld_rd4_downlink_resume_queries`, `test_integration_hiworld_rd4_preset_list_pipeline`, `test_integration_hiworld_rd4_aux_mode_pipeline`, `test_integration_hiworld_virtual_cdc_pipeline`.
+  - Host Unit Tests: 106/106 passed. Integration Tests: 35/35 passed. Target builds: STM32 (0 warnings), ESP32 (0 warnings).
 
 ### 4.13 Commercial Hardware Target Integration & Cadence Harmonization
 - **Drop-In Bare-Metal Targets (`platformio.ini`):**

@@ -114,7 +114,7 @@ CD Changer / Media packets use opcode **`Cmd 0x97`** with an 11-byte payload:
 ### 3.3 Critical Traps & Protocol Idiosyncrasies
 
 #### Trap 1: Endianness (`uint16_le` Little-Endian)
-The decompiled parsing method [`PeugeotDataParser.smali::parseCarMediaState`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali#L5281) calls:
+The decompiled parsing method `PeugeotDataParser.smali::parseCarMediaState` calls:
 ```smali
 invoke-static {p1, v1, 2, true}, Lcom/qf/vehicle/utils/JavaDecodeUtil;->byteArrToInt([BIIZ)I
 ```
@@ -471,7 +471,7 @@ int build_hiworld_cd_packet(
 
 ### 9.1 Using the Python Test Tool (`send_peugeot_radio.py`)
 
-The workspace includes [`scenarios/send_peugeot_radio.py`](file:///home/Fazer/git/QF_Canbus_system/scenarios/send_peugeot_radio.py) configured to transmit CD frames:
+The test suite includes `scenarios/send_peugeot_radio.py` configured to transmit CD frames:
 
 ```bash
 # 1. Inspect raw hex bytes without hardware (Dry-run):
@@ -547,3 +547,17 @@ OriginalMediaPlayer: updateMedia: track=5/18, duration=02:35, workMode=Play
 - [ ] **Single CD Drive Handling:** For internal CD drive, set `Data[0] = 0x01` and `Data[1] = 0x01` (or `0x00` when ejected).
 - [ ] **Rate Limiting:** Transmit 1 Hz periodic during active playback, plus immediately on event changes.
 
+---
+
+## 11. Passive CD Monitoring vs. Active Virtual CDC Emulation
+
+This document specifies the **passive uplink monitoring** of the OEM Peugeot RD4 in-dash CD drive and factory CD Changer:
+- In-dash CD drive mechanism: CAN `0x325` (disc tray presence)
+- In-dash CD track count: CAN `0x365` (total tracks, MP3 flags)
+- In-dash CD playback progress: CAN `0x3A5` (track number, elapsed mm:ss, playback status)
+- Factory CDC telemetry: CAN `0x3A6` (6-disc slot statuses)
+
+When an aftermarket Android Head Unit wishes to **actively emulate a CD Changer** to route Android audio into the factory RD4 via Quadlock Connector Part B (Pins 4, 10, 11) without physical CDs, refer to the dedicated specification:
+👉 **[CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md](CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md)**
+
+The Virtual CDC engine acts as an active Blaupunkt CDC node transmitting CAN `0x162`, `0x1A2`, `0x1E2`, `0x1A0`, `0x0E2`, `0x531`, processing `0x131` from the RD4, handling downlink controls (`Cmd 0xAD`), and automatically pulsing the virtual COM2000 stalk (`0x21F`) to switch audio sources.

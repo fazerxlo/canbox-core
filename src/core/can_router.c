@@ -1,5 +1,6 @@
 #include "core/can_router.h"
 #include "core/vehicle_profile.h"
+#include "profiles/psa_virtual_cdc.h"
 #include "protocols/hu_protocol.h"
 #include "hal/hal_gpio.h"
 #include <string.h>
@@ -69,6 +70,7 @@ void can_router_init(void) {
     hal_gpio_write(GPIO_PIN_CAN_STBY, false);
     vehicle_profile_init();
     hu_protocol_init();
+    psa_virtual_cdc_init();
     can_router_rebuild_filter();
 }
 
@@ -422,6 +424,9 @@ void can_router_periodic_100ms(void) {
     if (s_can_bus_sleeping) {
         return;
     }
+
+    // Periodic Virtual CDC Emulation tick (100ms)
+    psa_virtual_cdc_tick_100ms();
 
     // Broadcast periodic states (Vehicle speed, RPM)
     if (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||

@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "profiles/peugeot_407.h"
+#include "profiles/psa_virtual_cdc.h"
 #include "core/vehicle_profile.h"
 #include "protocols/hu_protocol.h"
 #include "protocols/hu_protocol_driver.h"
@@ -2935,5 +2936,115 @@ void test_peugeot_407_aux_mode_suppression(void) {
     TEST_ASSERT_EQUAL_HEX8(0x00, out[7]); /* Preset slot = 0 */
     TEST_ASSERT_EQUAL_HEX8(0x00, out[8]); /* Indicators = 0 */
     TEST_ASSERT_EQUAL_STRING_LEN("        ", (char *)&out[10], 8);
+}
+
+void test_peugeot_407_virtual_cdc_initial_state(void) {
+    psa_virtual_cdc_init();
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+
+    const psa_virtual_cdc_t *ctx = psa_virtual_cdc_get_context();
+    TEST_ASSERT_NOT_NULL(ctx);
+    TEST_ASSERT_TRUE(ctx->enabled);
+    TEST_ASSERT_EQUAL_UINT8(1, ctx->active_disc);
+    TEST_ASSERT_EQUAL_UINT8(1, ctx->track_num);
+    TEST_ASSERT_EQUAL_UINT8(99, ctx->total_tracks);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx->elapsed_min);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx->elapsed_sec);
+
+    /* 100ms tick: transmits 0x162 status frame */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_tick_100ms();
+    can_frame_t frame_162;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_162));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_162.id);
+    TEST_ASSERT_EQUAL_UINT8(7, frame_162.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0xA0, frame_162.data[0]); /* radio_enabled (0xA0) */
+    TEST_ASSERT_EQUAL_HEX8(0x03, frame_162.data[1]); /* status_icon (3) */
+    TEST_ASSERT_EQUAL_HEX8(0x06, frame_162.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, frame_162.data[3]); /* disc 1 */
+    TEST_ASSERT_EQUAL_HEX8(0x06, frame_162.data[5]); /* source registration magic byte 0x06 */
+}
+
+void test_peugeot_407_virtual_cdc_downlink_controls(void) {
+    psa_virtual_cdc_init();
+
+    /* SubCmd 0x0E: Select Disc Slot 2 */
+    psa_virtual_cdc_handle_hu_cmd(0x0E, 0x02);
+    /* SubCmd 0x0F: Set Elapsed Sec 20 (0x14) */
+    psa_virtual_cdc_handle_hu_cmd(0x0F, 0x14);
+    /* SubCmd 0x10: Set Track Number 5 (0x05) */
+    psa_virtual_cdc_handle_hu_cmd(0x10, 0x05);
+
+    /* SubCmd 0x02: Audio Start (0x01) */
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_active());
+
+    const psa_virtual_cdc_t *ctx = psa_virtual_cdc_get_context();
+    TEST_ASSERT_EQUAL_UINT8(2, ctx->active_disc);
+    TEST_ASSERT_EQUAL_UINT8(5, ctx->track_num);
+    TEST_ASSERT_EQUAL_UINT8(20, ctx->elapsed_sec);
+
+    /* 100ms tick: 0x162 reflects active disc and playing bit */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_tick_100ms();
+    can_frame_t frame_162;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_162));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_162.id);
+    TEST_ASSERT_EQUAL_HEX8(0x02 | 0x03, frame_162.data[1]); /* playing (0x02) | status_icon (0x03) */
+    TEST_ASSERT_EQUAL_HEX8(0x02, frame_162.data[3]); /* disc 2 */
+
+    /* SubCmd 0x02: Audio Stop (0x00) -> returns to standby */
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x00);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+
+    /* SubCmd 0x01: Disable Virtual CDC (0x00) -> halts all periodic frames */
+    psa_virtual_cdc_handle_hu_cmd(0x01, 0x00);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_presence_enabled());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_tick_100ms();
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_162));
+
+    /* SubCmd 0x01: Enable Virtual CDC (0x01) -> resumes periodic presence */
+    psa_virtual_cdc_handle_hu_cmd(0x01, 0x01);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_tick_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_162));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_162.id);
+}
+
+void test_peugeot_407_virtual_cdc_periodic_transmission(void) {
+    psa_virtual_cdc_init();
+    psa_virtual_cdc_set_state(true);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_active());
+
+    /* Test 0x131 reception from RD4 radio: Next Track command (0x20) */
+    const uint8_t can_131_next[] = { 0xA0, 0x00, 0x00, 0x00, 0x00 }; /* Bit 7: radio on, Bit 5: next track */
+    psa_virtual_cdc_process_can_0x131(can_131_next, sizeof(can_131_next));
+    const psa_virtual_cdc_t *ctx = psa_virtual_cdc_get_context();
+    TEST_ASSERT_EQUAL_UINT8(2, ctx->track_num); /* Track incremented from 1 to 2 */
+
+    /* Run 5 ticks (500ms): 0x1A0 (Play Modes) is sent in the 500ms group */
+    hal_can_native_clear_sent_frame();
+    for (int i = 0; i < 5; i++) {
+        psa_virtual_cdc_tick_100ms();
+    }
+    can_frame_t frame;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame));
+    TEST_ASSERT_EQUAL_HEX32(0x1A0, frame.id);
+    TEST_ASSERT_EQUAL_UINT8(2, frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x92, frame.data[0]);
+
+    /* Run 10 ticks (1000ms): 0x0E2 (Disc slot indicator) is sent in the 1000ms group */
+    hal_can_native_clear_sent_frame();
+    for (int i = 0; i < 5; i++) {
+        psa_virtual_cdc_tick_100ms();
+    }
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame));
+    TEST_ASSERT_EQUAL_HEX32(0x0E2, frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
 }
 

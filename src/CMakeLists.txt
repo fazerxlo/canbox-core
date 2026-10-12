@@ -6,6 +6,7 @@ set(srcs
     "core/vehicle_profile.c"
     "profiles/profile_psa.c"
     "profiles/peugeot_407.c"
+    "profiles/psa_virtual_cdc.c"
     "profiles/profile_vag.c"
     "protocols/canbox_parser.c"
     "protocols/hiworld_car_mapping.c"

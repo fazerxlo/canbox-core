@@ -5,6 +5,7 @@
 #include "proto_hiworld.h"
 #include "core/can_router.h"
 #include "profiles/peugeot_407.h"
+#include "profiles/psa_virtual_cdc.h"
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
 #include "core/canbox_version.h"
@@ -85,6 +86,10 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
         /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */
         hu_protocol_send_media_state(NULL);
+    } else if (packet->cmd == HIWORLD_CMD_VIRTUAL_CDC) {
+        if (packet->payload_len >= 2) {
+            psa_virtual_cdc_handle_hu_cmd(packet->payload[0], packet->payload[1]);
+        }
     } else if (packet->cmd == HIWORLD_CMD_UPGRADE_TRIGGER) {
         /* Head Unit requested firmware update (e.g. 5A A5 03 E0 00 00 E2) */
         /* Write persistent magic token to reserved SRAM */

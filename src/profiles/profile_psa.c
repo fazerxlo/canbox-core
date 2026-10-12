@@ -1,5 +1,6 @@
 #include "core/vehicle_profile.h"
 #include "profiles/peugeot_407.h"
+#include "profiles/psa_virtual_cdc.h"
 #include <string.h>
 
 static inline uint16_t read_be16_local(const uint8_t *d) {
@@ -434,6 +435,12 @@ static void psa_decode_cd_play_0x3a5_profile(const can_frame_t *frame, vehicle_s
     psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc);
 }
 
+static void psa_decode_cdc_cmd_0x131_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)state;
+    if (!frame) return;
+    psa_virtual_cdc_process_can_0x131(frame->data, frame->dlc);
+}
+
 static void psa_decode_cd_changer_0x3a6_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc);
@@ -441,6 +448,7 @@ static void psa_decode_cd_changer_0x3a6_profile(const can_frame_t *frame, vehicl
 
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
+    { PSA_CAN_ID_CDC_CMD_131,        psa_decode_cdc_cmd_0x131_profile },
     { PSA_CAN_ID_TEXTE_RADIO,        psa_decode_texte_radio_0x0a4_profile },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
     { 0x0F6,                         psa_decode_bsi_slow_0x0f6 },

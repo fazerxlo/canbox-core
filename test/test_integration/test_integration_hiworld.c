@@ -3,6 +3,7 @@
 #include "core/vehicle_profile.h"
 #include "protocols/proto_hiworld.h"
 #include "protocols/hiworld_connection.h"
+#include "profiles/psa_virtual_cdc.h"
 #include "hal/hal_gpio.h"
 
 void test_integration_hiworld_steering_wheel_volume_up_pipeline(void) {
@@ -1241,4 +1242,102 @@ void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
     }
     TEST_ASSERT_TRUE(found_0x84);
     TEST_ASSERT_TRUE(found_0x85);
+}
+
+void test_integration_hiworld_virtual_cdc_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+
+    /* Make sure bus is awake by feeding an active CAN frame */
+    can_frame_t frame_ign = {
+        .id = 0x036,
+        .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_ign);
+
+    /* Drain initial UART output */
+    uint8_t rx_buf[128];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 1. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x02, Param 0x01 (Audio Start / Play) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x01, 0xB2 ] */
+    const uint8_t hu_play_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x01, 0xB2 };
+    for (size_t i = 0; i < sizeof(hu_play_packet); i++) {
+        can_router_process_uart_byte(hu_play_packet[i]);
+    }
+
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_active());
+
+    /* Check UART output: ACK for 0xAD (0x5A, 0xA5, 0x01, 0xFF, 0xAD, 0xAC) and Cmd 0x84 (CDC 0x31) */
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_ack_0xad = false;
+    bool found_0x84_cdc = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            if (rx_buf[i + 3] == 0xFF && (i + 4) < rx_len && rx_buf[i + 4] == 0xAD) {
+                found_ack_0xad = true;
+            }
+            if (rx_buf[i + 3] == 0x84 && (i + 4) < rx_len && rx_buf[i + 4] == 0x31) {
+                found_0x84_cdc = true;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(found_ack_0xad);
+    TEST_ASSERT_TRUE(found_0x84_cdc);
+
+    /* 2. Run periodic 100ms ticks: verifies CAN 0x162 is transmitted every 100ms */
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    can_frame_t frame_sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_sent.id);
+    TEST_ASSERT_EQUAL_UINT8(7, frame_sent.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x06, frame_sent.data[5]); /* Source registration magic byte */
+
+    /* 3. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x02, Param 0x00 (Audio Stop / Standby) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x00, 0xB1 ] */
+    hal_can_native_clear_sent_frame();
+    const uint8_t hu_stop_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x00, 0xB1 };
+    for (size_t i = 0; i < sizeof(hu_stop_packet); i++) {
+        can_router_process_uart_byte(hu_stop_packet[i]);
+    }
+
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* Verify 100ms tick continues broadcasting 0x162 presence in standby */
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x02, frame_sent.data[1] & 0x07); /* Status icon: 2 (Pause) */
+
+    /* 4. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x01, Param 0x00 (Disable Virtual CDC) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x00, 0xB0 ] */
+    hal_can_native_clear_sent_frame();
+    const uint8_t hu_disable_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x00, 0xB0 };
+    for (size_t i = 0; i < sizeof(hu_disable_packet); i++) {
+        can_router_process_uart_byte(hu_disable_packet[i]);
+    }
+
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_presence_enabled());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* Verify 100ms tick halts all transmission when disabled */
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+
+    /* 5. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x01, Param 0x01 (Re-enable Virtual CDC) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x01, 0xB1 ] */
+    const uint8_t hu_enable_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x01, 0xB1 };
+    for (size_t i = 0; i < sizeof(hu_enable_packet); i++) {
+        can_router_process_uart_byte(hu_enable_packet[i]);
+    }
+
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_sent.id);
 }
