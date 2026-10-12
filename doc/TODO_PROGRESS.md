@@ -138,6 +138,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[-]` | `0x81` | **Cruise Presets Group 1 Setup** | `0x0A` (10) | `0x39B` (Tx) | Documented in `commands_and_payload_structure.md` | Uploads speed memory presets 1..6 |
 | `[x]` | `0x85` | **Historical Alarm Replay Query**| `0x02` (2) | `0x39B` (Tx) | `src/protocols/proto_hiworld_adapter.c` | Triggers alert journal replay (mapped along with `0x2F`) |
 | `[x]` | `0x94` | **Software Reset / Link Ping** | `0x01` (1) | N/A (Internal) | `src/protocols/hiworld_connection.c` | Link liveness check / software reboot |
+| `[x]` | **ALL**| **Universal Downlink ACK (`0xFF`)**| `0x02` (2) | N/A (UART Tx) | `src/protocols/proto_hiworld_adapter.c`<br>`src/protocols/hiworld_connection.c` | Implemented universal ACK response `[0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]` for all valid downlink frames (`CmdID != 0xFE && CmdID != 0xFF`), matching OEM commercial firmware specification |
 | `[ ]` | `0xC2` | **MCU Firmware Flash Transfer** | `0x0A` (10) | N/A (Bootloader)| Target-specific bootloader (STM32/ESP32 IAP) |
 
 ---
@@ -325,6 +326,16 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 - **Verification:**
   - Unit test `test_can_id_filter_enforcement` verifying profile rule ID acceptance, rejection of unmapped standard IDs (`0x7FF`, `0x111`, `0x260`), rejection of extended frames, and filter rebuild upon profile switching.
 
+### 4.15 Commercial Hardware Target Integration & Cadence Harmonization
+- **Drop-In Bare-Metal Targets (`platformio.ini`):**
+  - `[env:hiworld_stm32f105]`: Target STM32F105RB / STM32F107VC (ARM Cortex-M3 Connectivity Line) with `0x08007000` flash offset / 28 KB factory IAP displacement (`VECT_TAB_OFFSET=0x7000`), dual bxCAN hardware support, and 38,400 baud USART2.
+  - `[env:raise_nuc131]`: Target Nuvoton NUC131SD2AE (ARM Cortex-M0) with `0x00008000` flash offset / 32 KB APROM displacement, C_CAN controller, and active-low `PC3` transceiver standby drive.
+- **Universal Downlink Acknowledgment:**
+  - Implemented automatic ACK packet generation (`TX [0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]`) for all valid incoming Head Unit downlink commands (`cmd != 0xFE && cmd != 0xFF`), matching commercial Hiworld MCU firmware behavior.
+- **Cadence & Resync Harmonization:**
+  - Added 60-second periodic bulk resync timer (`s_bulk_resync_timer`) to recover vehicle aperture/status upon silent Android Head Unit OS restarts.
+  - Aligned event-driven SWC bypass, 100 ms telemetry cadence, and 1000 ms active door keepalive.
+
 ---
 
 ## 5. Critical PSA Alert DTC Mapping Reference
@@ -406,6 +417,7 @@ All test commands run on host desktop without hardware connected:
 | **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **93 / 93 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table, dynamic CAN ID filter |
 | **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **27 / 27 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline |
 | **STM32 Target Build** | `~/.platformio/penv/bin/pio run -e stm32_cbox` | **BUILD OK** | Bare-metal ARM Cortex-M3 flash binary |
+| **Hiworld STM32F105 Target** | `~/.platformio/penv/bin/pio run -e hiworld_stm32f105` | **BUILD OK** | Drop-in OEM Canbox flash binary (`0x08007000` offset, 28 KB IAP bootloader) |
 | **ESP32 Target Build** | `~/.platformio/penv/bin/pio run -e esp32_cbox` | **BUILD OK** | Dual-core Xtensa FreeRTOS flash binary |
 | **Interactive Desktop Sim** | `CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec` | **OPERATIONAL** | Virtual CAN (`vcan0`) and pseudo-terminal (`pty`) emulator |
 

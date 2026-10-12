@@ -70,15 +70,11 @@ pio run -e stm32_cbox
 
 | Environment | Architecture | Board / Target | Output Binaries |
 | --- | --- | --- | --- |
-| `stm32_cbox` | ARM Cortex-M3 (STM32F103C8T6) | BluePill F103C8 | `.pio/build/stm32_cbox/firmware.bin`<br>
-
-<br>`.pio/build/stm32_cbox/firmware.elf` |
-| `esp32_cbox` | Xtensa Dual-Core (ESP32) | NodeMCU / ESP32-WROOM-32 | `.pio/build/esp32_cbox/firmware.bin`<br>
-
-<br>`.pio/build/esp32_cbox/bootloader.bin`<br>
-
-<br>`.pio/build/esp32_cbox/partitions.bin` |
-| `nuc131_cbox` | ARM Cortex-M0 (NUC131SD2AE) | Nuvoton NUC131 CAN Box | `.pio/build/nuc131_cbox/firmware.bin` |
+| `stm32_cbox` | ARM Cortex-M3 (STM32F103C8T6) | BluePill F103C8 (Generic) | `.pio/build/stm32_cbox/firmware.bin`<br>`.pio/build/stm32_cbox/firmware.elf` |
+| `hiworld_stm32f105` | ARM Cortex-M3 (STM32F105RB / STM32F107VC) | OEM Hiworld CAN Box (`0x08007000` IAP) | `.pio/build/hiworld_stm32f105/firmware.bin`<br>`.pio/build/hiworld_stm32f105/firmware.elf` |
+| `esp32_cbox` | Xtensa Dual-Core (ESP32) | NodeMCU / ESP32-WROOM-32 | `.pio/build/esp32_cbox/firmware.bin`<br>`.pio/build/esp32_cbox/bootloader.bin`<br>`.pio/build/esp32_cbox/partitions.bin` |
+| `nuc131_cbox` | ARM Cortex-M0 (NUC131SD2AE) | Nuvoton NUC131 CAN Box (Generic) | `.pio/build/nuc131_cbox/firmware.bin` |
+| `raise_nuc131` | ARM Cortex-M0 (NUC131SD2AE) | OEM Raise CAN Box (`0x00008000` IAP) | `.pio/build/raise_nuc131/firmware.bin` |
 | `native_test` | Host x86_64 / Desktop Linux | Virtual CAN Simulator | `.pio/build/native_test/program` |
 
 ---
@@ -101,7 +97,21 @@ The resulting binary will be located at:
 .pio/build/stm32_cbox/firmware.bin
 ```
 
-### 3.2 Build ESP32 Target (`esp32_cbox`)
+### 3.2 Build OEM Hiworld STM32F105 Target (`hiworld_stm32f105`)
+
+```bash
+# Standard build with automatic timestamp
+pio run -e hiworld_stm32f105
+
+# Build with explicit version
+CANBOX_BUILD_VERSION="CANBOX-CORE-V1.0.0" pio run -e hiworld_stm32f105
+```
+The resulting binary configured with `0x08007000` IAP displacement will be located at:
+```
+.pio/build/hiworld_stm32f105/firmware.bin
+```
+
+### 3.3 Build ESP32 Target (`esp32_cbox`)
 
 ```bash
 # Standard build with automatic timestamp
@@ -118,19 +128,23 @@ The resulting binaries will be located at:
 .pio/build/esp32_cbox/partitions.bin
 ```
 
-### 3.3 Build Nuvoton NUC131 Target (`nuc131_cbox`)
+### 3.4 Build Nuvoton NUC131 Targets
 
 ```bash
+# Generic target
 pio run -e nuc131_cbox
 
+# OEM Raise drop-in target with 0x00008000 bootloader offset
+pio run -e raise_nuc131
 ```
 
 The resulting binary will be located at:
 ```
 .pio/build/nuc131_cbox/firmware.bin
+.pio/build/raise_nuc131/firmware.bin
 ```
 
-### 3.4 Build Desktop Virtual Simulator (`native_test`)
+### 3.5 Build Desktop Virtual Simulator (`native_test`)
 ```bash
 pio run -e native_test
 ```
@@ -177,7 +191,24 @@ openocd -f interface/stlink.cfg -f target/stm32f1x.cfg \
 
 ---
 
-### 4.2 ESP32 (DevKit / Bench Adapter)
+### 4.2 OEM Hiworld CAN Box (STM32F105 / STM32F107 Connectivity Line)
+
+Commercial Hiworld CAN boxes include a factory resident IAP bootloader occupying `0x08000000` to `0x080067FF` and persistent configuration in Sector 13 (`0x08006800`–`0x08006FFF`). The application entry point is located at **`0x08007000`**.
+
+#### Flashing via ST-Link V2 (Preserving OEM Bootloader):
+Connect ST-Link V2 to SWD test pads (`PA13` SWDIO, `PA14` SWCLK, `GND`, `3.3V`):
+```bash
+# Using st-flash
+st-flash write .pio/build/hiworld_stm32f105/firmware.bin 0x08007000
+
+# Or via OpenOCD
+openocd -f interface/stlink.cfg -f target/stm32f1x.cfg \
+  -c "program .pio/build/hiworld_stm32f105/firmware.bin 0x08007000 verify reset exit"
+```
+
+---
+
+### 4.3 ESP32 (DevKit / Bench Adapter)
 
 #### Option A: Direct PlatformIO Upload (USB Serial)
 
@@ -299,12 +330,11 @@ CANBOX-CORE-V20261009.113534
 Before generating release binaries, run the full test suite to guarantee zero regression:
 
 ```bash
-# Run Unit Tests (92 test cases)
+# Run Unit Tests (93 test cases)
 pio test -e native_test_runner
 
 # Run Integration Pipeline Tests (27 test cases)
 pio test -e integration_test
-
 ```
 
 All tests must report `[PASSED]` with zero compilation warnings under `-Wall -Wextra -std=c99`.

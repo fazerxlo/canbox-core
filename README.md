@@ -258,9 +258,14 @@ pio test -e integration_test
 
 ### Hardware Deployment
 
-**STM32F103 Target:**
+**STM32F103 Target (Generic / BluePill):**
 ```bash
 pio run -e stm32_cbox
+```
+
+**OEM Hiworld Target (STM32F105 / 28KB IAP Bootloader @ 0x08007000):**
+```bash
+pio run -e hiworld_stm32f105
 ```
 
 **ESP32 Target:**
@@ -268,9 +273,14 @@ pio run -e stm32_cbox
 pio run -e esp32_cbox
 ```
 
-**Nuvoton NUC131 Target:**
+**Nuvoton NUC131 Target (Generic):**
 ```bash
 pio run -e nuc131_cbox
+```
+
+**OEM Raise Target (NUC131 / 32KB Bootloader @ 0x00008000):**
+```bash
+pio run -e raise_nuc131
 ```
 
 ---
