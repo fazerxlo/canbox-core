@@ -7,12 +7,14 @@
 #define FMC_BASE                (0x5000C000UL)
 #define GPIOB_BASE              (0x50004040UL)
 #define GPIOC_BASE              (0x50004080UL)
+#define GPIOD_BASE              (0x500040C0UL)
 #define UART0_BASE              (0x40050000UL)
 
 /* System & Protection */
 #define SYS_REGWRPROT           (*(volatile uint32_t *)(SYS_BASE + 0x100))
 #define SYS_IPRSTC2             (*(volatile uint32_t *)(SYS_BASE + 0x00C))
 #define SYS_GPB_MFP             (*(volatile uint32_t *)(SYS_BASE + 0x034))
+#define SYS_GPD_MFP             (*(volatile uint32_t *)(SYS_BASE + 0x03C))
 
 /* Clock Control */
 #define CLK_APBCLK              (*(volatile uint32_t *)(CLK_BASE + 0x008))
@@ -29,6 +31,8 @@
 #define GPIOB_DOUT              (*(volatile uint32_t *)(GPIOB_BASE + 0x08))
 #define GPIOC_PMD               (*(volatile uint32_t *)(GPIOC_BASE + 0x00))
 #define GPIOC_DOUT              (*(volatile uint32_t *)(GPIOC_BASE + 0x08))
+#define GPIOD_PMD               (*(volatile uint32_t *)(GPIOD_BASE + 0x00))
+#define GPIOD_DOUT              (*(volatile uint32_t *)(GPIOD_BASE + 0x08))
 
 /* UART0 Registers (NUC131 TRM: BAUD is at offset 0x24) */
 #define UART0_RBR               (*(volatile uint32_t *)(UART0_BASE + 0x00))
@@ -68,12 +72,16 @@ void iap_init_hardware(void) {
 
     SYS_REGWRPROT = 0x00;
 
-    /* 3. Configure pin directions and silence buzzer matching factory board:
-     * PC_DOUT = 0x00c7, PC_PMD = 0x0000f045
+    /* 3. Configure pin directions, isolate CAN in Standby (PC3=1), drive CAN_TX (PD7) HIGH (Recessive), and silence buzzer:
+     * PC_DOUT = 0x00cf, PC_PMD = 0x0000f045 (PC3=1 Standby)
      * PB_DOUT = 0x113f, PB_PMD = 0x43030ff4
+     * PD_DOUT = 0x00c0, PD_PMD = 0x00007000 (PD7=1 CAN_TX Recessive Push-Pull, PD6=Input)
      */
-    GPIOC_DOUT = 0x000000C7;
+    GPIOC_DOUT = 0x000000CF;
     GPIOC_PMD  = 0x0000F045;
+
+    GPIOD_DOUT = 0x000000C0;
+    GPIOD_PMD  = 0x00007000;
 
     GPIOB_DOUT = 0x0000113F;
     GPIOB_PMD  = 0x43030FF4;
@@ -306,6 +314,9 @@ static void jump_to_app(void) {
     /* Disable interrupts and clear pending flags on Cortex-M0 (32 IRQs max) */
     *(volatile uint32_t *)0xE000E180 = 0xFFFFFFFF; /* NVIC->ICER[0] */
     *(volatile uint32_t *)0xE000E280 = 0xFFFFFFFF; /* NVIC->ICPR[0] */
+
+    /* Release CAN Transceiver Standby: pull PC3 LOW (0 = Active) so CAN transceiver is awake for app */
+    GPIOC_DOUT &= ~(1U << 3);
 
     /* FMC Hardware Vector Remap: ISPCMD = 0x2E */
     SYS_REGWRPROT = 0x59;

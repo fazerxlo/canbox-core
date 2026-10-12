@@ -352,6 +352,16 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Implemented `src/hiworld_bootloader/hiworld_iap_nuc131.c`: Handshake unlock prompt `'U'`, password verification (`0x19 0x78 0x02 0x17`), 136-byte obfuscated record processing, 32-bit additive checksum, FMC page erase (`ISPCMD=0x22`) / word program (`ISPCMD=0x21`), hardware vector remapping (`VECMAP` `ISPCMD=0x2E`), and dual-trigger safety (SRAM token `0x55AA55AA` + 500 ms listen window).
   - Implemented `tools/pack_hiworld_iap.py`: Standalone CLI packer generating standard Hiworld `can_app.iap` containers from compiled `.bin` firmware binaries.
   - Implemented upgrade trigger handler in `src/protocols/proto_hiworld_adapter.c` on receiving `HIWORLD_CMD_UPGRADE_TRIGGER (0xE0)`.
+- **Standalone Serial IAP Flasher & Automation CLI (`tools/flash_hiworld_serial.py`):**
+  - Implemented standalone Python tool enabling 100% wireless/ST-Link-free firmware updates directly over standard USB-to-UART adapter connected to the CAN Box serial lines.
+  - Automatically invokes PlatformIO compiler (`pio run -e raise_nuc131`), generates obfuscated IAP record stream, issues `0x5A 0xA5 0x02 0xE0 0x00 0x00 0xE1` bootloader trigger, verifies password unlock (`0x19 0x78 0x02 0x17`), erases flash, streams all 143 records with live progress bar, and validates application reboot & telemetry streaming within 6.8 seconds.
+- **Bootloader Early Pin Isolation & CAN Bus Protection:**
+  - Enforced `PD7` (`CAN0_TX`) push-pull HIGH (recessive 3.3V) and `PC3` (`CAN_STBY`) push-pull HIGH (standby) at the absolute first instruction of Cortex-M0 execution in `src/hiworld_bootloader/startup_bootloader.S` and `src/hal/hal_nuc131/startup_app.S`.
+  - Prevents NUC131 GPIO floating states during reset/SWD halt from driving dominant levels onto the vehicle CAN bus, eliminating bench instrument cluster/MDF sleep tripping.
+  - Added clean transceiver handover (`PC3` pulled LOW to active) in `jump_to_app()` right before branching to the main application.
+- **Peugeot 407 Dual Reverse Detection & Event-Driven GPIO Trigger:**
+  - Unified reverse gear detection across both `0x036` (Byte 1 Bit 7) and `0x0F6` (Byte 7 Bit 7) via `s_reverse_from_0f6 || s_reverse_from_036` in `src/profiles/profile_psa.c`, preventing high-speed `0x036` frames from clobbering active reverse state from slow `0x0F6` frames.
+  - Added immediate zero-latency event-driven dispatch for `GPIO_PIN_REVERSE_OUT` (`PA13`) directly inside `can_router_process_can()` in `src/core/can_router.c`.
 - **Universal Downlink Acknowledgment:**
   - Implemented automatic ACK packet generation (`TX [0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]`) for all valid incoming Head Unit downlink commands (`cmd != 0xFE && cmd != 0xFF`), matching commercial Hiworld MCU firmware behavior.
 - **Cadence & Resync Harmonization:**

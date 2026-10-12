@@ -103,6 +103,13 @@ void can_router_process_can(const can_frame_t *frame) {
         s_last_sent_state.ignition_state = s_current_state.ignition_state;
     }
 
+    // Immediately push reverse hardware trigger on reverse gear change (zero latency)
+    if (s_current_state.reverse_gear != s_last_sent_state.reverse_gear) {
+        hal_gpio_write(GPIO_PIN_REVERSE_OUT, s_current_state.reverse_gear);
+        hu_protocol_send_reverse(s_current_state.reverse_gear);
+        s_last_sent_state.reverse_gear = s_current_state.reverse_gear;
+    }
+
     // Immediately push high-priority event-driven changes (steering keys)
     if (s_current_state.wheel.active_key != s_last_sent_state.wheel.active_key ||
         s_current_state.wheel.press_state != s_last_sent_state.wheel.press_state) {

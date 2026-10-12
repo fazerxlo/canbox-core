@@ -69,16 +69,25 @@ Reset_Handler:
     ldr r0, =_estack
     msr msp, r0
 
-    /* Silence buzzer & apply factory GPIO outputs:
-     * PC_DOUT = 0x00c7, PC_PMD = 0x0000f045 (PC0=1, PC1=1, PC2=1, PC3=0, PC6=1, PC7=1)
+    /* Silence buzzer, keep CAN transceiver in Standby (PC3=1), apply factory GPIO outputs:
+     * PC_DOUT = 0x00cf, PC_PMD = 0x0000f045 (PC0=1, PC1=1, PC2=1, PC3=1 Standby, PC6=1, PC7=1)
      * PB_DOUT = 0x113f, PB_PMD = 0x43030ff4 (PB1=1 TX, PB3=1, PB12=1, PB15=0)
      * PA_DOUT = 0x4cff, PA_PMD = 0x75f5ff0f (PA15=0, PA8/9/12/13=0)
+     * PD_DOUT = 0x00c0, PD_PMD = 0x00007000 (PD7=1 CAN_TX Recessive Push-Pull, PD6=Input CAN_RX)
      */
     ldr r2, =0x50004088   /* GPIOC_DOUT */
-    ldr r1, =0x000000C7
+    ldr r1, =0x000000CF
     str r1, [r2]
     ldr r2, =0x50004080   /* GPIOC_PMD */
     ldr r1, =0x0000F045
+    str r1, [r2]
+
+    /* Immediately isolate CAN_TX (PD7) pin: drive Push-Pull HIGH (Recessive) */
+    ldr r2, =0x500040C8   /* GPIOD_DOUT */
+    ldr r1, =0x000000C0   /* PD7 = 1, PD6 = 1 */
+    str r1, [r2]
+    ldr r2, =0x500040C0   /* GPIOD_PMD */
+    ldr r1, =0x00007000   /* PD7 Push-Pull (01b), PD6 Input (00b) */
     str r1, [r2]
 
     ldr r2, =0x50004048   /* GPIOB_DOUT */

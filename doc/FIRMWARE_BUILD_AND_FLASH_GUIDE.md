@@ -264,6 +264,34 @@ Factory Raise boards have Security Lock Active in `CONFIG0` (`0xF70FFBB9`, bit 1
 
 ---
 
+### 4.5 Standalone Serial IAP Flashing (No ST-Link Required)
+
+Once the Hiworld IAP bootloader is resident at `0x00000000`, all future application firmware updates can be performed **100% over the UART serial cable** (at 38,400 baud) without an ST-Link programmer.
+
+The automated tool `tools/flash_hiworld_serial.py` handles the entire compile, obfuscation, IAP handshake, flash erase, chunk streaming, and verification pipeline:
+
+```bash
+# Flash via serial adapter (default: /dev/ttyUSB1 @ 38400 baud)
+./tools/flash_hiworld_serial.py --port /dev/ttyUSB1
+
+# Compile with a custom version tag and flash in one step:
+./tools/flash_hiworld_serial.py --port /dev/ttyUSB1 --version CANBOX-CORE-V1.0.0
+
+# Flash a pre-built binary without re-compiling:
+./tools/flash_hiworld_serial.py --bin .pio/build/raise_nuc131/program.bin --no-build --port /dev/ttyUSB1
+```
+
+**Flashing Process:**
+1. Compiles target `raise_nuc131` via PlatformIO (if `--no-build` is omitted).
+2. Packages the `.bin` into obfuscated 136-byte records.
+3. Transmits the Hiworld software upgrade trigger command (`5A A5 02 E0 00 00 E1`) over UART.
+4. Waits for bootloader `'U'` prompt, sends password (`0x19 0x78 0x02 0x17`), and verifies FMC erase.
+5. Streams all 143 records with live progress bar and block acknowledgments.
+6. Verifies clean application reboot and resumption of `0x5A 0xA5` Hiworld telemetry stream in ~6.8 seconds.
+
+
+---
+
 ## 5. Verification on Android Head Unit
 
 After flashing the firmware and connecting OpenCanbox to the Android Head Unit UART port (38,400 baud, 8N1):

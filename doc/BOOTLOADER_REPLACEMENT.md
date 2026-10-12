@@ -912,4 +912,16 @@ Once the Hiworld IAP bootloader is resident on the NUC131:
    - On the Head Unit: Open **Car Settings $\rightarrow$ Version $\rightarrow$ CAN Update $\rightarrow$ Confirm**.
    - The Head Unit streams records at 38,400 baud, verifies checksums, de-obfuscates, programs flash, and reboots cleanly into `canbox-core`.
 
+### 10.1 Flashing from PC via Serial Cable (Developer Workflow)
+
+For bench development and testing without an Android Head Unit, the standalone Python tool `tools/flash_hiworld_serial.py` emulates the Android Head Unit update sequence end-to-end:
+
+```bash
+# Auto-compile and flash over USB-Serial cable (38,400 baud)
+./tools/flash_hiworld_serial.py --port /dev/ttyUSB1
+```
+
+This automates the entire IAP trigger, handshake, flash programming, and verification cycle in ~6.8 seconds.
+
+
 

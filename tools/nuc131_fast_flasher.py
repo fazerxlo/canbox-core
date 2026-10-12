@@ -112,7 +112,7 @@ class OpenOcdClient:
 
 STUB_CODE = bytes.fromhex(
     "0c4b 5860 2224 dc60 0124 1c61 1c69 002c fcd1 2124 dc60 "
-    "002a 09d0 5860 0c68 0431 9c60 0124 1c61 1c69 002c fcd1 "
+    "002a 0bd0 5860 0c68 0431 9c60 0124 1c61 1c69 002c fcd1 "
     "0430 013a f1e7 00be 00c00050"
 )
 

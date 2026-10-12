@@ -58,7 +58,7 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
 
         # 1. Erase page
         client.cmd(f"mww 0x5000C004 0x{page_addr:08X}; mww 0x5000C00C 0x22; mww 0x5000C010 0x01")
-        time.sleep(0.005)
+        time.sleep(0.010)
 
         # 2. Program words in page
         cmds = []
@@ -69,11 +69,11 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
                 cmds.append(f"mww 0x5000C004 0x{word_addr:08X}; mww 0x5000C008 0x{val:08X}; mww 0x5000C00C 0x21; mww 0x5000C010 0x01")
 
         if cmds:
-            # Send batch of words in chunks of 16
-            chunk_size = 16
+            # Send batch of words in chunks of 4 with a short delay for FMC write cycle
+            chunk_size = 4
             for i in range(0, len(cmds), chunk_size):
                 client.cmd("; ".join(cmds[i : i + chunk_size]))
-                time.sleep(0.002)
+                time.sleep(0.003)
 
         print(f"    - Programmed page {p + 1}/{total_pages} ({(p + 1) * 100 // total_pages}%)...", end="\r")
 
