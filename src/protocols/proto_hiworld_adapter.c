@@ -537,17 +537,19 @@ static void hiworld_send_radio_state(const vehicle_radio_t *radio) {
     if (radio->source_mode < 0x20 && radio->power_status != 0) {
         payload[1] = (uint8_t)(radio->freq_0_1mhz & 0xFF);
         payload[2] = (uint8_t)((radio->freq_0_1mhz >> 8) & 0xFF);
+        payload[3] = radio->preset_slot;
+        payload[4] = radio->indicators;
     } else {
         payload[1] = 0x00;
         payload[2] = 0x00;
+        payload[3] = 0x00;
+        payload[4] = 0x00;
     }
 
-    payload[3] = radio->preset_slot;
-    payload[4] = radio->indicators;
     payload[5] = radio->power_status;
 
     for (size_t i = 0; i < 8; i++) {
-        payload[6 + i] = (radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
+        payload[6 + i] = (radio->source_mode < 0x20 && radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
     }
 
     uint8_t tx_buf[24];
@@ -559,6 +561,10 @@ static void hiworld_send_radio_state(const vehicle_radio_t *radio) {
 
 static void hiworld_send_radio_text(const char *text, uint8_t len) {
     if (!text || len == 0) return;
+    /* Do not emit radio text frames if audio source is not radio */
+    if (s_cached_radio_valid && (s_cached_radio_state.source_mode >= 0x20 || s_cached_radio_state.power_status == 0)) {
+        return;
+    }
     if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
 
     uint8_t tx_buf[80];
@@ -603,6 +609,11 @@ static void hiworld_send_radio_presets(const vehicle_radio_t *radio) {
     if (radio == NULL) {
         if (!s_cached_radio_valid) return;
         radio = &s_cached_radio_state;
+    }
+
+    /* Do not emit radio preset frames if audio source is not radio (e.g. AUX, CD, or Off) */
+    if (radio->source_mode >= 0x20 || radio->power_status == 0) {
+        return;
     }
 
     /* Check if any preset name is set; if so send extended names frame (49B), else freqs (13B) */

@@ -1355,8 +1355,11 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
         }
     }
 
-    if (radio->source_mode < 0x20) {
+    if (radio->source_mode < 0x20 || radio->source_mode == 0xFF) {
         radio->source_mode = radio->band;
+        if (radio->power_status == 0) {
+            radio->power_status = 0x01;
+        }
     }
     radio->updated = true;
 }
@@ -1509,6 +1512,13 @@ void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
 
 void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
     if (!radio || !isotp || !data || dlc < 2) return;
+
+    if (radio->source_mode == 0xFF) {
+        radio->source_mode = radio->band;
+        if (radio->power_status == 0) {
+            radio->power_status = 0x01;
+        }
+    }
 
     uint8_t pci = data[0] & 0xF0;
 
@@ -1704,22 +1714,23 @@ size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf,
         out_buf[4] = radio->band;
     }
 
-    /* Frequency uint16_le: Head Unit decodes as Little Endian */
     if (radio->source_mode < 0x20 && radio->power_status != 0) {
         out_buf[5] = (uint8_t)(radio->freq_0_1mhz & 0xFF);
         out_buf[6] = (uint8_t)((radio->freq_0_1mhz >> 8) & 0xFF);
+        out_buf[7] = radio->preset_slot;
+        out_buf[8] = radio->indicators;
     } else {
         out_buf[5] = 0x00;
         out_buf[6] = 0x00;
+        out_buf[7] = 0x00;
+        out_buf[8] = 0x00;
     }
 
-    out_buf[7] = radio->preset_slot;
-    out_buf[8] = radio->indicators;
     out_buf[9] = radio->power_status;
 
-    /* 8-Byte ASCII Station Name (space padded) */
+    /* 8-Byte ASCII Station Name (space padded, blank for external sources) */
     for (size_t i = 0; i < 8; i++) {
-        out_buf[10 + i] = (radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
+        out_buf[10 + i] = (radio->source_mode < 0x20 && radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
     }
 
     /* Checksum: ((LEN + CMD + sum(DATA)) - 1) & 0xFF */

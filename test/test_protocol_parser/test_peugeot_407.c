@@ -2890,3 +2890,50 @@ void test_can_id_filter_enforcement(void) {
     TEST_ASSERT_FALSE(can_router_is_id_allowed(0x5C0));
 }
 
+void test_peugeot_407_aux_mode_suppression(void) {
+    vehicle_media_t media;
+    psa_isotp_rx_ctx_t isotp;
+    psa_rd4_media_init(&media, &isotp);
+
+    /* 1. Set source to AUX 1 via CAN 0x165 (0xC8, 0xC0, 0x40, 0x00) */
+    const uint8_t can_165_aux1[] = { 0xC8, 0xC0, 0x40, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_165_aux1, sizeof(can_165_aux1));
+
+    TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_HEX8(0x01, media.radio.power_status);
+
+    /* 2. Process background CAN tuner frame 0x225 (preset 6, 89.4 MHz, FM1) */
+    const uint8_t can_225_bg[] = { 0x20, 0x60, 0x90, 0x03, 0x14 };
+    psa_rd4_process_can_0x225(&media.radio, can_225_bg, sizeof(can_225_bg));
+
+    /* Source mode MUST remain AUX 1 (0x20), NOT overwritten by tuner band */
+    TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode);
+
+    /* 3. Build Hiworld Cmd 0x84: radio tuner parameters must be blanked in AUX mode */
+    uint8_t out[32];
+    size_t out_len = build_hiworld_radio_state(&media.radio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(19, out_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x20, out[4]); /* Source: AUX 1 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[5]); /* Frequency LSB = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[6]); /* Frequency MSB = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[7]); /* Preset slot = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[8]); /* Indicators = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, out[9]); /* Power status = 1 */
+    TEST_ASSERT_EQUAL_STRING_LEN("        ", (char *)&out[10], 8); /* Blank station name */
+
+    /* 4. Test AUX 2 mode (src = 0x5 -> 0x21) */
+    const uint8_t can_165_aux2[] = { 0xC8, 0xC0, 0x50, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_165_aux2, sizeof(can_165_aux2));
+    TEST_ASSERT_EQUAL_HEX8(0x21, media.radio.source_mode);
+
+    out_len = build_hiworld_radio_state(&media.radio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_HEX8(0x21, out[4]); /* Source: AUX 2 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[7]); /* Preset slot = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, out[8]); /* Indicators = 0 */
+    TEST_ASSERT_EQUAL_STRING_LEN("        ", (char *)&out[10], 8);
+}
+

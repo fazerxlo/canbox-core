@@ -114,6 +114,7 @@ void test_peugeot_407_custom_cockpit_check_sequence(void);
 void test_peugeot_407_custom_summary_table_and_empty_clearance(void);
 void test_peugeot_407_custom_downlink_0x2f_response(void);
 void test_can_id_filter_enforcement(void);
+void test_peugeot_407_aux_mode_suppression(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -249,6 +250,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_custom_summary_table_and_empty_clearance);
     RUN_TEST(test_peugeot_407_custom_downlink_0x2f_response);
     RUN_TEST(test_can_id_filter_enforcement);
+    RUN_TEST(test_peugeot_407_aux_mode_suppression);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

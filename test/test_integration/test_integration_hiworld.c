@@ -1138,3 +1138,107 @@ void test_integration_hiworld_rd4_preset_list_pipeline(void) {
     }
     TEST_ASSERT_TRUE(found_0x85);
 }
+
+void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    /* 1. Inject CAN 0x165 selecting AUX Input 1 (src = 0x4 -> source_mode 0x20) */
+    can_frame_t frame_aux = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x40, 0x00 }
+    };
+    can_router_process_can(&frame_aux);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Must output Cmd 0x84 (CarRadioState) indicating AUX 1 (0x20) */
+    TEST_ASSERT_EQUAL_UINT32(19, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[4]); /* Source = AUX 1 (0x20) */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[5]); /* Frequency LSB = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[6]); /* Frequency MSB = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[7]); /* Preset slot = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[8]); /* Indicators = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[9]); /* Power status = 1 (Playing) */
+    TEST_ASSERT_EQUAL_STRING_LEN("        ", (char *)&rx_buf[10], 8); /* Blank station name */
+
+    /* Verify NO Cmd 0x85 (presets) was transmitted */
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x85) {
+            TEST_FAIL_MESSAGE("Cmd 0x85 should NOT be sent when audio source is AUX");
+        }
+    }
+
+    /* 2. Background CAN tuner frame 0x225 and station name 0x2A5 arrive from vehicle */
+    can_frame_t frame_225 = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x20, 0x60, 0x90, 0x03, 0x14 } /* Preset 6, FM1, 89.4 MHz */
+    };
+    can_router_process_can(&frame_225);
+
+    can_frame_t frame_2a5 = {
+        .id = 0x2A5,
+        .dlc = 8,
+        .data = { 'J', 'E', 'D', 'Y', 'N', 'K', 'A', ' ' }
+    };
+    can_router_process_can(&frame_2a5);
+
+    /* Must produce ZERO UART output: background tuner changes while in AUX must not spam serial or trigger Radio UI */
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    /* 3. Simulate periodic 60s resync ticks (600 ticks) */
+    for (int t = 0; t < 599; t++) {
+        if (t % 10 == 0) {
+            can_router_process_can(&frame_aux);
+        }
+        can_router_periodic_100ms();
+    }
+    /* Drain heartbeats accumulated during the 599 ticks */
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 600th tick triggers the 60s periodic bulk resync */
+    can_router_process_can(&frame_aux);
+    can_router_periodic_100ms();
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Resync in AUX mode must emit Cmd 0x84 (AUX 1), NEVER Cmd 0x85 (presets) or Cmd 0x86 (radiotext) */
+    bool found_0x84 = false;
+    bool found_0x85 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            if (rx_buf[i + 3] == 0x84) found_0x84 = true;
+            if (rx_buf[i + 3] == 0x85) found_0x85 = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x84);
+    TEST_ASSERT_FALSE(found_0x85);
+
+    /* 4. Transition back to Radio (CAN 0x165 -> Tuner 0x10 = FM1) */
+    can_frame_t frame_radio = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_radio);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Transition to radio MUST output Cmd 0x84 (Radio State) followed by Cmd 0x85 (Preset list) */
+    found_0x84 = false;
+    found_0x85 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            if (rx_buf[i + 3] == 0x84) found_0x84 = true;
+            if (rx_buf[i + 3] == 0x85) found_0x85 = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x84);
+    TEST_ASSERT_TRUE(found_0x85);
+}

@@ -253,6 +253,28 @@ $$\text{Hiworld\_Freq} = f_{\text{MHz}} \times 10 = (R \times 0.5) + 500 = \frac
 
 ---
 
+### 3.6 External Source & AUX Mode Radio UI Suppression (`0x84`, `0x85`, `0x86`)
+* **Bug & Android APK Root Cause:**
+  - In `dump_2026-10-12_19-07-34.log`, the vehicle audio source was set to AUX Input 1 (`0x165` Byte 2 = `0x40` $\to$ `source_mode = 0x20`).
+  - OpenCanbox transmitted `Cmd 0x84` (`source_mode = 0x20`), but immediately followed it with `Cmd 0x85` (presets).
+  - In `PeugeotDataParser.smali::parseCarRadioPreFrequency`, receiving `Cmd 0x85` takes `Data[0]` (e.g. `0x01` FM1) and directly overwrites `mCarRadioInfo.mBandType = Data[0]`, then invokes `notifyCarRadioState(mCarRadioInfo)`.
+  - In `PeugeotDataController$3.smali::notifyCarRadioState`, when `mBandType < 0x20` while previously in an external source (`lastAudioSource >= 0x20`), the Android Head Unit assumes the user selected Radio and executes:
+    `AppUtil.startCarApp(context, "com.qf.vehicle.activities.OriginalTuner");`
+  - Furthermore, in `Cmd 0x84`, sending non-zero frequency, preset slots, or station names from background tuner CAN frames (`0x225`, `0x2A5`) while in AUX mode confused the Head Unit UI.
+* **Firmware Implementation Rules:**
+  1. **Strict Suppression of `Cmd 0x85` and `Cmd 0x86`:**
+     - Whenever `radio->source_mode >= 0x20` (AUX 1 `0x20`, AUX 2 `0x21`, CD `0x30`, CDC `0x31`, Standby `0xFF`) or `radio->power_status == 0`, `hiworld_send_radio_presets()` and `hiworld_send_radio_text()` return immediately with zero transmission.
+  2. **Field Blanking in `Cmd 0x84`:**
+     - When `radio->source_mode >= 0x20`, `Frequency LSB`, `Frequency MSB`, `Preset Slot`, and `Indicators` are strictly set to `0x00`. The 8-byte station name is padded with 8 spaces (`"        "`).
+  3. **Router Decoupling:**
+     - Background CAN frames (`0x225`, `0x2A5`, `0x0A4`) broadcast continuously by the RD4 unit while in AUX mode must NOT trigger UART telemetry transmissions unless `source_mode` or `power_status` changes.
+  4. **State Transition Refresh:**
+     - Upon switching back from an external source to radio tuner (`old_src >= 0x20 && new_src < 0x20`), `Cmd 0x85` (presets) and `Cmd 0x86` (radiotext) are refreshed.
+  5. **Periodic 60s Resync:**
+     - The periodic 60-second bulk resync emits `Cmd 0x84`, but skips `Cmd 0x85` and `Cmd 0x86` when `source_mode >= 0x20`.
+
+---
+
 ## 4. Headunit Query & Handshake Resync Handling
 
 When the Android Head Unit boots up, or when either `OriginalTuner` or `OriginalMediaPlayer` resumes (`onResume()`), the APK queries the CAN Box using `forwardType`:

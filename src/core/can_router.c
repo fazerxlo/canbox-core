@@ -9,6 +9,7 @@ static vehicle_state_t s_last_sent_state;
 static uint16_t        s_tpms_periodic_timer = 0;
 static uint8_t         s_doors_periodic_timer = 0;
 static uint16_t        s_bulk_resync_timer = 0;
+static uint16_t        s_media_resync_timer = 0;
 
 static bool            s_initial_alerts_scanned = false;
 static bool            s_bsi_alert_query_pending = false;
@@ -48,6 +49,7 @@ void can_router_init(void) {
     s_tpms_periodic_timer = 0;
     s_doors_periodic_timer = 0;
     s_bulk_resync_timer = 0;
+    s_media_resync_timer = 0;
     s_initial_alerts_scanned = false;
     s_bsi_alert_query_pending = false;
     s_bsi_alert_query_timeout_ticks = 0;
@@ -317,7 +319,22 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push radio tuner & source updates on change
     if (s_current_state.media.radio.updated) {
         s_current_state.media.radio.updated = false;
-        if (memcmp(&s_current_state.media.radio, &s_last_sent_state.media.radio, sizeof(vehicle_radio_t)) != 0) {
+
+        bool radio_changed = false;
+        if (s_current_state.media.radio.source_mode >= 0x20) {
+            /* External sources (AUX, CD, CDC, OFF): only source_mode or power_status changes matter */
+            if (s_current_state.media.radio.source_mode != s_last_sent_state.media.radio.source_mode ||
+                s_current_state.media.radio.power_status != s_last_sent_state.media.radio.power_status) {
+                radio_changed = true;
+            }
+        } else {
+            /* Radio tuner mode: any change in frequency, band, preset, indicators, name, power, or source */
+            if (memcmp(&s_current_state.media.radio, &s_last_sent_state.media.radio, sizeof(vehicle_radio_t)) != 0) {
+                radio_changed = true;
+            }
+        }
+
+        if (radio_changed) {
             uint8_t old_src = s_last_sent_state.media.radio.source_mode;
             uint8_t new_src = s_current_state.media.radio.source_mode;
 
@@ -329,22 +346,38 @@ void can_router_process_can(const can_frame_t *frame) {
             }
 
             hu_protocol_send_radio_state(&s_current_state.media.radio);
+
+            /* If transitioning to radio mode, also refresh presets and radio text */
+            if (old_src >= 0x20 && new_src < 0x20) {
+                hu_protocol_send_radio_presets(&s_current_state.media.radio);
+                if (s_current_state.media.radio.radio_text_len > 0) {
+                    hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+                }
+            }
+
+            s_last_sent_state.media.radio = s_current_state.media.radio;
+        } else if (s_current_state.media.radio.source_mode >= 0x20) {
+            /* Keep cached radio state aligned without sending serial frames */
             s_last_sent_state.media.radio = s_current_state.media.radio;
         }
     }
 
-    // Immediately push radio preset list updates on change
+    // Immediately push radio preset list updates on change (only if currently in radio mode)
     if (s_current_state.media.radio.preset_updated) {
         s_current_state.media.radio.preset_updated = false;
-        hu_protocol_send_radio_presets(&s_current_state.media.radio);
+        if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
+            hu_protocol_send_radio_presets(&s_current_state.media.radio);
+        }
         memcpy(s_last_sent_state.media.radio.preset_freqs, s_current_state.media.radio.preset_freqs, sizeof(s_last_sent_state.media.radio.preset_freqs));
         memcpy(s_last_sent_state.media.radio.preset_names, s_current_state.media.radio.preset_names, sizeof(s_last_sent_state.media.radio.preset_names));
     }
 
-    // Immediately push dynamic RDS RadioText on change
+    // Immediately push dynamic RDS RadioText on change (only if currently in radio mode)
     if (s_current_state.media.radio.radio_text_updated) {
         s_current_state.media.radio.radio_text_updated = false;
-        hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+        if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
+            hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+        }
         s_last_sent_state.media.radio.radio_text_len = s_current_state.media.radio.radio_text_len;
         memcpy(s_last_sent_state.media.radio.radio_text, s_current_state.media.radio.radio_text, sizeof(s_last_sent_state.media.radio.radio_text));
     }
@@ -447,14 +480,15 @@ void can_router_periodic_100ms(void) {
     }
 
     // Periodic slow resync for Radio & Media states (60 seconds / 600 ticks)
-    static uint16_t s_media_resync_timer = 0;
     if (++s_media_resync_timer >= 600) {
         s_media_resync_timer = 0;
         if (s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_state(&s_current_state.media.radio);
-            hu_protocol_send_radio_presets(&s_current_state.media.radio);
-            if (s_current_state.media.radio.radio_text_len > 0) {
-                hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+            if (s_current_state.media.radio.source_mode < 0x20) {
+                hu_protocol_send_radio_presets(&s_current_state.media.radio);
+                if (s_current_state.media.radio.radio_text_len > 0) {
+                    hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+                }
             }
         }
         if (s_current_state.media.cdc.active_disc != 0) {
