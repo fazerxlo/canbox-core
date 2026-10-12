@@ -179,6 +179,10 @@ typedef struct {
     bool                     reverse_gear;
     bool                     handbrake;
     bool                     economy_mode;
+    bool                     ignition_on;
+    bool                     radio_on;
+    bool                     radio_present;
+    bool                     radio_sleep;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);
@@ -189,6 +193,8 @@ typedef struct {
 } can_router_rule_t;
 
 void can_router_init(void);
+void can_router_rebuild_filter(void);
+bool can_router_is_id_allowed(uint32_t can_id);
 void can_router_process_can(const can_frame_t *frame);
 void can_router_process_uart_byte(uint8_t byte);
 void can_router_periodic_100ms(void);

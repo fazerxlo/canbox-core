@@ -28,6 +28,7 @@ extern "C" {
 #define HIWORLD_CMD_WARNING_INFO      0x42
 #define HIWORLD_CMD_EXTENDED_ALERT    0xEA
 #define HIWORLD_CMD_TPMS_NUMERIC      0x66
+#define HIWORLD_CMD_UPGRADE_TRIGGER   0xE0
 #define HIWORLD_CMD_HEARTBEAT         0xFF
 
 /* Alert transmission compilation parameters:

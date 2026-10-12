@@ -258,9 +258,14 @@ pio test -e integration_test
 
 ### Hardware Deployment
 
-**STM32F103 Target:**
+**STM32F103 Target (Generic / BluePill):**
 ```bash
 pio run -e stm32_cbox
+```
+
+**OEM Hiworld Target (STM32F105 / 28KB IAP Bootloader @ 0x08007000):**
+```bash
+pio run -e hiworld_stm32f105
 ```
 
 **ESP32 Target:**
@@ -268,9 +273,14 @@ pio run -e stm32_cbox
 pio run -e esp32_cbox
 ```
 
-**Nuvoton NUC131 Target:**
+**Nuvoton NUC131 Target (Generic):**
 ```bash
 pio run -e nuc131_cbox
+```
+
+**OEM Raise Target (NUC131 / 32KB Bootloader @ 0x00008000):**
+```bash
+pio run -e raise_nuc131
 ```
 
 ---
@@ -329,13 +339,25 @@ canbox-core/
 │
 ├── doc/                                     # Complete reverse-engineering & protocol specs
 │   ├── TODO_PROGRESS.md                     # Implementation roadmap
+│   ├── BOOTLOADER_REPLACEMENT.md            # Hiworld IAP bootloader specification
+│   ├── NUC131_SUPPORT.md                    # Nuvoton NUC131 integration & memory map
+│   ├── FIRMWARE_BUILD_AND_FLASH_GUIDE.md    # Multi-platform build & flashing guide
 │   ├── HARDWARE_GPIO_REVERSE_ILL_ACC.md     # GPIO output driver specification
 │   ├── MANUAL_TESTING_WITH_HEADUNIT.md      # Hardware workbench guide
 │   ├── CANBOX_SPEC_HIWORLD_*.md             # Hiworld protocol specifications
 │   ├── PEUGEOT_RT4_TRIP_RESET.md            # Downlink trip computer protocol
 │   └── PEUGEOT_RT4_CAR_CONFIG.md            # BSI settings & car personalization
 │
+├── ldscripts/                               # Target linker scripts
+│   ├── nuc131_bootloader.ld                 # NUC131 8 KB bootloader partition (0x00000000)
+│   └── nuc131_app.ld                        # NUC131 56 KB application partition (0x00002000)
+│
+├── openocd_nuc131.cfg                       # OpenOCD SWD configuration for NUC131 via ST-Link V2
+│
 ├── include/
+│   ├── bootloader/
+│   │   └── hiworld_iap_nuc131.h             # Hiworld IAP bootloader interface & tokens
+│   │
 │   ├── core/
 │   │   ├── can_router.h                     # State machine & change detection
 │   │   ├── ring_buffer.h                    # Lock-free SPSC queue
@@ -361,8 +383,12 @@ canbox-core/
 │       └── raise_car_mapping.h              # Raise model index mappings
 │
 ├── src/
-│   ├── main.c                               # Main entry (Linux + STM32)
+│   ├── main.c                               # Main entry (Linux + STM32 + NUC131)
 │   ├── main_esp32.c                         # ESP32/FreeRTOS main entry
+│   │
+│   ├── hiworld_bootloader/                  # Native Hiworld IAP bootloader for NUC131
+│   │   ├── hiworld_iap_nuc131.c             # De-obfuscation, FMC flashing, unlock handshake
+│   │   └── startup_bootloader.S             # Hardware vector table & ISR bounce trampolines
 │   │
 │   ├── core/
 │   │   ├── can_router.c                     # State cache & change detection
@@ -370,13 +396,13 @@ canbox-core/
 │   │   └── vehicle_profile_manager.c        # Profile registration
 │   │
 │   ├── profiles/
-│   │   ├── profile_peugeot_407.c            # Peugeot 407 decoder
-│   │   ├── profile_psa_generic.c            # Generic PSA CAN2004/2010 decoders
-│   │   └── profile_vag_pq.c                 # VAG PQ35/46 decoders
+│   │   ├── peugeot_407.c                    # Peugeot 407 decoder
+│   │   ├── profile_psa.c                    # Generic PSA CAN2004/2010 decoders
+│   │   └── profile_vag.c                    # VAG PQ35/46 decoders
 │   │
 │   ├── protocols/
 │   │   ├── hu_protocol.c                    # Protocol dispatcher
-│   │   ├── proto_hiworld_adapter.c          # Hiworld uplink/downlink
+│   │   ├── proto_hiworld_adapter.c          # Hiworld uplink/downlink & upgrade trigger
 │   │   ├── proto_raise_adapter.c            # Raise uplink/downlink
 │   │   ├── proto_bagoo_adapter.c            # Bagoo uplink/downlink
 │   │   ├── hiworld_car_mapping.c            # Hiworld model database
@@ -384,48 +410,24 @@ canbox-core/
 │   │
 │   └── hal/
 │       ├── hal_native/                      # Linux SocketCAN + POSIX pty
-│       │   ├── hal_can_native.c
-│       │   ├── hal_uart_native.c
-│       │   ├── hal_gpio_native.c
-│       │   └── hal_system_native.c
-│       │
-│       ├── hal_stm32/                       # STM32F103 bxCAN + LL drivers
-│       │   ├── hal_can_stm32.c
-│       │   ├── hal_uart_stm32.c
-│       │   ├── hal_gpio_stm32.c
-│       │   └── hal_system_stm32.c
-│       │
+│       ├── hal_stm32/                       # STM32F103/F105 bxCAN + LL drivers
 │       ├── hal_esp32/                       # ESP32 TWAI + ESP-IDF
-│       │   ├── hal_can_esp32.c
-│       │   ├── hal_uart_esp32.c
-│       │   ├── hal_gpio_esp32.c
-│       │   └── hal_system_esp32.c
-│       │
-│       └── hal_avr/                         # AVR + MCP2515 SPI CAN
-│           └── (AVR HAL drivers)
+│       └── hal_nuc131/                      # Nuvoton NUC131 Bosch C_CAN + UART0 + GPIO
+│           ├── hal_can_nuc131.c
+│           ├── hal_uart_nuc131.c
+│           ├── hal_gpio_nuc131.c
+│           ├── hal_system_nuc131.c
+│           └── startup_app.S
 │
-├── test/
-│   ├── test_protocol_parser/                # Protocol framing & checksum unit tests
-│   │   ├── test_hiworld_framing.c
-│   │   ├── test_raise_framing.c
-│   │   └── test_checksum_algorithms.c
-│   │
-│   └── test_integration/                    # End-to-end CAN-to-UART tests
-│       ├── test_peugeot_407_decoder.c
-│       ├── test_canbusscenarios.c
-│       └── test_hiworld_roundtrip.c
+├── test/                                    # Unit and integration test suites
 │
-├── test_data/                               # Real vehicle CAN dumps & replay files
-│   ├── peugeot_407_idle.candump
-│   ├── peugeot_407_driving.candump
-│   └── hiworld_protocol_capture.log
-│
-└── tools/                                   # Bench testing & protocol validation
-    ├── canbox_e2e_logger.py                 # Live bidirectional logger
-    ├── canbox_bench_e2e.py                  # Automated scenario testing
-    ├── diff_canbox_frames.py                # Differential analysis
-    ├── canbox_manual_test.py                # Interactive frame injector
-    └── replay_serial.py                     # Serial packet replayer
+├── tools/                                   # Bench testing, protocol validation & tools
+│   ├── pack_hiworld_iap.py                  # Packs firmware.bin into can_app.iap container
+│   ├── nuc131_fast_flasher.py               # Fast SWD programming tool for NUC131
+│   ├── generate_version.py                  # Dynamic compile-time version tag embedder
+│   ├── canbox_e2e_logger.py                 # Live bidirectional logger
+│   ├── canbox_bench_e2e.py                  # Automated scenario testing
+│   └── diff_canbox_frames.py                # Differential analysis
 ```
 
 ---
@@ -436,9 +438,10 @@ canbox-core/
 | :--- | :--- | :--- | :--- | :--- |
 | **Linux** | `native_test` | SocketCAN + POSIX pty | `hal_native` | `pio run -e native_test` |
 | **STM32F103** | `stm32_cbox` | bxCAN + USART1 + GPIO | `hal_stm32` | `pio run -e stm32_cbox` |
+| **STM32F105/F107**| `hiworld_stm32f105` | Dual bxCAN + USART2 (0x08007000 IAP) | `hal_stm32` | `pio run -e hiworld_stm32f105` |
 | **ESP32** | `esp32_cbox` | TWAI + UART1 + GPIO | `hal_esp32` | `pio run -e esp32_cbox` |
-| **ATmega328P** | `avr_cbox` | MCP2515 SPI CAN | `hal_avr` | `pio run -e avr_cbox` |
-| **Nuvoton NUC131** | `nuc131_cbox` | Bosch C_CAN + UART | `hal_nuc131` | `pio run -e nuc131_cbox` |
+| **NUC131 Bootloader** | `nuc131_bootloader`| UART0 (38.4k) + FMC (0x00000000 Base) | `hiworld_bootloader` | `pio run -e nuc131_bootloader` |
+| **NUC131 Application**| `raise_nuc131` | Bosch C_CAN + UART0 (0x00002000 App) | `hal_nuc131` | `pio run -e raise_nuc131` |
 
 ---
 

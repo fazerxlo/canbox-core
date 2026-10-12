@@ -5,4 +5,8 @@
 .vscode/ipch
 /*.log
 __pycache__
-
+openocd_nuc131_bin/
+openocd_nuc131_bin
+*.bin.dump
+*.iap
+*.dump

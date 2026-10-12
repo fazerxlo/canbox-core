@@ -107,7 +107,7 @@ typedef struct {
     hiworld_link_state_t state;
     uint8_t              car_model_id;
     uint8_t              car_variant;
-    char                 fw_version[20];
+    char                 fw_version[64];
 
     uint32_t             last_rx_millis;
     uint32_t             last_handshake_millis;

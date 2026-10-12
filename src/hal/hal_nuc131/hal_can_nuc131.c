@@ -36,13 +36,22 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     // Reset the CAN module
     SYS_ResetModule(CAN0_RST);
 
-    // Open CAN controller in normal mode
-    // CAN_Open() automatically sets up:
-    // - init mode
-    // - timing parameters for the requested baudrate
-    // - message objects
-    // - leaves init mode enabled
-    CAN_Open(CAN0, baudrate, CAN_NORMAL_MODE);
+    // Directly configure CAN bit timing (bypassing dynamic CAN_Open loop)
+    CAN_EnterInitMode(CAN0);
+    if (baudrate == CAN_BAUD_125K) {
+        // 48 MHz PCLK: 125 kbps, 81.25% sample point
+        CAN0->BTIME = 0x2B17;
+        CAN0->BRPE  = 0;
+    } else if (baudrate == CAN_BAUD_500K) {
+        // 48 MHz PCLK: 500 kbps, 81.25% sample point: tsegall=16, BRP=6, TSEG1=12, TSEG2=3
+        CAN0->BTIME = 0x2B05;
+        CAN0->BRPE  = 0;
+    } else {
+        // Default / 125 kbps
+        CAN0->BTIME = 0x2B17;
+        CAN0->BRPE  = 0;
+    }
+    CAN_LeaveInitMode(CAN0);
 
     // Set all RX message objects to accept all frames
     for (uint8_t i = CAN_RX_OBJ_START; i <= CAN_RX_OBJ_END; i++) {

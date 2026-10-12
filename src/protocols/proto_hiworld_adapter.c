@@ -6,6 +6,7 @@
 #include "core/can_router.h"
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
+#include "core/canbox_version.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -26,6 +27,21 @@ static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
 
 static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     if (!packet) return;
+
+    /* Acknowledge downlink command per Hiworld specification:
+     * For every valid packet received with CmdID != 0xFE and CmdID != 0xFF,
+     * the MCU returns an acknowledgment frame:
+     * TX [0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]
+     * Note: CAR_TYPE_SET (0x24) is already acknowledged in hiworld_connection.c
+     */
+    if (packet->cmd != 0xFE && packet->cmd != 0xFF && packet->cmd != HIWORLD_CMD_CAR_TYPE_SET) {
+        uint8_t ack_payload[1] = { packet->cmd };
+        uint8_t tx_ack[6];
+        size_t ack_len = proto_hiworld_serialize(HIWORLD_CMD_HEARTBEAT, ack_payload, 1, tx_ack, sizeof(tx_ack));
+        if (ack_len > 0) {
+            hal_uart_write(tx_ack, ack_len);
+        }
+    }
 
     if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
         /* ForwardEcuSetting:
@@ -62,6 +78,12 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if (packet->cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY) {
         /* Head Unit requested alert/diagnostic log refresh (forwardType 0x2F) */
         can_router_query_alert_journal();
+    } else if (packet->cmd == HIWORLD_CMD_UPGRADE_TRIGGER) {
+        /* Head Unit requested firmware update (e.g. 5A A5 03 E0 00 00 E2) */
+        /* Write persistent magic token to reserved SRAM */
+        *(volatile uint32_t *)0x20000000 = 0x55AA55AA;
+        /* Reboot into bootloader */
+        hal_system_reboot();
     }
 }
 
@@ -72,7 +94,7 @@ static void uart_tx_adapter(const uint8_t *buf, size_t len) {
 static void ensure_hiworld_initialized(void) {
     if (!s_hiworld_initialized) {
         proto_hiworld_init(on_hiworld_packet_received);
-        hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+        hiworld_conn_init(&s_hw_conn_ctx, canbox_get_version(), uart_tx_adapter, on_can_config_callback);
         s_hiworld_hb_tick = 0;
         s_hiworld_initialized = true;
     }
@@ -80,7 +102,7 @@ static void ensure_hiworld_initialized(void) {
 
 static void hiworld_init(void) {
     proto_hiworld_init(on_hiworld_packet_received);
-    hiworld_conn_init(&s_hw_conn_ctx, "H1H2PA123A-240717", uart_tx_adapter, on_can_config_callback);
+    hiworld_conn_init(&s_hw_conn_ctx, canbox_get_version(), uart_tx_adapter, on_can_config_callback);
     s_hiworld_hb_tick = 0;
     s_hiworld_initialized = true;
 }

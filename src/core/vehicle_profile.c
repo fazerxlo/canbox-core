@@ -45,6 +45,7 @@ bool vehicle_profile_set_active(vehicle_profile_id_t profile_id) {
     if (s_active_profile->init) {
         s_active_profile->init();
     }
+    can_router_rebuild_filter();
     return true;
 }
 

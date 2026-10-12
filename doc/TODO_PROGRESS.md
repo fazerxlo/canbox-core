@@ -3,7 +3,7 @@
 **Target Vehicle Platform:** Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps)  
 **Target Head Unit Protocol:** Hiworld PSA (`0x5A 0xA5` Framing, Additive Checksum, UART 38,400 baud, 8N1)  
 **Target Head Unit Application:** `com.qf.vehicle` (Peugeot Hiworld `wc` Driver / QF Canbus System)  
-**Reference Protocol Specifications:** `commands_and_payload_structure.md`, `doc/CANBOX_SPEC_HIWORLD_407_*.md`  
+**Reference Protocol Specifications:** `commands_and_payload_structure.md`, `doc/CANBOX_SPEC_HIWORLD_407_*.md`, `doc/FIRMWARE_BUILD_AND_FLASH_GUIDE.md`  
 **Firmware Core Project:** `canbox-core` (Pure C99 Embedded Automotive Firmware, Zero Heap)  
 **Last Updated:** October 2026  
 
@@ -78,7 +78,9 @@ flowchart LR
 | **11. RD4 Audio & Multimedia Passthrough**| 4 | 0 | 2 | 2 | 0 | **0%** |
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 0 | 0 | 1 | 0 | **0%** (Pending CAN Frame) |
 | **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
-| **Overall** | **44** | **32** | **6** | **4** | **2** | **73%** |
+| **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
+| **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 0 | **100%** |
+| **Overall** | **47** | **35** | **6** | **4** | **2** | **74%** |
 
 ---
 
@@ -90,7 +92,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 
 | Status | CMD | Name / Category | Wire LEN | Vehicle CAN ID | Core Files / Drivers | Test Verification & Notes |
 | :---: | :---: | :--- | :---: | :---: | :--- | :--- |
-| `[x]` | `0xF0` | **Version String Report** | Variable | N/A (Firmware) | `src/protocols/hiworld_connection.c` | `test_hiworld_verification_vector_2_version_report`<br>Reports build string e.g. `H1H2PA123A-240717` |
+| `[x]` | `0xF0` | **Version String Report** | Variable | N/A (Firmware) | `src/core/canbox_version.c`<br>`src/protocols/hiworld_connection.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_hiworld_verification_vector_2_version_report`<br>`test_canbox_embedded_firmware_version`<br>Dynamically embedded `CANBOX-CORE-V<YYYYMMDD.hhmmss>` generated at build time via `tools/generate_version.py` (buffer expanded to 64 bytes) |
 | `[x]` | `0x11` | **Steering Wheel Keys (SWC)** | `0x0A` (10) | `0x21F`<br>`0x221`<br>`0x0F6` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_stalk_0x21f_buttons_and_rotary`<br>`test_peugeot_407_stalk_tip_0x221_trip_button`<br>`test_integration_hiworld_native_stalk_0x21f_pipeline`<br>`test_integration_hiworld_stalk_tip_0x221_trip_pipeline`<br>`test_peugeot_407_stalk_buttons_press_and_release`<br>`test_peugeot_407_stalk_rotary_encoder`<br>`test_integration_hiworld_steering_wheel_volume_up_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md` |
 | `[x]` | `0x12` | **Doors & Apertures Status** | `0x0B` (11) | `0x220`<br>`0x036` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_doors_hiworld_vector_1_driver_front`<br>`test_integration_hiworld_door_status_pipeline`<br>10 payload bytes: FL, FR, RL, RR, trunk, bonnet, handbrake |
 | `[x]` | `0x13` | **Instantaneous Trip Telemetry** | `0x0B` (11) | `0x221` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_trip_hiworld_vector_1_instant_fuel`<br>`test_integration_hiworld_trip_pipeline`<br>Instant fuel ($0.1\text{ L/100km}$), DTE range, target distance |
@@ -137,7 +139,8 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[-]` | `0x81` | **Cruise Presets Group 1 Setup** | `0x0A` (10) | `0x39B` (Tx) | Documented in `commands_and_payload_structure.md` | Uploads speed memory presets 1..6 |
 | `[x]` | `0x85` | **Historical Alarm Replay Query**| `0x02` (2) | `0x39B` (Tx) | `src/protocols/proto_hiworld_adapter.c` | Triggers alert journal replay (mapped along with `0x2F`) |
 | `[x]` | `0x94` | **Software Reset / Link Ping** | `0x01` (1) | N/A (Internal) | `src/protocols/hiworld_connection.c` | Link liveness check / software reboot |
-| `[ ]` | `0xC2` | **MCU Firmware Flash Transfer** | `0x0A` (10) | N/A (Bootloader)| Target-specific bootloader (STM32/ESP32 IAP) |
+| `[x]` | **ALL**| **Universal Downlink ACK (`0xFF`)**| `0x02` (2) | N/A (UART Tx) | `src/protocols/proto_hiworld_adapter.c`<br>`src/protocols/hiworld_connection.c` | Implemented universal ACK response `[0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]` for all valid downlink frames (`CmdID != 0xFE && CmdID != 0xFF`), matching OEM commercial firmware specification |
+| `[-]` | `0xC2` / `0xE0` | **MCU Firmware Flash Transfer / IAP** | Variable | N/A (Bootloader)| `doc/BOOTLOADER_REPLACEMENT.md` | Full native Hiworld IAP bootloader specification for Raise NUC131 hardware: FMC hardware vector remap (`ISPCMD=0x2E`), 136-byte container de-obfuscation, sequence-addressed flash writes, and `pack_hiworld_iap.py` pack tool |
 
 ---
 
@@ -262,16 +265,20 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 ### 4.9 Physical Hardware Synthesis & Low-Power Management (GPIO)
 - **ACC (Switched Head Unit Power):**
   - Synthesized via `GPIO_PIN_HEADUNIT_POWER` (PB9 on STM32 `volvo_od2`, PA8 on NUC131 `vw_nc03`, GPIO 18 on ESP32).
-  - Primary Control Frame: CAN `0x036` (`COMMANDES_BSI`, 100 ms).
-    - Byte 4 Bits [2:0] (`PHASE_VIE`):
-      - `0x01`: **Ignition ON** (Wakeup / Run `+APC`) — Radio turns ON and stays awake (`VEHICLE_IGNITION_ON`, ACC ON).
-      - `0x02`: **Ignition OFF** (Going to sleep) — Initiates shutdown / accessory timer (`VEHICLE_IGNITION_OFF`, ACC OFF).
-      - `0x03`: **Wakeup transition** — Brief (~40 ms) pulse during key turn.
-      - `0x00`: **Deep Sleep / Standby** — Head unit enters deep sleep mode (`VEHICLE_IGNITION_OFF`, ACC OFF).
-    - Byte 2 Bit 7 (`MODE_ECO` = `0x80`):
-      - `1`: **Economy Mode** — Forces radio and head unit power OFF immediately to protect battery.
-  - RD4 Radio Awakening: CAN `0x165` Byte 0 Bit 7 (`0x80`). When key is OFF, turning on the factory RD4 radio promotes ignition state to `VEHICLE_IGNITION_ACC` to power the head unit. Shuts down when radio switches OFF (`(data[0] & 0xC0) == 0`). Overridden to OFF if Economy Mode (`0x036` Byte 2 Bit 7) is active.
-  - Battery Reconnect: BSI sends `0x036` Byte 4 = `0x02` (Ignition OFF) for ~14s before dropping to `0x00` (`dump_connect_battery_only.log`); ACC wire stays strictly 0V throughout.
+  - Declarative Power Formula with Radio Presence & Deep Sleep Gating:
+    - If `economy_mode` $\to$ `VEHICLE_IGNITION_OFF` (ACC OFF).
+    - Else if `radio_present` (CAN `0x165` detected on bus):
+      - If `radio_sleep` (`(data[0] & 0xC0) == 0`, e.g. `0x08 80 00 00`) $\to$ `VEHICLE_IGNITION_OFF` (ACC OFF).
+      - Else if `radio_on` (`data[0] & 0x80`) $\to$ `VEHICLE_IGNITION_ON` / `ACC` (ACC ON).
+      - Else $\to$ follows `ignition_on`.
+    - Else (no factory radio on bus, e.g. aftermarket HU installation) $\to$ follows `ignition_on`.
+    - `ignition_on`: CAN `0x036` Byte 4 Bits [2:0] == `0x01` (Run `+APC`) or `0x03` (Crank pulse).
+    - `radio_present`: Received CAN `0x165` on bus.
+    - `radio_on`: CAN `0x165` Byte 0 Bit 7 == `1` (RD4 radio active).
+    - `radio_sleep`: CAN `0x165` Byte 0 Bits [7:6] == `0` (RD4 radio in sleep / standby).
+    - `economy_mode`: CAN `0x036` Byte 2 Bit 7 == `1` (`MODE_ECO` battery protection).
+  - Battery Reconnect (`dump_connect_battery_only.log`): BSI sends `0x036` Byte 4 = `0x02` (Ignition OFF) for ~14s before dropping to `0x00`; `radio_on` is false, so ACC stays strictly 0V.
+  - Radio Awakening & Sleep (`dump_ign_off_rd4_on_off.log`, `dump_2026-10-10_09-53-15.log`): When key is OFF, pressing RD4 knob asserts `radio_on`, turning ACC ON; when radio enters sleep (`0x08`), ACC drops to 0V even if stale ignition pulses (`0x01`) linger.
 - **ILL (Night Dimming & Brightness):**
   - Synthesized via `GPIO_PIN_ILL_OUT` (PC13 on STM32 `volvo_od2`, PA9 on NUC131 `vw_nc03`, GPIO 5 on ESP32).
   - Triggers: CAN `0x036` Byte 3 Bit 5 (`0x20` cluster illumination) OR CAN `0x128` Byte 0 (`0x80` sidelights / `0x40` low beam).
@@ -302,9 +309,54 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 - **Protocol Heartbeat Ping (`0xFF`):**
   - Emitted at 1.0 Hz (1000 ms cadence / 10 periodic ticks) in `src/protocols/proto_hiworld_adapter.c` (`5A A5 01 FF 01 00`).
   - Rate throttled down from 10 Hz to prevent serial queue saturation.
+- **Embedded Firmware Version (`0xF0`):**
+  - Generated dynamically at build time via `tools/generate_version.py` into macro `CANBOX_BUILD_VERSION` as `CANBOX-CORE-V<YYYYMMDD.hhmmss>`.
+  - Stored in expanded 64-byte `ctx->fw_version` buffer in `hiworld_connection_ctx_t`.
+  - Sent upon handshake (`0x24`), explicit version query (`0x30`), and initial discovery beacon (`HIWORLD_LINK_WAIT_MODEL`). Displayed in Android Head Unit Factory / CAN settings.
 - **Lifecycle Recovery (Scenarios A, B, C, D):**
   - Full operational recovery documented in `doc/CANBOX_SPEC_HIWORLD_GENERIC_CONNECTION_PHASE.md`.
-- **Verification:** `test_hiworld_verification_vector_1_car_type_set`, `test_integration_hiworld_runtime_car_selection_and_handshake`, `test_integration_hiworld_telemetry_periodic_pipeline`.
+- **Verification:** `test_hiworld_verification_vector_1_car_type_set`, `test_hiworld_verification_vector_2_version_report`, `test_canbox_embedded_firmware_version`, `test_integration_hiworld_runtime_car_selection_and_handshake`, `test_integration_hiworld_telemetry_periodic_pipeline`.
+
+### 4.11 Dynamic CAN ID Pre-filtering & Routing Engine (Layer 3)
+- **Static Bitmask Cache (Zero Heap):**
+  - 256-byte static bitmask (`uint8_t s_allowed_ids_bitmask[256]`) mapping all 11-bit standard CAN IDs ($0 \dots 2047 / 0x7FF$).
+  - Auto-generated on startup in `can_router_init()` and dynamically updated on profile switches via `vehicle_profile_set_active()` $\to$ `can_router_rebuild_filter()`.
+- **Constant-Time O(1) Early Rejection:**
+  - Rejects unmapped standard CAN frames and 29-bit extended frames before invoking profile decoders or executing differential state comparisons (`memcmp`).
+  - Preserves transceiver bus wake-up and inactivity watchdog (`s_can_inactivity_ticks`) upon detecting any bus traffic prior to rejection.
+- **Verification:**
+  - Unit test `test_can_id_filter_enforcement` verifying profile rule ID acceptance, rejection of unmapped standard IDs (`0x7FF`, `0x111`, `0x260`), rejection of extended frames, and filter rebuild upon profile switching.
+
+### 4.15 Commercial Hardware Target Integration & Cadence Harmonization
+- **Drop-In Bare-Metal Targets (`platformio.ini`):**
+  - `[env:hiworld_stm32f105]`: Target STM32F105RB / STM32F107VC (ARM Cortex-M3 Connectivity Line) with `0x08007000` flash offset / 28 KB factory IAP displacement (`VECT_TAB_OFFSET=0x7000`), dual bxCAN hardware support, and 38,400 baud USART2.
+  - `[env:raise_nuc131]`: Target Nuvoton NUC131SD2AE (ARM Cortex-M0) with `0x00002000` flash offset / 8 KB APROM displacement, C_CAN controller, and active-low `PC3` transceiver standby drive. Linked with `ldscripts/nuc131_app.ld`.
+  - `[env:nuc131_bootloader]`: Native Hiworld IAP Bootloader (`src/hiworld_bootloader/hiworld_iap_nuc131.c`, `include/bootloader/hiworld_iap_nuc131.h`) mapped at `0x00000000` (8 KB), linked with `ldscripts/nuc131_bootloader.ld`.
+- **Physical Hardware Verification & Ground-Truth GPIO Resolution (Raise NUC131 Board):**
+  - **Buzzer Elimination via Ground-Truth MMIO Alignment:** Probed quiet factory Raise CAN box via OpenOCD SWD, discovering ground-truth GPIO output configuration:
+    - `PC_PMD = 0x0000F045`, `PC_DOUT = 0x000000C7`: CAN transceiver standby `PC3` is active-low (`0`), while `PC0`, `PC1`, `PC2`, `PC6`, `PC7` are driven push-pull `1`. Driving `PC3 = 1` had caused fault line / buzzer whine.
+    - `PB_PMD = 0x43030FF4`, `PB_DOUT = 0x0000113F`: `PB1` (UART0 TX), `PB3`, `PB12` held at `1`, `PB15` push-pull `0`.
+    - `PA_PMD = 0x75F5FF0F`, `PA_DOUT = 0x00004CFF`: `PA15` push-pull `0`, `PA8`, `PA9`, `PA12`, `PA13` push-pull `0`.
+  - **Immediate Boot Startup Alignment:** Enforced factory register states in `src/hiworld_bootloader/startup_bootloader.S`, `src/hal/hal_nuc131/startup_app.S`, `src/hiworld_bootloader/hiworld_iap_nuc131.c`, and `src/hal/hal_nuc131/hal_gpio_nuc131.c`.
+  - **Cortex-M0 Interrupt Trampoline:** Since Cortex-M0 fetches vectors from `0x00000000` without VTOR, implemented vector forwarding trampolines in `src/hiworld_bootloader/startup_bootloader.S` for all 32 Cortex-M0 / NUC131 exception & peripheral IRQs to jump to `0x00002000 + offset`.
+  - **Single Linker Script Ingestion:** Eliminated duplicate linker script invocation in PlatformIO Nuvoton builder, ensuring exact symbol bounds (`_sidata`, `_sdata`, `_edata`, `_sbss`, `_ebss`).
+  - **Verified Live Operation via ST-Link V2:**
+    - **Dual Partition Flashing:** Bootloader flashed at `0x00000000` (1856 bytes verified) and application `canbox-core` at `0x00002000` (15000 bytes verified).
+    - **Clean Boot & Trampoline Jump:** Bootloader starts, checks token, listens, and jumps cleanly to `0x00002000`. Target runs without HardFault (`Thread mode`, `MSP = 0x20001FC0`).
+    - **Exact 1000 Hz SysTick Cadence:** Live measured SysTick tick counter `s_ticks_ms` delta is 1003 ms per 1.00s (calibrated `HCLK = 48 MHz` with 48000 reload).
+    - **End-to-End CAN Decoding:** Injected PSA `0x0B6` telemetry frame (2000 RPM, 80 km/h) via SWD into `s_can_rx_rb`: correctly consumed by `hal_can_receive()`, parsed by `peugeot_407.c`, updating canonical state (`Speed = 80 km/h`, `RPM = 2000 RPM`).
+    - **UART0 Transmission:** Telemetry periodic update triggered serialization and drained through UART0 TX FIFO (`UART0_FSR` TX empty).
+    - **UART0 Downlink Ingestion:** Injected Head Unit model handshake command (`0x24`) into `s_uart_rx_rb`: parsed and advanced ring buffer head/tail cleanly.
+    - **Acoustic Silence:** Buzzer permanently silenced via verified GPIO drive (`PC3 = 0`, `PC0/1/2/6/7 = 1`, `PB1/3/12 = 1`).
+- **Hiworld IAP Bootloader for NUC131 & Packaging Engine:**
+  - Implemented `src/hiworld_bootloader/hiworld_iap_nuc131.c`: Handshake unlock prompt `'U'`, password verification (`0x19 0x78 0x02 0x17`), 136-byte obfuscated record processing, 32-bit additive checksum, FMC page erase (`ISPCMD=0x22`) / word program (`ISPCMD=0x21`), hardware vector remapping (`VECMAP` `ISPCMD=0x2E`), and dual-trigger safety (SRAM token `0x55AA55AA` + 500 ms listen window).
+  - Implemented `tools/pack_hiworld_iap.py`: Standalone CLI packer generating standard Hiworld `can_app.iap` containers from compiled `.bin` firmware binaries.
+  - Implemented upgrade trigger handler in `src/protocols/proto_hiworld_adapter.c` on receiving `HIWORLD_CMD_UPGRADE_TRIGGER (0xE0)`.
+- **Universal Downlink Acknowledgment:**
+  - Implemented automatic ACK packet generation (`TX [0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]`) for all valid incoming Head Unit downlink commands (`cmd != 0xFE && cmd != 0xFF`), matching commercial Hiworld MCU firmware behavior.
+- **Cadence & Resync Harmonization:**
+  - Added 60-second periodic bulk resync timer (`s_bulk_resync_timer`) to recover vehicle aperture/status upon silent Android Head Unit OS restarts.
+  - Aligned event-driven SWC bypass, 100 ms telemetry cadence, and 1000 ms active door keepalive.
 
 ---
 
@@ -384,9 +436,10 @@ All test commands run on host desktop without hardware connected:
 
 | Test Scope | CLI Command | Current Status | Coverage |
 | :--- | :--- | :---: | :--- |
-| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **91 / 91 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table |
+| **Native Unit Tests** | `~/.platformio/penv/bin/pio test -e native_test_runner` | **93 / 93 PASSED** | Hiworld framing, checksums, decoders, serializers, alert table, dynamic CAN ID filter |
 | **Integration Pipeline** | `~/.platformio/penv/bin/pio test -e integration_test` | **27 / 27 PASSED** | End-to-end CAN $\to$ Router $\to$ Hiworld UART pipeline |
 | **STM32 Target Build** | `~/.platformio/penv/bin/pio run -e stm32_cbox` | **BUILD OK** | Bare-metal ARM Cortex-M3 flash binary |
+| **Hiworld STM32F105 Target** | `~/.platformio/penv/bin/pio run -e hiworld_stm32f105` | **BUILD OK** | Drop-in OEM Canbox flash binary (`0x08007000` offset, 28 KB IAP bootloader) |
 | **ESP32 Target Build** | `~/.platformio/penv/bin/pio run -e esp32_cbox` | **BUILD OK** | Dual-core Xtensa FreeRTOS flash binary |
 | **Interactive Desktop Sim** | `CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec` | **OPERATIONAL** | Virtual CAN (`vcan0`) and pseudo-terminal (`pty`) emulator |
 

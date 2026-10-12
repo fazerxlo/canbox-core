@@ -2,6 +2,7 @@
 #include "protocols/proto_hiworld.h"
 #include "protocols/hiworld_connection.h"
 #include "protocols/hiworld_car_mapping.h"
+#include "core/canbox_version.h"
 #include "hal/hal_can.h"
 #include <string.h>
 
@@ -218,4 +219,27 @@ void test_hiworld_car_mapping_lookup(void) {
 
     uint8_t model_id;
     TEST_ASSERT_TRUE(hiworld_car_mapping_get_model_id(VEHICLE_PROFILE_PSA_2004, &model_id));
+}
+
+void test_canbox_embedded_firmware_version(void) {
+    const char *ver = canbox_get_version();
+    TEST_ASSERT_NOT_NULL(ver);
+    TEST_ASSERT_TRUE(strlen(ver) >= 14);
+    TEST_ASSERT_EQUAL_STRING_LEN("CANBOX-CORE-V", ver, 13);
+
+    /* Test that hiworld_connection context accepts and preserves the full string without truncation */
+    hiworld_connection_ctx_t ctx;
+    s_mock_uart_tx_len = 0;
+    hiworld_conn_init(&ctx, ver, mock_uart_tx, mock_can_config);
+
+    TEST_ASSERT_EQUAL_STRING(ver, ctx.fw_version);
+
+    /* Test transmission of 0xF0 frame with full version string */
+    hiworld_conn_send_version(&ctx);
+    TEST_ASSERT_TRUE(s_mock_uart_tx_len > 5);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF1, s_mock_uart_tx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, s_mock_uart_tx_buf[1]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)strlen(ver), s_mock_uart_tx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, s_mock_uart_tx_buf[3]);
+    TEST_ASSERT_EQUAL_MEMORY(ver, &s_mock_uart_tx_buf[4], strlen(ver));
 }
