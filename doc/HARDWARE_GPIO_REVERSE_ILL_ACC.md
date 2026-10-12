@@ -86,6 +86,10 @@ In many modern vehicles (including the Peugeot 407 CAN2004 architecture), physic
 | **`0x036`** | Byte 1 | `0x80` (`Bit 7`) | Reverse Engaged (High Speed) | `1` = Reverse Gear Active, `0` = Inactive |
 | **`0x0F6`** | Byte 7 | `0x80` (`Bit 7`) | BSI Reverse Indicator (Slow Data) | `1` = Reverse Gear Active, `0` = Inactive |
 
+#### Logical Decoding & Zero-Latency Dispatch
+- **Multi-Frame Ground Truth:** On PSA CAN2004 (Peugeot 407), reverse can be reported by either high-speed frame `0x036` or slow BSI status frame `0x0F6`. Tracking both states with logical OR (`s_reverse_from_0f6 || s_reverse_from_036`) ensures that high-speed idle frames on `0x036` do not clear an active reverse condition held by `0x0F6`.
+- **Zero-Latency Dispatch:** Handled immediately inside `can_router_process_can()` upon CAN reception without waiting for the 100 ms periodic timer loop, guaranteeing instantaneous hardware camera line assertion (`GPIO_PIN_REVERSE_OUT` / `PA13`).
+
 #### Electrical Characteristics
 - **Standard Harness Wire Color:** Brown, Pink, or Violet with White stripe (marked `REVERSE` or `BACK`).
 - **Output Type:** Switched $+12\text{V}$ (High-Side Driver).

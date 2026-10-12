@@ -79,7 +79,8 @@ flowchart LR
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 0 | 0 | 1 | 0 | **0%** (Pending CAN Frame) |
 | **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
 | **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
-| **Overall** | **45** | **37** | **4** | **2** | **2** | **82%** |
+| **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 0 | **100%** |
+| **Overall** | **47** | **39** | **4** | **2** | **2** | **83%** |
 
 ---
 
@@ -142,7 +143,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[x]` | `0x85` | **Historical Alarm Replay Query**| `0x02` (2) | `0x39B` (Tx) | `src/protocols/proto_hiworld_adapter.c` | Triggers alert journal replay (mapped along with `0x2F`) |
 | `[x]` | `0x94` | **Software Reset / Link Ping** | `0x01` (1) | N/A (Internal) | `src/protocols/hiworld_connection.c` | Link liveness check / software reboot |
 | `[x]` | **ALL**| **Universal Downlink ACK (`0xFF`)**| `0x02` (2) | N/A (UART Tx) | `src/protocols/proto_hiworld_adapter.c`<br>`src/protocols/hiworld_connection.c` | Implemented universal ACK response `[0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]` for all valid downlink frames (`CmdID != 0xFE && CmdID != 0xFF`), matching OEM commercial firmware specification |
-| `[ ]` | `0xC2` | **MCU Firmware Flash Transfer** | `0x0A` (10) | N/A (Bootloader)| Target-specific bootloader (STM32/ESP32 IAP) |
+| `[-]` | `0xC2` / `0xE0` | **MCU Firmware Flash Transfer / IAP** | Variable | N/A (Bootloader)| `doc/BOOTLOADER_REPLACEMENT.md` | Full native Hiworld IAP bootloader specification for Raise NUC131 hardware: FMC hardware vector remap (`ISPCMD=0x2E`), 136-byte container de-obfuscation, sequence-addressed flash writes, and `pack_hiworld_iap.py` pack tool |
 
 ---
 
@@ -378,7 +379,38 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 ### 4.13 Commercial Hardware Target Integration & Cadence Harmonization
 - **Drop-In Bare-Metal Targets (`platformio.ini`):**
   - `[env:hiworld_stm32f105]`: Target STM32F105RB / STM32F107VC (ARM Cortex-M3 Connectivity Line) with `0x08007000` flash offset / 28 KB factory IAP displacement (`VECT_TAB_OFFSET=0x7000`), dual bxCAN hardware support, and 38,400 baud USART2.
-  - `[env:raise_nuc131]`: Target Nuvoton NUC131SD2AE (ARM Cortex-M0) with `0x00008000` flash offset / 32 KB APROM displacement, C_CAN controller, and active-low `PC3` transceiver standby drive.
+  - `[env:raise_nuc131]`: Target Nuvoton NUC131SD2AE (ARM Cortex-M0) with `0x00002000` flash offset / 8 KB APROM displacement, C_CAN controller, and active-low `PC3` transceiver standby drive. Linked with `ldscripts/nuc131_app.ld`.
+  - `[env:nuc131_bootloader]`: Native Hiworld IAP Bootloader (`src/hiworld_bootloader/hiworld_iap_nuc131.c`, `include/bootloader/hiworld_iap_nuc131.h`) mapped at `0x00000000` (8 KB), linked with `ldscripts/nuc131_bootloader.ld`.
+- **Physical Hardware Verification & Ground-Truth GPIO Resolution (Raise NUC131 Board):**
+  - **Buzzer Elimination via Ground-Truth MMIO Alignment:** Probed quiet factory Raise CAN box via OpenOCD SWD, discovering ground-truth GPIO output configuration:
+    - `PC_PMD = 0x0000F045`, `PC_DOUT = 0x000000C7`: CAN transceiver standby `PC3` is active-low (`0`), while `PC0`, `PC1`, `PC2`, `PC6`, `PC7` are driven push-pull `1`. Driving `PC3 = 1` had caused fault line / buzzer whine.
+    - `PB_PMD = 0x43030FF4`, `PB_DOUT = 0x0000113F`: `PB1` (UART0 TX), `PB3`, `PB12` held at `1`, `PB15` push-pull `0`.
+    - `PA_PMD = 0x75F5FF0F`, `PA_DOUT = 0x00004CFF`: `PA15` push-pull `0`, `PA8`, `PA9`, `PA12`, `PA13` push-pull `0`.
+  - **Immediate Boot Startup Alignment:** Enforced factory register states in `src/hiworld_bootloader/startup_bootloader.S`, `src/hal/hal_nuc131/startup_app.S`, `src/hiworld_bootloader/hiworld_iap_nuc131.c`, and `src/hal/hal_nuc131/hal_gpio_nuc131.c`.
+  - **Cortex-M0 Interrupt Trampoline:** Since Cortex-M0 fetches vectors from `0x00000000` without VTOR, implemented vector forwarding trampolines in `src/hiworld_bootloader/startup_bootloader.S` for all 32 Cortex-M0 / NUC131 exception & peripheral IRQs to jump to `0x00002000 + offset`.
+  - **Single Linker Script Ingestion:** Eliminated duplicate linker script invocation in PlatformIO Nuvoton builder, ensuring exact symbol bounds (`_sidata`, `_sdata`, `_edata`, `_sbss`, `_ebss`).
+  - **Verified Live Operation via ST-Link V2:**
+    - **Dual Partition Flashing:** Bootloader flashed at `0x00000000` (1856 bytes verified) and application `canbox-core` at `0x00002000` (15000 bytes verified).
+    - **Clean Boot & Trampoline Jump:** Bootloader starts, checks token, listens, and jumps cleanly to `0x00002000`. Target runs without HardFault (`Thread mode`, `MSP = 0x20001FC0`).
+    - **Exact 1000 Hz SysTick Cadence:** Live measured SysTick tick counter `s_ticks_ms` delta is 1003 ms per 1.00s (calibrated `HCLK = 48 MHz` with 48000 reload).
+    - **End-to-End CAN Decoding:** Injected PSA `0x0B6` telemetry frame (2000 RPM, 80 km/h) via SWD into `s_can_rx_rb`: correctly consumed by `hal_can_receive()`, parsed by `peugeot_407.c`, updating canonical state (`Speed = 80 km/h`, `RPM = 2000 RPM`).
+    - **UART0 Transmission:** Telemetry periodic update triggered serialization and drained through UART0 TX FIFO (`UART0_FSR` TX empty).
+    - **UART0 Downlink Ingestion:** Injected Head Unit model handshake command (`0x24`) into `s_uart_rx_rb`: parsed and advanced ring buffer head/tail cleanly.
+    - **Acoustic Silence:** Buzzer permanently silenced via verified GPIO drive (`PC3 = 0`, `PC0/1/2/6/7 = 1`, `PB1/3/12 = 1`).
+- **Hiworld IAP Bootloader for NUC131 & Packaging Engine:**
+  - Implemented `src/hiworld_bootloader/hiworld_iap_nuc131.c`: Handshake unlock prompt `'U'`, password verification (`0x19 0x78 0x02 0x17`), 136-byte obfuscated record processing, 32-bit additive checksum, FMC page erase (`ISPCMD=0x22`) / word program (`ISPCMD=0x21`), hardware vector remapping (`VECMAP` `ISPCMD=0x2E`), and dual-trigger safety (SRAM token `0x55AA55AA` + 500 ms listen window).
+  - Implemented `tools/pack_hiworld_iap.py`: Standalone CLI packer generating standard Hiworld `can_app.iap` containers from compiled `.bin` firmware binaries.
+  - Implemented upgrade trigger handler in `src/protocols/proto_hiworld_adapter.c` on receiving `HIWORLD_CMD_UPGRADE_TRIGGER (0xE0)`.
+- **Standalone Serial IAP Flasher & Automation CLI (`tools/flash_hiworld_serial.py`):**
+  - Implemented standalone Python tool enabling 100% wireless/ST-Link-free firmware updates directly over standard USB-to-UART adapter connected to the CAN Box serial lines.
+  - Automatically invokes PlatformIO compiler (`pio run -e raise_nuc131`), generates obfuscated IAP record stream, issues `0x5A 0xA5 0x02 0xE0 0x00 0x00 0xE1` bootloader trigger, verifies password unlock (`0x19 0x78 0x02 0x17`), erases flash, streams all 143 records with live progress bar, and validates application reboot & telemetry streaming within 6.8 seconds.
+- **Bootloader Early Pin Isolation & CAN Bus Protection:**
+  - Enforced `PD7` (`CAN0_TX`) push-pull HIGH (recessive 3.3V) and `PC3` (`CAN_STBY`) push-pull HIGH (standby) at the absolute first instruction of Cortex-M0 execution in `src/hiworld_bootloader/startup_bootloader.S` and `src/hal/hal_nuc131/startup_app.S`.
+  - Prevents NUC131 GPIO floating states during reset/SWD halt from driving dominant levels onto the vehicle CAN bus, eliminating bench instrument cluster/MDF sleep tripping.
+  - Added clean transceiver handover (`PC3` pulled LOW to active) in `jump_to_app()` right before branching to the main application.
+- **Peugeot 407 Dual Reverse Detection & Event-Driven GPIO Trigger:**
+  - Unified reverse gear detection across both `0x036` (Byte 1 Bit 7) and `0x0F6` (Byte 7 Bit 7) via `s_reverse_from_0f6 || s_reverse_from_036` in `src/profiles/profile_psa.c`, preventing high-speed `0x036` frames from clobbering active reverse state from slow `0x0F6` frames.
+  - Added immediate zero-latency event-driven dispatch for `GPIO_PIN_REVERSE_OUT` (`PA13`) directly inside `can_router_process_can()` in `src/core/can_router.c`.
 - **Universal Downlink Acknowledgment:**
   - Implemented automatic ACK packet generation (`TX [0x5A, 0xA5, 0x01, 0xFF, RxCmdID, (RxCmdID - 1) & 0xFF]`) for all valid incoming Head Unit downlink commands (`cmd != 0xFE && cmd != 0xFF`), matching commercial Hiworld MCU firmware behavior.
 - **Cadence & Resync Harmonization:**

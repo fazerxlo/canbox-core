@@ -36,13 +36,22 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     // Reset the CAN module
     SYS_ResetModule(CAN0_RST);
 
-    // Open CAN controller in normal mode
-    // CAN_Open() automatically sets up:
-    // - init mode
-    // - timing parameters for the requested baudrate
-    // - message objects
-    // - leaves init mode enabled
-    CAN_Open(CAN0, baudrate, CAN_NORMAL_MODE);
+    // Directly configure CAN bit timing (bypassing dynamic CAN_Open loop)
+    CAN_EnterInitMode(CAN0);
+    if (baudrate == CAN_BAUD_125K) {
+        // 48 MHz PCLK: 125 kbps, 81.25% sample point
+        CAN0->BTIME = 0x2B17;
+        CAN0->BRPE  = 0;
+    } else if (baudrate == CAN_BAUD_500K) {
+        // 48 MHz PCLK: 500 kbps, 81.25% sample point: tsegall=16, BRP=6, TSEG1=12, TSEG2=3
+        CAN0->BTIME = 0x2B05;
+        CAN0->BRPE  = 0;
+    } else {
+        // Default / 125 kbps
+        CAN0->BTIME = 0x2B17;
+        CAN0->BRPE  = 0;
+    }
+    CAN_LeaveInitMode(CAN0);
 
     // Set all RX message objects to accept all frames
     for (uint8_t i = CAN_RX_OBJ_START; i <= CAN_RX_OBJ_END; i++) {
@@ -50,10 +59,18 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
         CAN_SetRxMsgObjAndMsk(CAN0, i, CAN_STD_ID, 0x0, 0x0, FALSE);
     }
 
-    // Enable interrupts
-    CAN_EnableInt(CAN0, CAN_CON_IE_Msk | CAN_CON_SIE_Msk);
+    // Enable interrupts: Message object interrupt only
+    CAN_EnableInt(CAN0, CAN_CON_IE_Msk);
     NVIC_SetPriority(CAN0_IRQn, 0);
     NVIC_EnableIRQ(CAN0_IRQn);
+
+    // Set CAN controller to Listen-Only / Silent Mode:
+    // Enables TEST bit in CON and SILENT bit in TEST register.
+    // In Silent Mode, the CAN core is strictly listen-only: it receives all bus
+    // traffic normally but NEVER transmits dominant bits (no ACK bits, no error frames),
+    // guaranteeing zero electrical disturbance to the vehicle's Comfort CAN bus.
+    CAN0->CON |= CAN_CON_TEST_Msk;
+    CAN0->TEST |= CAN_TEST_SILENT_Msk;
 
     return HAL_STATUS_OK;
 }
@@ -95,15 +112,10 @@ hal_status_t hal_can_receive(can_frame_t *frame) {
 void CAN0_IRQHandler(void) {
     uint32_t u32IIDRstatus = CAN0->IIDR;
 
-    // Check if it's a status/error interrupt
+    // Check if it's a status/error interrupt (reading STATUS clears it)
     if (u32IIDRstatus == 0x8000u) {
-        uint32_t sts = CAN0->STATUS;
-        if (sts & CAN_STATUS_RXOK_Msk) {
-            CAN0->STATUS &= ~CAN_STATUS_RXOK_Msk;
-        }
-        if (sts & CAN_STATUS_TXOK_Msk) {
-            CAN0->STATUS &= ~CAN_STATUS_TXOK_Msk;
-        }
+        volatile uint32_t sts = CAN0->STATUS;
+        (void)sts;
     }
     // Check if it's a message object interrupt (1-31)
     else if ((u32IIDRstatus >= 1u) && (u32IIDRstatus <= 31u)) {

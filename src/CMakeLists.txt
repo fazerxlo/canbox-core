@@ -1,5 +1,6 @@
 set(srcs
     "main_esp32.c"
+    "core/canbox_version.c"
     "core/can_router.c"
     "core/ring_buffer.c"
     "core/vehicle_profile.c"
@@ -7,7 +8,11 @@ set(srcs
     "profiles/peugeot_407.c"
     "profiles/profile_vag.c"
     "protocols/canbox_parser.c"
+    "protocols/hiworld_car_mapping.c"
+    "protocols/hiworld_connection.c"
     "protocols/hu_protocol.c"
+    "protocols/proto_bagoo.c"
+    "protocols/proto_bagoo_adapter.c"
     "protocols/proto_hiworld.c"
     "protocols/proto_hiworld_adapter.c"
     "protocols/proto_raise.c"

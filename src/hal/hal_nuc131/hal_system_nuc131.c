@@ -28,11 +28,9 @@ hal_status_t hal_system_init(void) {
     // Relock registers
     SYS_LockReg();
 
-    // Configure SysTick for 1ms
-    // SysTick counter value = (core_clock / 8) / tick_frequency
-    // For 48 MHz / 8 = 6 MHz, tick at 1 kHz => counter = 6000
-    uint32_t counter = SystemCoreClock / 8 / 1000;
-    CLK_EnableSysTick(CLK_CLKSEL0_STCLK_S_HIRC_DIV2, counter);
+    // Configure SysTick for exact 1ms ticks:
+    // Core Clock (HCLK) = 48 MHz -> 48,000 counts per 1 ms
+    CLK_EnableSysTick(CLK_CLKSEL0_STCLK_S_HCLK, SystemCoreClock / 1000);
 
     return HAL_STATUS_OK;
 }

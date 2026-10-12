@@ -14,7 +14,7 @@ static const hu_protocol_driver_t *s_available_protocols[] = {
     [HU_PROTOCOL_BAGOO]   = &g_hu_protocol_bagoo,
 };
 
-static const hu_protocol_driver_t *s_active_driver = &g_hu_protocol_raise;
+static const hu_protocol_driver_t *s_active_driver = &g_hu_protocol_hiworld;
 
 void hu_protocol_init(void) {
 #if defined(PLATFORM_LINUX)

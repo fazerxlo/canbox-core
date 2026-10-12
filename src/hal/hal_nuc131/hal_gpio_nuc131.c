@@ -31,24 +31,20 @@ static bool gpio_read_input(GPIO_T *port, uint32_t pin) {
 }
 
 hal_status_t hal_gpio_init(void) {
-    // Transceiver Standby: PC3 in Open-Drain mode (0 = active, 1 = standby/silent)
-    GPIO_SetMode(NUC_GPIO_CAN_STBY_PORT, (1u << NUC_GPIO_CAN_STBY_PIN), GPIO_PMD_OPEN_DRAIN);
+    /* Set GPIO modes and initial outputs matching factory board:
+     * Port A: PA_PMD = 0x75f5ff0f, PA_DOUT = 0x4cff (PA15 push-pull 0, PA8/9/12/13 push-pull 0, PA0 input)
+     * Port B: PB_PMD = 0x43030ff4, PB_DOUT = 0x113f (PB15 push-pull 0, PB12/PB3 driven to factory 1)
+     * Port C: PC_PMD = 0x0000f045, PC_DOUT = 0x00c7 (PC0=1, PC1=1, PC2=1, PC3=0 CAN active, PC6=1, PC7=1)
+     */
+    PA->PMD  = 0x75F5FF0FUL;
+    PA->DOUT = 0x00004CFFUL;
 
-    // Outputs in Push-Pull mode: PA8 (ACC), PA9 (ILL), PA12 (BRAKE), PA13 (REVERSE)
-    GPIO_SetMode(NUC_GPIO_HU_PWR_PORT,  (1u << NUC_GPIO_HU_PWR_PIN),  GPIO_PMD_OUTPUT);
-    GPIO_SetMode(NUC_GPIO_ILL_PORT,     (1u << NUC_GPIO_ILL_PIN),     GPIO_PMD_OUTPUT);
-    GPIO_SetMode(NUC_GPIO_BRAKE_PORT,   (1u << NUC_GPIO_BRAKE_PIN),   GPIO_PMD_OUTPUT);
-    GPIO_SetMode(NUC_GPIO_REVERSE_PORT, (1u << NUC_GPIO_REVERSE_PIN), GPIO_PMD_OUTPUT);
+    PB->PMD  = 0x43030FF4UL;
+    PB->DOUT = 0x0000113FUL;
 
-    // Input: PA0 (Ignition sense)
-    GPIO_SetMode(NUC_GPIO_IGN_PORT,     (1u << NUC_GPIO_IGN_PIN),     GPIO_PMD_INPUT);
-
-    // Initial output states
-    gpio_write_port(NUC_GPIO_CAN_STBY_PORT, NUC_GPIO_CAN_STBY_PIN, false); // 0 = Normal / Active
-    gpio_write_port(NUC_GPIO_HU_PWR_PORT,   NUC_GPIO_HU_PWR_PIN,   false); // 0 = OFF
-    gpio_write_port(NUC_GPIO_ILL_PORT,      NUC_GPIO_ILL_PIN,      false); // 0 = OFF
-    gpio_write_port(NUC_GPIO_BRAKE_PORT,    NUC_GPIO_BRAKE_PIN,    false); // 0 = OFF (permanently)
-    gpio_write_port(NUC_GPIO_REVERSE_PORT,  NUC_GPIO_REVERSE_PIN,  false); // 0 = OFF
+    /* Port C: PC_PMD = 0x0000f045, PC_DOUT = 0x00cf (PC3=1 CAN Standby, PC0/1/2/6/7=1) */
+    PC->PMD  = 0x0000F045UL;
+    PC->DOUT = 0x000000CFUL;
 
     return HAL_STATUS_OK;
 }

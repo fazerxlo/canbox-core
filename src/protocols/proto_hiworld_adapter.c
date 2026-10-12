@@ -85,6 +85,12 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
         /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */
         hu_protocol_send_media_state(NULL);
+    } else if (packet->cmd == HIWORLD_CMD_UPGRADE_TRIGGER) {
+        /* Head Unit requested firmware update (e.g. 5A A5 03 E0 00 00 E2) */
+        /* Write persistent magic token to reserved SRAM */
+        *(volatile uint32_t *)0x20000000 = 0x55AA55AA;
+        /* Reboot into bootloader */
+        hal_system_reboot();
     }
 }
 

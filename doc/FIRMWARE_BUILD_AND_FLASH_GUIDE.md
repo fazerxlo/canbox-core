@@ -73,8 +73,8 @@ pio run -e stm32_cbox
 | `stm32_cbox` | ARM Cortex-M3 (STM32F103C8T6) | BluePill F103C8 (Generic) | `.pio/build/stm32_cbox/firmware.bin`<br>`.pio/build/stm32_cbox/firmware.elf` |
 | `hiworld_stm32f105` | ARM Cortex-M3 (STM32F105RB / STM32F107VC) | OEM Hiworld CAN Box (`0x08007000` IAP) | `.pio/build/hiworld_stm32f105/firmware.bin`<br>`.pio/build/hiworld_stm32f105/firmware.elf` |
 | `esp32_cbox` | Xtensa Dual-Core (ESP32) | NodeMCU / ESP32-WROOM-32 | `.pio/build/esp32_cbox/firmware.bin`<br>`.pio/build/esp32_cbox/bootloader.bin`<br>`.pio/build/esp32_cbox/partitions.bin` |
-| `nuc131_cbox` | ARM Cortex-M0 (NUC131SD2AE) | Nuvoton NUC131 CAN Box (Generic) | `.pio/build/nuc131_cbox/firmware.bin` |
-| `raise_nuc131` | ARM Cortex-M0 (NUC131SD2AE) | OEM Raise CAN Box (`0x00008000` IAP) | `.pio/build/raise_nuc131/firmware.bin` |
+| `nuc131_bootloader` | ARM Cortex-M0 (NUC131SD2AE) | Hiworld IAP Bootloader (`0x00000000` base) | `.pio/build/nuc131_bootloader/program.bin` |
+| `raise_nuc131` | ARM Cortex-M0 (NUC131SD2AE) | OEM Raise CAN Box (`0x00002000` app offset) | `.pio/build/raise_nuc131/program.bin` |
 | `native_test` | Host x86_64 / Desktop Linux | Virtual CAN Simulator | `.pio/build/native_test/program` |
 
 ---
@@ -131,17 +131,20 @@ The resulting binaries will be located at:
 ### 3.4 Build Nuvoton NUC131 Targets
 
 ```bash
-# Generic target
-pio run -e nuc131_cbox
+# Hiworld IAP Bootloader (0x00000000 - 0x00001FFF)
+pio run -e nuc131_bootloader
 
-# OEM Raise drop-in target with 0x00008000 bootloader offset
+# canbox-core Application (0x00002000 - 0x0000FFFF)
 pio run -e raise_nuc131
+
+# Pack application into Hiworld IAP update container
+python3 tools/pack_hiworld_iap.py .pio/build/raise_nuc131/program.bin -o can_app.iap
 ```
 
-The resulting binary will be located at:
+The resulting binaries will be located at:
 ```
-.pio/build/nuc131_cbox/firmware.bin
-.pio/build/raise_nuc131/firmware.bin
+.pio/build/nuc131_bootloader/program.bin
+.pio/build/raise_nuc131/program.bin
 ```
 
 ### 3.5 Build Desktop Virtual Simulator (`native_test`)
@@ -231,75 +234,61 @@ esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
 
 ---
 
-### 4.3 Nuvoton NUC131 (OEM Hiworld / Raise Hardware)
+### 4.4 Nuvoton NUC131 (OEM Raise Hardware / NUC131SD2AE)
 
-Most OEM CAN boxes (such as the Raise PSA-RZ-15-0121-B1) ship with Nuvoton NUC131 microcontrollers. These can be flashed easily using a standard **ST-Link V2** and OpenOCD if you do not have a Nuvoton Nu-Link programmer.
+OEM Raise CAN boxes (such as `PSA-RZ-15-0121-B1`) ship with Nuvoton NUC131 microcontrollers. These are flashed using an **ST-Link V2** and OpenOCD using the dedicated project configuration `openocd_nuc131.cfg`.
 
 #### ⚠️ PRE-REQUISITE: Unlocking Factory-Protected Boards
+Factory Raise boards have Security Lock Active in `CONFIG0` (`0xF70FFBB9`, bit 1 = 0), causing all flash reads to return `0xFFFFFFFF`. A one-time mass chip erase clears this lock.
 
-Factory OEM boards have Hardware Readout Protection (Code Read Protection) activated in the `CONFIG0` register. Standard flashing commands will fail because the internal Flash Memory Controller actively blocks SWD access to the flash memory. **You must mass-erase the chip first to unlock it.**
+1. **Wire ST-Link V2 to Board SWD Pads:**
+   * ST-Link `SWCLK` (Pin 9) $\to$ Board `ICE_CLK`
+   * ST-Link `SWDIO` (Pin 7) $\to$ Board `ICE_DAT`
+   * ST-Link `GND` (Pin 4/6/8) $\to$ Board `GND`
+   * ST-Link `3.3V` (Pin 1) $\to$ Board `VDD`
 
-**IMPORTANT: To unlock a locked MCU, you MUST connect the ST-Link's RST pin to the NUC131's nRST pin. A standard 4-wire SWD connection is not sufficient to halt a locked core.**
+2. **Mass Chip Erase (One-Time Unlock):**
+   ```bash
+   openocd -f openocd_nuc131.cfg -c "init; halt; numicro chip_erase; shutdown"
+   ```
 
-1. **Wire the ST-Link V2 to the OEM board (5 wires):**
-* ST-Link `SWCLK` -> Board `ICE_CLK`
-* ST-Link `SWDIO` -> Board `ICE_DAT`
-* ST-Link `GND` -> Board `GND`
-* ST-Link `3.3V` -> Board `VDD`
-* ST-Link `RST` -> Board `nRST`
+3. **Flash Hiworld IAP Bootloader (`0x00000000`):**
+   ```bash
+   openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/nuc131_bootloader/program.bin 0x00000000; verify_image .pio/build/nuc131_bootloader/program.bin 0x00000000; shutdown"
+   ```
 
+4. **Flash `canbox-core` Application (`0x00002000`):**
+   ```bash
+   openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/raise_nuc131/program.bin 0x00002000; verify_image .pio/build/raise_nuc131/program.bin 0x00002000; reset run; shutdown"
+   ```
 
-2. **Create a custom OpenOCD config (`nuc131_stlink.cfg`):**
-```tcl
-adapter driver hla
-hla_layout stlink
-transport select hla_swd
-adapter speed 200
+---
 
-# Force OpenOCD to accept ST-Link USB VID/PID
-hla_vid_pid 0x0483 0x3748 0x0483 0x374b
+### 4.5 Standalone Serial IAP Flashing (No ST-Link Required)
 
-# Force hardware reset during connection
-reset_config srst_only srst_nogate connect_assert_srst
+Once the Hiworld IAP bootloader is resident at `0x00000000`, all future application firmware updates can be performed **100% over the UART serial cable** (at 38,400 baud) without an ST-Link programmer.
 
-if { [info exists CPUTAPID] == 0 } {
-   set CPUTAPID 0x2ba01477
-}
-
-source [find target/numicro.cfg]
-
-```
-
-
-3. **Run the Mass Erase Command:**
-Execute the following single-line command. This command forces a hardware reset, halts the core, executes the chip erase to wipe the lock bit, and then verifies the `CONFIG0` register:
-```bash
-sudo openocd -f nuc131_stlink.cfg -c "init; reset halt; numicro chip_erase; reset halt; sleep 200; mdw 0x00300000 1; shutdown"
-
-```
-
-
-4. **Verify the unlock:**
-Check the output of the terminal after running the command above. Look for the `mdw` output. If it returns `0x00300000: ffffffff`, the chip is successfully unlocked, the factory firmware is erased, and the board is ready to be flashed.
-
-#### Option A: Flashing with ST-Link V2 (Standalone OpenOCD)
-
-Once the chip is unlocked, you can flash the OpenCanbox firmware using the same configuration file (the `RST` pin connection is no longer strictly required, but recommended):
+The automated tool `tools/flash_hiworld_serial.py` handles the entire compile, obfuscation, IAP handshake, flash erase, chunk streaming, and verification pipeline:
 
 ```bash
-sudo openocd -f nuc131_stlink.cfg -c "program .pio/build/nuc131_cbox/firmware.bin 0x00000000 verify reset exit"
+# Flash via serial adapter (default: /dev/ttyUSB1 @ 38400 baud)
+./tools/flash_hiworld_serial.py --port /dev/ttyUSB1
 
+# Compile with a custom version tag and flash in one step:
+./tools/flash_hiworld_serial.py --port /dev/ttyUSB1 --version CANBOX-CORE-V1.0.0
+
+# Flash a pre-built binary without re-compiling:
+./tools/flash_hiworld_serial.py --bin .pio/build/raise_nuc131/program.bin --no-build --port /dev/ttyUSB1
 ```
 
-#### Option B: Flashing with Nu-Link ICE (If Available)
+**Flashing Process:**
+1. Compiles target `raise_nuc131` via PlatformIO (if `--no-build` is omitted).
+2. Packages the `.bin` into obfuscated 136-byte records.
+3. Transmits the Hiworld software upgrade trigger command (`5A A5 02 E0 00 00 E1`) over UART.
+4. Waits for bootloader `'U'` prompt, sends password (`0x19 0x78 0x02 0x17`), and verifies FMC erase.
+5. Streams all 143 records with live progress bar and block acknowledgments.
+6. Verifies clean application reboot and resumption of `0x5A 0xA5` Hiworld telemetry stream in ~6.8 seconds.
 
-If you possess an official Nuvoton Nu-Link adapter, you can use the built-in target scripts:
-
-```bash
-openocd -f interface/nulink.cfg -f target/numicroM0.cfg \
-  -c "program .pio/build/nuc131_cbox/firmware.bin 0x00000000 verify reset exit"
-
-```
 
 ---
 

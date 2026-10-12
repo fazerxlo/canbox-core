@@ -84,9 +84,13 @@ static void psa_decode_console_0x3e5_profile(const can_frame_t *frame, vehicle_s
     psa_decode_console_0x3e5(frame->data, frame->dlc, console_key_cb);
 }
 
+static bool s_reverse_from_0f6 = false;
+static bool s_reverse_from_036 = false;
+
 static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc >= 8) {
-        state->reverse_gear = (frame->data[7] & (1 << 7)) != 0;
+        s_reverse_from_0f6 = (frame->data[7] & (1 << 7)) != 0;
+        state->reverse_gear = s_reverse_from_0f6 || s_reverse_from_036;
     }
 }
 
@@ -143,7 +147,8 @@ static inline void psa_update_derived_power_state(vehicle_state_t *state) {
 static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc < 2) return;
 
-    state->reverse_gear = (frame->data[1] & (1 << 7)) != 0;
+    s_reverse_from_036 = (frame->data[1] & (1 << 7)) != 0;
+    state->reverse_gear = s_reverse_from_0f6 || s_reverse_from_036;
     state->handbrake    = (frame->data[1] & (1 << 0)) != 0;
 
     if (frame->dlc >= 3) {
