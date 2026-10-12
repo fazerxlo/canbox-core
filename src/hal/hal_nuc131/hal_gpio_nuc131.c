@@ -42,8 +42,9 @@ hal_status_t hal_gpio_init(void) {
     PB->PMD  = 0x43030FF4UL;
     PB->DOUT = 0x0000113FUL;
 
+    /* Port C: PC_PMD = 0x0000f045, PC_DOUT = 0x00cf (PC3=1 CAN Standby, PC0/1/2/6/7=1) */
     PC->PMD  = 0x0000F045UL;
-    PC->DOUT = 0x000000C7UL;
+    PC->DOUT = 0x000000CFUL;
 
     return HAL_STATUS_OK;
 }

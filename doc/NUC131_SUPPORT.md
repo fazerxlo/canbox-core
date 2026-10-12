@@ -145,6 +145,12 @@ python3 tools/pack_hiworld_iap.py .pio/build/raise_nuc131/program.bin -o can_app
    - Flash application: `openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/raise_nuc131/program.bin 0x00002000; reset run; shutdown"`
 2. **Head Unit In-Application Programming (IAP):**
    - Copy `can_app.iap` to `/canmcuupdata/can_app.iap` on a USB drive and trigger CAN Update from Head Unit settings.
+3. **Serial Firmware Uploader (`tools/flash_hiworld_serial.py`):**
+   - Direct PC flashing over UART cable (`/dev/ttyUSB1` @ 38,400 baud):
+     ```bash
+     ./tools/flash_hiworld_serial.py --port /dev/ttyUSB1
+     ```
+   - Automatically builds target `raise_nuc131`, packages IAP records, enters bootloader over UART, and flashes firmware in ~6.8 seconds with no ST-Link required.
 
 ---
 
@@ -154,3 +160,7 @@ python3 tools/pack_hiworld_iap.py .pio/build/raise_nuc131/program.bin -o can_app
 * ✅ Complete HAL coverage for CAN, UART, GPIO, and System Tick (calibrated 1000 Hz SysTick).
 * ✅ Dual-partition memory layout with hardware interrupt bounce trampolines verified on physical board.
 * ✅ Transceiver standby and buzzer GPIO states aligned with ground-truth factory MMIO configuration (buzzer completely silenced).
+* ✅ Reset pin isolation: `PD7` (CAN TX) and `PC3` (CAN STBY) held HIGH at the first reset instruction to prevent vehicle CAN network disruption on boot/flash.
+* ✅ Zero-latency reverse trigger on `PA13` supporting dual Peugeot 407 reverse frames (`0x036` and `0x0F6`).
+* ✅ Standalone serial flashing over UART fully working and verified in hardware.
+
