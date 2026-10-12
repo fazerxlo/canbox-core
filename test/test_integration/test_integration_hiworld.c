@@ -977,6 +977,51 @@ void test_integration_hiworld_rd4_cd_in_dash_pipeline(void) {
         0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x05, 0x00, 0x02, 0x23, 0x00, 0x02, 0x12, 0x00, 0xDF
     };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_cd_ex1, rx_buf, 16);
+
+    // 4. Switch back to Radio (CAN 0x165 -> 0x10 = FM1):
+    // MUST send Cmd 0x97 stopping CD playback first, then Cmd 0x84 for radio tuner
+    can_frame_t frame_radio = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_radio);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Buffer contains Cmd 0x97 (16 bytes) followed by Cmd 0x84 (19 bytes) = 35 bytes */
+    TEST_ASSERT_TRUE(rx_len >= 35);
+
+    // Verify first packet is Cmd 0x97 with play_status = 0x01 (Stop/Pause)
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[12]); /* play_status = 0x01 (Pause/Stop) */
+
+    // Verify second packet is Cmd 0x84 with Tuner mode
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[16]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[17]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[18]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[19]);
+
+    // Inject uninitialized sentinels while on Radio (must produce zero UART output)
+    can_frame_t frame_365_sentinel = {
+        .id = 0x365,
+        .dlc = 5,
+        .data = { 0xFF, 0xFF, 0xFF, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_365_sentinel);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    can_frame_t frame_3a5_sentinel = {
+        .id = 0x3A5,
+        .dlc = 6,
+        .data = { 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x00 }
+    };
+    can_router_process_can(&frame_3a5_sentinel);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 }
 
 void test_integration_hiworld_rd4_downlink_resume_queries(void) {

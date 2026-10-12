@@ -1606,6 +1606,9 @@ void psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
 void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
     if (!cdc || !data || dlc < 1) return;
 
+    /* Ignore uninitialized / empty drive sentinel frames (e.g. FF FF FF ...) */
+    if (data[0] == 0xFF) return;
+
     /* CAN 0x365: Internal CD Disc Info (DLC: 5)
      * Byte 0: Total tracks on disc (1..99)
      * Byte 1: CD Format / Mechanism (0x26)
@@ -1624,6 +1627,9 @@ void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
 
 void psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
     if (!cdc || !data || dlc < 5) return;
+
+    /* Ignore uninitialized / empty drive sentinel frames (e.g. FF FF FF FF 7F 00) */
+    if (data[0] == 0xFF || data[2] == 0xFF) return;
 
     /* CAN 0x3A5: Internal CD Track & Playback Telemetry (DLC: 6)
      * Byte 0: Current track number (1..99)

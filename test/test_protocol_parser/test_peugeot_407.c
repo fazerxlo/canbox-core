@@ -1455,6 +1455,21 @@ void test_peugeot_407_rd4_cd_ground_truth_dump(void) {
         0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00, 0x02, 0x0C, 0x00, 0xB6
     };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_log2, out, 16);
+
+    /* Verification for dump_2026-10-11_19-22-47.log:
+     * When radio is active, car broadcasts uninitialized sentinels:
+     * CAN 0x365: FF FF FF 00 00
+     * CAN 0x3A5: FF FF FF FF 7F 00
+     * Decoders MUST ignore these frames and NOT mark cdc as updated or playing!
+     */
+    media.cdc.updated = false;
+    const uint8_t can_365_sentinel[] = { 0xFF, 0xFF, 0xFF, 0x00, 0x00 };
+    psa_rd4_process_can_0x365(&media.cdc, can_365_sentinel, sizeof(can_365_sentinel));
+    TEST_ASSERT_FALSE(media.cdc.updated);
+
+    const uint8_t can_3a5_sentinel[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x00 };
+    psa_rd4_process_can_0x3a5(&media.cdc, can_3a5_sentinel, sizeof(can_3a5_sentinel));
+    TEST_ASSERT_FALSE(media.cdc.updated);
 }
 
 void test_peugeot_407_rd4_source_and_wavebands(void) {

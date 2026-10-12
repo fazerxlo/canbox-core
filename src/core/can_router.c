@@ -309,6 +309,16 @@ void can_router_process_can(const can_frame_t *frame) {
     if (s_current_state.media.radio.updated) {
         s_current_state.media.radio.updated = false;
         if (memcmp(&s_current_state.media.radio, &s_last_sent_state.media.radio, sizeof(vehicle_radio_t)) != 0) {
+            uint8_t old_src = s_last_sent_state.media.radio.source_mode;
+            uint8_t new_src = s_current_state.media.radio.source_mode;
+
+            /* If transitioning away from CD (0x30) or CDC (0x31), notify HU that CD playback has stopped */
+            if ((old_src == 0x30 || old_src == 0x31) && (new_src != 0x30 && new_src != 0x31)) {
+                s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
+                hu_protocol_send_media_state(&s_current_state.media.cdc);
+                s_last_sent_state.media.cdc = s_current_state.media.cdc;
+            }
+
             hu_protocol_send_radio_state(&s_current_state.media.radio);
             s_last_sent_state.media.radio = s_current_state.media.radio;
         }
@@ -333,7 +343,10 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push CD Changer (CDC) updates on change
     if (s_current_state.media.cdc.updated) {
         s_current_state.media.cdc.updated = false;
-        if (memcmp(&s_current_state.media.cdc, &s_last_sent_state.media.cdc, sizeof(vehicle_cdc_t)) != 0) {
+        /* Only push media state to HU if current source is CD (0x30) or CDC (0x31) */
+        uint8_t src = s_current_state.media.radio.source_mode;
+        bool is_cd_source = (src == 0x30 || src == 0x31 || s_current_state.media.cdc.active_disc != 0);
+        if (is_cd_source && memcmp(&s_current_state.media.cdc, &s_last_sent_state.media.cdc, sizeof(vehicle_cdc_t)) != 0) {
             hu_protocol_send_media_state(&s_current_state.media.cdc);
             s_last_sent_state.media.cdc = s_current_state.media.cdc;
         }
