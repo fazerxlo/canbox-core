@@ -252,15 +252,27 @@ Factory Raise boards have Security Lock Active in `CONFIG0` (`0xF70FFBB9`, bit 1
    openocd -f openocd_nuc131.cfg -c "init; halt; numicro chip_erase; shutdown"
    ```
 
-3. **Flash Hiworld IAP Bootloader (`0x00000000`):**
+3. **Start OpenOCD GDB/TCL Server:**
    ```bash
-   openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/nuc131_bootloader/program.bin 0x00000000; verify_image .pio/build/nuc131_bootloader/program.bin 0x00000000; shutdown"
+   openocd -f openocd_nuc131.cfg &
    ```
 
-4. **Flash `canbox-core` Application (`0x00002000`):**
+4. **Flash Hiworld IAP Bootloader (`0x00000000`):**
+   > [!NOTE]
+   > OpenOCD's built-in `flash write_image` command does not recognize the NUC131 device ID (`0x11413102`). Use the project's dedicated hardware FMC flasher `tools/nuc131_flasher.py`:
    ```bash
-   openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/raise_nuc131/program.bin 0x00002000; verify_image .pio/build/raise_nuc131/program.bin 0x00002000; reset run; shutdown"
+   python3 tools/nuc131_flasher.py .pio/build/nuc131_bootloader/program.bin 0x0000
    ```
+
+5. **Flash `canbox-core` Application (`0x00002000`):**
+   ```bash
+   python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000
+   ```
+   *To resume normal execution after flashing, execute in OpenOCD or reset the board:*
+   ```bash
+   nc -w 1 127.0.0.1 6666 <<< "reset run"
+   ```
+
 
 ---
 
