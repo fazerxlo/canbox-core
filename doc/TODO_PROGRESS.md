@@ -57,6 +57,7 @@ flowchart LR
     UART -.->|"UART Downlink"| L5
     L5 -.->|"Downlink CAN Tx (0x221, 0x39B, 0x228)"| L1
     L1 -.->|"CAN Frames"| Car
+```
 
 2. High-Level Hiworld PSA Progress Overview
 | Functional Subsystem | Total Features | Completed [x] | In Progress [-] | Planned [ ] | N/A | Completion % |
