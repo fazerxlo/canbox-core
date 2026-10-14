@@ -1,14 +1,23 @@
-OpenCanbox Core: Hiworld PSA Peugeot 407 Implementation Progress & Specification Tracker
-Target Vehicle Platform: Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps)
-Target Head Unit Protocol: Hiworld PSA (0x5A 0xA5 Framing, Additive Checksum, UART 38,400 baud, 8N1)
-Target Head Unit Application: com.qf.vehicle (Peugeot Hiworld wc Driver / QF Canbus System)
-Reference Protocol Specifications: commands_and_payload_structure.md, doc/CANBOX_SPEC_HIWORLD_407_*.md, doc/FIRMWARE_BUILD_AND_FLASH_GUIDE.md
-Firmware Core Project: canbox-core (Pure C99 Embedded Automotive Firmware, Zero Heap)
-Last Updated: October 2026
-1. Executive Summary & Architecture Pipeline
-This document tracks the complete development, verification status, and actionable roadmap of OpenCanbox Core (canbox-core) tailored strictly and exclusively to the Hiworld PSA protocol on the Peugeot 407 platform.
-All decoders strictly operate on verified PSA CAN2004 Comfort Bus frames (@ 125 kbps). Speculative CAN2010 definitions (e.g. radar on 0x260/0x270 or unconfirmed steering angle frames) and non-Hiworld protocol details (Raise, Bagoo, VAG) are strictly excluded from this tracker.
-End-to-End Pipeline Mapping
+# OpenCanbox Core: Hiworld PSA Peugeot 407 Implementation Progress & Specification Tracker
+
+**Target Vehicle Platform:** Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps)  
+**Target Head Unit Protocol:** Hiworld PSA (`0x5A 0xA5` Framing, Additive Checksum, UART 38,400 baud, 8N1)  
+**Target Head Unit Application:** `com.qf.vehicle` (Peugeot Hiworld `wc` Driver / QF Canbus System)  
+**Reference Protocol Specifications:** `commands_and_payload_structure.md`, `doc/CANBOX_SPEC_HIWORLD_407_*.md`, `doc/FIRMWARE_BUILD_AND_FLASH_GUIDE.md`  
+**Firmware Core Project:** `canbox-core` (Pure C99 Embedded Automotive Firmware, Zero Heap)  
+**Last Updated:** October 2026  
+
+---
+
+## 1. Executive Summary & Architecture Pipeline
+
+This document tracks the complete development, verification status, and actionable roadmap of **OpenCanbox Core** (`canbox-core`) tailored **strictly and exclusively to the Hiworld PSA protocol on the Peugeot 407 platform**.
+
+All decoders strictly operate on **verified PSA CAN2004 Comfort Bus frames (@ 125 kbps)**. Speculative CAN2010 definitions (e.g. radar on `0x260`/`0x270` or unconfirmed steering angle frames) and non-Hiworld protocol details (Raise, Bagoo, VAG) are strictly excluded from this tracker.
+
+### End-to-End Pipeline Mapping
+
+```mermaid
 flowchart LR
     subgraph Car["Peugeot 407 CAN2004 Comfort Bus (125 kbps)"]
         BSI_POW["0x036 (Ignition, Lighting, Handbrake)"]
@@ -228,7 +237,4 @@ src/protocols/hiworld_connection.c | Implemented universal ACK response [0x5A, 0
  * CAN Ground Truth (0x221, 0x2A1, 0x261):
    * Instantaneous consumption (0x13), Trip 1 historical averages (0x14), and Trip 2 historical averages (0x15).
  * Implementation Status:
-   * Fully implemented and verified via unit tests (test_peugeot_407_trip_hiworld_vector_*). Downlink reset command (0x1B \to CAN ID 0x221) fully operational.
-4.5 Parking Radar & AAS Proximity (0x41)
- * CAN Ground Truth (0x0E1):
-   * Strict CAN2004 AAS comfort bus sensor frames mapping 8 individual sensor p
+   * Fully implemented and verified via unit tests (test_peugeot_407_trip_hiworld_vector_*). Do
