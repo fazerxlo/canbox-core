@@ -28,7 +28,7 @@ This document captures the hardware integration, peripheral mapping, and build a
 
 ## 3. Hardware Pinout & Peripheral Mapping
 
-The `canbox-core` HAL implementation (`src/hal/hal_nuc131/`) and Hiworld bootloader (`src/hiworld_bootloader/`) map hardware pins to match automotive CAN box PCB designs (specifically Raise PSA-RZ-15-0121-B1):
+The `canbox-core` HAL implementation (`src/hal/hal_nuc131/`) and Hiworld bootloader (`src/nuc131_hiworld_bootloader/`) map hardware pins to match automotive CAN box PCB designs (specifically Raise PSA-RZ-15-0121-B1):
 
 | Function / Signal | NUC131 Pin | Direction / Mode | HAL Identifier | Notes |
 | :--- | :---: | :---: | :--- | :--- |
@@ -93,8 +93,8 @@ build_flags =
     -DPLATFORM_NUC131
     -Wall -Wextra -std=c99
 build_src_filter = 
-    +<hiworld_bootloader/startup_bootloader.S>
-    +<hiworld_bootloader/hiworld_iap_nuc131.c>
+    +<nuc131_hiworld_bootloader/startup_bootloader.S>
+    +<nuc131_hiworld_bootloader/hiworld_iap_nuc131.c>
 
 [env:raise_nuc131]
 platform = https://github.com/fazerxlo/nuvoton_nuc131.git

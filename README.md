@@ -386,7 +386,7 @@ canbox-core/
 │   ├── main.c                               # Main entry (Linux + STM32 + NUC131)
 │   ├── main_esp32.c                         # ESP32/FreeRTOS main entry
 │   │
-│   ├── hiworld_bootloader/                  # Native Hiworld IAP bootloader for NUC131
+│   ├── nuc131_hiworld_bootloader/          # Native Hiworld IAP bootloader for NUC131
 │   │   ├── hiworld_iap_nuc131.c             # De-obfuscation, FMC flashing, unlock handshake
 │   │   └── startup_bootloader.S             # Hardware vector table & ISR bounce trampolines
 │   │
@@ -440,7 +440,7 @@ canbox-core/
 | **STM32F103** | `stm32_cbox` | bxCAN + USART1 + GPIO | `hal_stm32` | `pio run -e stm32_cbox` |
 | **STM32F105/F107**| `hiworld_stm32f105` | Dual bxCAN + USART2 (0x08007000 IAP) | `hal_stm32` | `pio run -e hiworld_stm32f105` |
 | **ESP32** | `esp32_cbox` | TWAI + UART1 + GPIO | `hal_esp32` | `pio run -e esp32_cbox` |
-| **NUC131 Bootloader** | `nuc131_bootloader`| UART0 (38.4k) + FMC (0x00000000 Base) | `hiworld_bootloader` | `pio run -e nuc131_bootloader` |
+| **NUC131 Bootloader** | `nuc131_bootloader`| UART0 (38.4k) + FMC (0x00000000 Base) | `nuc131_hiworld_bootloader` | `pio run -e nuc131_bootloader` |
 | **NUC131 Application**| `raise_nuc131` | Bosch C_CAN + UART0 (0x00002000 App) | `hal_nuc131` | `pio run -e raise_nuc131` |
 
 ---
