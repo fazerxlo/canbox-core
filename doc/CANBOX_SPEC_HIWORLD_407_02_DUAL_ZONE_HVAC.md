@@ -13,7 +13,7 @@
 # 1. Functional Domain & Architecture Overview
 
 The Peugeot 407 automatic climate control system drives three CAN frames on the PSA Comfort CAN bus:
-- **`0x1D0` (Climate Panel State, 100 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost, and zone temperature indices.
+- **`0x1D0` (Climate Panel State, 100 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost (Byte 4 Bit 6, `0x40`), and zone temperature indices.
 - **`0x1E3` (Climate EMF / Display State, 100 ms):** Carries A/C compressor state, dual mode, front demist, cabin air recycling popup notification triggers (`intake_notify`), and display indices.
 - **`0x12D` (Climate Compressor State, 100 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
 
@@ -345,3 +345,9 @@ static inline void psa_hvac_send_hiworld(psa_hvac_ctx_t *ctx) {
 - **Expected UART Output (Hiworld `0x31`):**
   - Frame: `5A A5 0C 31 4D 00 00 00 00 03 2A 2A 00 00 00 78 D6`
   - Checksum Calculation: `((0x0C + 0x31 + 0x4D + 0x03 + 0x2A + 0x2A + 0x78) - 1) & 0xFF = 0xD6`
+
+## Rear Defrost Detection (`vehicle_climate_t.rear_defrost`)
+
+Rear defrost is decoded only from `0x1D0`: Byte 4 Bit 6 (`(data[4] >> 6) & 1`), dlc >= 5. `0x128` and `0x0F6` are intentionally not used.
+
+A cleared bit clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`). Implemented in `psa_hvac_process_can_0x1d0()`; test `test_peugeot_407_rear_defrost_detection`.

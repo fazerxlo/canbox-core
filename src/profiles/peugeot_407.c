@@ -361,7 +361,12 @@ static const uint8_t psa_wind_to_hiworld[16] = {
 };
 
 void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
-    if (!climate || !data || dlc < 7) return;
+    if (!climate || !data) return;
+
+    /* Rear defrost demand: Byte 4 Bit 6 (0x40) */
+    if (dlc >= 5) climate->rear_defrost = ((data[4] >> 6) & 0x01) != 0;
+
+    if (dlc < 7) return;
 
     climate->power_on = (data[0] != 0xA8);
     climate->ac_on = climate->power_on;
@@ -395,7 +400,6 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
         climate->recirculate = false;
         climate->aqs_auto = true;
     }
-    climate->rear_defrost = (data[4] & 0x01) != 0;
 
     uint8_t l_temp = data[5];
     uint8_t r_temp = data[6];

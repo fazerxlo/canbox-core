@@ -45,6 +45,7 @@ void test_peugeot_407_console_0x3e5_edge_cases(void);
 void test_peugeot_407_verification_vector_1_vol_up(void);
 void test_peugeot_407_verification_vector_2_climate(void);
 void test_peugeot_407_hvac_defrost_and_recirc(void);
+void test_peugeot_407_rear_defrost_detection(void);
 void test_peugeot_407_verification_vector_3_parking_radar(void);
 void test_peugeot_407_front_parking_radar(void);
 void test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center(void);
@@ -171,6 +172,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_verification_vector_1_vol_up);
     RUN_TEST(test_peugeot_407_verification_vector_2_climate);
     RUN_TEST(test_peugeot_407_hvac_defrost_and_recirc);
+    RUN_TEST(test_peugeot_407_rear_defrost_detection);
     RUN_TEST(test_peugeot_407_verification_vector_3_parking_radar);
     RUN_TEST(test_peugeot_407_front_parking_radar);
     RUN_TEST(test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center);

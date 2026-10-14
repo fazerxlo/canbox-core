@@ -416,6 +416,33 @@ void test_peugeot_407_hvac_defrost_and_recirc(void) {
     TEST_ASSERT_EQUAL_UINT32(11, len);
 }
 
+static bool rd_feed(uint32_t id, uint8_t dlc, const uint8_t *d) {
+    can_frame_t f;
+    memset(&f, 0, sizeof(f));
+    f.id = id;
+    f.dlc = dlc;
+    memcpy(f.data, d, dlc);
+    can_router_process_can(&f);
+    return can_router_get_state()->climate.rear_defrost;
+}
+
+void test_peugeot_407_rear_defrost_detection(void) {
+    can_router_init();
+
+    /* 0x1D0: Byte 4 Bit 6 */
+    const uint8_t h_on[]  = { 0x00, 0x00, 0x00, 0x00, 0x40, 0x0A, 0x0A };
+    const uint8_t h_off[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x0A };
+    const uint8_t h_old[] = { 0x00, 0x00, 0x00, 0x00, 0x01, 0x0A, 0x0A };
+    TEST_ASSERT_TRUE(rd_feed(0x1D0, 7, h_on));
+    TEST_ASSERT_FALSE(rd_feed(0x1D0, 7, h_off));
+    TEST_ASSERT_FALSE(rd_feed(0x1D0, 7, h_old)); /* bit 0 is no longer rear defrost */
+
+    /* Short frames do not touch state */
+    const uint8_t s1[] = { 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_TRUE(rd_feed(0x1D0, 7, h_on));
+    TEST_ASSERT_TRUE(rd_feed(0x1D0, 4, s1));
+}
+
 /* --------------------------------------------------------------------------
  * 1.3 Ultrasonic Parking Sensors (Front & Rear AAS) Tests
  * -------------------------------------------------------------------------- */
