@@ -19,7 +19,7 @@ All decoders strictly operate on **verified PSA CAN2004 Comfort Bus frames (@ 12
 
 ```mermaid
 flowchart LR
-    subgraph Car ["Peugeot 407 CAN2004 Comfort Bus (125 kbps)"]
+    subgraph Car["Peugeot 407 CAN2004 Comfort Bus (125 kbps)"]
         BSI_POW["0x036 (Ignition, Lighting, Handbrake)"]
         BSI_FAST["0x0B6 (Engine RPM, Speed)"]
         RADAR["0x0E1 (AAS Parking Radar Proximity)"]
@@ -32,7 +32,7 @@ flowchart LR
         RADIO["0x225 / 0x2A5 / 0x3A6 (RD4 Tuner, RDS & CDC)"]
     end
 
-    subgraph Core ["canbox-core (Pure C99 Engine)"]
+    subgraph Core["canbox-core (Pure C99 Engine)"]
         L1["L1: CAN Rx (hal_can)"]
         L2["L2: Profile Decoder (peugeot_407.c)"]
         L3["L3: Router & State Cache (can_router.c)"]
@@ -41,22 +41,22 @@ flowchart LR
         GPIO["Physical Hardware Synthesis (ACC / ILL / REVERSE)"]
     end
 
-    subgraph HU ["Android Head Unit (com.qf.vehicle) / Host"]
-        UART["UART Receiver (5A A5 Framing)"]
+    subgraph HU["Android Head Unit (com.qf.vehicle) / Host"]
+        UART["UART Receiver"]
         CTRL["PeugeotDataController (wc)"]
         PARSER["PeugeotDataParser"]
         UI["UI Panels, Overlays & Floating Toasts"]
     end
 
-    Car -->|CAN Frames @ 125k| L1
+    Car -->|"CAN Frames @ 125k"| L1
     L1 --> L2 --> L3 --> L4 --> L5
-    L3 -.->|Pin Triggers| GPIO
-    L5 -->|UART (38400 baud, 5A A5)| UART
+    L3 -.->|"Pin Triggers"| GPIO
+    L5 -->|"UART (38400 baud, 5A A5 framing)"| UART
     UART --> CTRL --> PARSER --> UI
-    UI -.->|Downlink Commands (0x1B, 0x2F, 0x3B, 0xCB)| UART
-    UART -.->|UART Downlink| L5
-    L5 -.->|Downlink CAN Tx (0x221, 0x39B, 0x228)| L1
-    L1 -.->|CAN Frames| Car
+    UI -.->|"Downlink Commands (0x1B, 0x2F, 0x3B, 0xCB)"| UART
+    UART -.->|"UART Downlink"| L5
+    L5 -.->|"Downlink CAN Tx (0x221, 0x39B, 0x228)"| L1
+    L1 -.->|"CAN Frames"| Car
 ```
 
 ---
