@@ -15,6 +15,7 @@ extern "C" {
 #define PSA_CAN_ID_FAST_DYNAMIC     0x0B6
 #define PSA_CAN_ID_RADAR_0E1        0x0E1
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
+#define PSA_CAN_ID_STEERING_SAS_10B 0x10B  /* BSI-routed SAS angle (CAN Comfort 125 kbps) */
 #define PSA_CAN_ID_BSI_SLOW_DATA    0x0F6
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
 #define PSA_CAN_ID_ALERT_JOURNAL    0x120

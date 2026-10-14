@@ -136,6 +136,12 @@ void hu_protocol_send_reverse(bool reverse_active) {
     }
 }
 
+void hu_protocol_send_steering_angle(int16_t angle_deg) {
+    if (s_active_driver && s_active_driver->send_steering_angle) {
+        s_active_driver->send_steering_angle(angle_deg);
+    }
+}
+
 void hu_protocol_send_alert_single(const vehicle_alert_item_t *alert) {
     if (s_active_driver && s_active_driver->send_alert_single) {
         s_active_driver->send_alert_single(alert);

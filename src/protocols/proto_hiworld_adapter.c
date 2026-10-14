@@ -207,6 +207,25 @@ static void hiworld_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) 
     (void)angle;
 }
 
+static void hiworld_send_steering_angle(int16_t angle_deg) {
+    /* Hiworld Base Info (Cmd 0x11) steering angle: whole degrees, polarity inverted
+     * relative to PSA CAN (PSA +Left -> Hiworld negative), Big-Endian at Bytes 6..7. */
+    uint16_t u_angle = (uint16_t)(int16_t)(-angle_deg);
+    uint8_t payload[10] = {
+        0x27, 0x00, 0x00, 0x00, 0x00, 0x00,
+        (uint8_t)(u_angle >> 8),
+        (uint8_t)(u_angle & 0xFF),
+        0x5E, 0x22
+    };
+
+    uint8_t tx_buf[20];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_BASE_INFO, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 static void hiworld_send_heartbeat(void) {
     /* Throttle keep-alive heartbeat (0xFF) from 10 Hz to 1 Hz (every 10 * 100ms ticks = 1000ms) */
     if (++s_hiworld_hb_tick < 10) {
@@ -522,6 +541,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_trip2 = hiworld_send_trip2,
     .send_radar = hiworld_send_radar,
     .send_reverse = NULL,
+    .send_steering_angle = hiworld_send_steering_angle,
     .send_alert_single = hiworld_send_alert_single,
     .send_alerts_summary = hiworld_send_alerts_summary,
     .send_heartbeat = hiworld_send_heartbeat,

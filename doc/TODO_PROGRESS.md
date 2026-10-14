@@ -76,11 +76,11 @@ flowchart LR
 | **9. Central Personalization & Settings** | 4 | 2 | 2 | 0 | 0 | **50%** |
 | **10. Date & Time Synchronization** | 2 | 1 | 1 | 0 | 0 | **50%** |
 | **11. RD4 Audio & Multimedia Passthrough**| 4 | 0 | 2 | 2 | 0 | **0%** |
-| **12. Dynamic Guidelines & Steering SAS**| 1 | 0 | 0 | 1 | 0 | **0%** (Pending CAN Frame) |
+| **12. Dynamic Guidelines & Steering SAS**| 1 | 1 | 0 | 0 | 0 | **100%** |
 | **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
 | **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
 | **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 0 | **100%** |
-| **Overall** | **47** | **35** | **6** | **4** | **2** | **74%** |
+| **Overall** | **47** | **36** | **6** | **3** | **2** | **77%** |
 
 ---
 
@@ -99,6 +99,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[x]` | `0x14` | **Trip 1 Computer Telemetry** | `0x07` (7) | `0x2A1` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_trip_hiworld_vector_2_trip1_historical`<br>Trip 1 avg fuel, avg speed, trip distance |
 | `[x]` | `0x15` | **Trip 2 Computer Telemetry** | `0x07` (7) | `0x261` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_trip_hiworld_vector_3_trip2_historical`<br>Trip 2 avg fuel, avg speed, trip distance |
 | `[x]` | `0x21` | **Console Panel Button Telemetry**| `0x02` (2) | `0x3E5` only | `src/profiles/peugeot_407.c` (`psa_decode_console_0x3e5_ex`)<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_console_0x3e5_buttons`<br>`test_peugeot_407_console_0x3e5_edge_cases`<br>`test_integration_hiworld_console_0x3e5_full_pipeline`<br>`test_integration_hiworld_console_0x3e5_ok_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md` section 3.3<br>Verified KeyIDs (OEM Canbox): AUDIO `0x31`, TRIP `0x40`, CLIM `0x28`, DARK `0x07`, OK `0x24`, ESC `0x25`, MENU `0x2E`, UP `0x17`, DOWN `0x18`, LEFT `0x19`, RIGHT `0x1A`. `0x3E5` 2-bit fields: B0 MENU[7:6] CLIM[1:0]; B1 TRIP[7:6] AUDIO[1:0]; B2 OK[7:6] ESC[5:4] DARK[3:2]; B5 UP[7:6] DOWN[5:4] RIGHT[3:2] LEFT[1:0]. Captured in `can_log_buttons*.log`: AUDIO, TRIP, CLIM, DARK, MENU, OK, ESC, UP; DOWN/LEFT/RIGHT bits from simulator docs (not yet captured). TEL decoded (B0[5:4] -> Hiworld `0x05` PHONE, unverified on vehicle, not yet captured); MODE pending (no KeyID). `0x167`/`0x0DF` decoders removed. CMD `0x22` and OEM idle `0x11` frame pending. |
+| `[x]` | `0x11` | **Dynamic Trajectory Steering Angle (SAS)** | `0x0A` (10) | `0x10B` (BSI-routed from CAN IS `0x305`), `0x0F6` (reverse gate) | `src/profiles/profile_psa.c` (`psa_decode_steering_angle_0x10b_profile`)<br>`src/core/can_router.c`<br>`src/protocols/proto_hiworld_adapter.c` (`hiworld_send_steering_angle`) | `test_integration_hiworld_steering_angle_trajectory_pipeline`<br>Spec: `doc/CANBOX_SPEC_HIWORLD_407_05_STEERING_ANGLE_SAS.md`. Angle = `-(raw/10)` whole degrees, sent only in reverse gear on change; Byte 3 != 0 or `0x7FFF` discarded. Cmd `0x1A` mirror pending (layout not documented). |
 | `[-]` | `0x24` | **CD Changer (CDC) Status** | `0x07` (7) | `0x3A6` | `src/profiles/peugeot_407.c` | `test_peugeot_407_cd_changer_and_rds`<br>Disc index ($1\dots 6$), track, elapsed time decoded; adapter pending |
 | `[x]` | `0x31` | **Dual-Zone Climate Status** | `0x0D` (13) | `0x1D0`<br>`0x1E3` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_hvac_hiworld`<br>Power, AC, auto, dual, defrost, fan (0..8), temps, AQS, airflow |
 | `[x]` | `0x41` | **Parking Radar Distance (OPS)** | `0x0D` (13) | `0x0E1` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center`<br>`test_integration_hiworld_radar_pipeline`<br>8 sensor bars (0..4 distance level); strictly CAN2004 `0x0E1` |
@@ -434,9 +435,9 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   1. Connect `psa_decode_cd_changer_0x3a6()` to `src/protocols/proto_hiworld_adapter.c`.
   2. Implement serializers for `CMD 0xA2` (tuner), `0xA3` (presets), and `0x24` (CDC status).
 
-### Priority 5: Dynamic Guidelines & Steering Angle (SAS) Frame Discovery
-- **Status:** Placeholders completely removed.
-- **Condition:** In live vehicle testing, cluster illumination (`0x128`) previously caused false trajectory oscillations. Dynamic steering guidelines remain disabled until a verified PSA CAN2004 optical steering angle frame is captured from a Peugeot 407.
+### Priority 5: Dynamic Guidelines & Steering Angle (SAS)
+- **Status:** Uplink implemented and verified (`[x]`). CAN `0x10B` (DLC >= 4, Byte 3 must be `0x00`, signed BE 0.1 deg, +Left) -> `steering_angle_deg` -> Hiworld `Cmd 0x11` Bytes 6-7 (`-(raw/10)`), emitted only while reverse gear is engaged and on delta.
+- **Pending:** Mirror in `Cmd 0x1A` Bytes 6-7 (frame layout not yet documented); Downlink n/a.
 
 ---
 

@@ -175,7 +175,7 @@ typedef struct {
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;
-    int16_t                  steering_angle_deg;
+    int16_t                  steering_angle_deg; /* PSA 0x10B whole degrees: +Left (CCW), -Right (CW) */
     bool                     reverse_gear;
     bool                     handbrake;
     bool                     economy_mode;

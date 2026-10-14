@@ -9,6 +9,7 @@ static vehicle_state_t s_last_sent_state;
 static uint16_t        s_tpms_periodic_timer = 0;
 static uint8_t         s_doors_periodic_timer = 0;
 static uint16_t        s_bulk_resync_timer = 0;
+static bool            s_angle_reverse_synced = false;
 
 static bool            s_initial_alerts_scanned = false;
 static bool            s_bsi_alert_query_pending = false;
@@ -48,6 +49,7 @@ void can_router_init(void) {
     s_tpms_periodic_timer = 0;
     s_doors_periodic_timer = 0;
     s_bulk_resync_timer = 0;
+    s_angle_reverse_synced = false;
     s_initial_alerts_scanned = false;
     s_bsi_alert_query_pending = false;
     s_bsi_alert_query_timeout_ticks = 0;
@@ -212,6 +214,18 @@ void can_router_process_can(const can_frame_t *frame) {
         hal_gpio_write(GPIO_PIN_REVERSE_OUT, s_current_state.reverse_gear);
         hu_protocol_send_reverse(s_current_state.reverse_gear);
         s_last_sent_state.reverse_gear = s_current_state.reverse_gear;
+    }
+
+    // Push dynamic trajectory steering angle on change, only while reverse gear is engaged
+    if (s_current_state.reverse_gear) {
+        if (s_current_state.steering_angle_deg != s_last_sent_state.steering_angle_deg ||
+            !s_angle_reverse_synced) {
+            hu_protocol_send_steering_angle(s_current_state.steering_angle_deg);
+            s_last_sent_state.steering_angle_deg = s_current_state.steering_angle_deg;
+            s_angle_reverse_synced = true;
+        }
+    } else {
+        s_angle_reverse_synced = false;
     }
 
     // Immediately push radar telemetry on updates

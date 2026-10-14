@@ -94,6 +94,17 @@ static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t 
     }
 }
 
+/* PSA Comfort CAN 0x10B: BSI-routed steering wheel angle (0.1 deg, signed BE, +Left / -Right) */
+static void psa_decode_steering_angle_0x10b_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (frame->dlc < 4) return;
+    if (frame->data[3] != 0x00) return; /* Sensor error flags set: discard */
+
+    int16_t raw_deci_deg = (int16_t)read_be16_local(&frame->data[0]);
+    if (raw_deci_deg == (int16_t)0x7FFF) return; /* Invalid sentinel */
+
+    state->steering_angle_deg = (int16_t)(raw_deci_deg / 10);
+}
+
 static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc < 1) return;
 
@@ -389,6 +400,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
     { 0x0F6,                         psa_decode_bsi_slow_0x0f6 },
+    { PSA_CAN_ID_STEERING_SAS_10B,   psa_decode_steering_angle_0x10b_profile },
     { PSA_CAN_ID_STALK_21F,          psa_decode_stalk_0x21f_profile },
     { PSA_CAN_ID_CONSOLE_3E5,        psa_decode_console_0x3e5_profile },
     { PSA_CAN_ID_ALERT_JOURNAL,      psa_decode_alert_journal_0x120_profile },
@@ -410,6 +422,8 @@ static const profile_can_rule_t s_psa_rules[] = {
 };
 
 static void psa_init(void) {
+    s_reverse_from_0f6 = false;
+    s_reverse_from_036 = false;
     psa_stalk_init(NULL);
     psa_console_init(NULL);
     psa_journal_iso_tp_init(&s_journal_ctx);

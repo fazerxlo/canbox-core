@@ -822,3 +822,56 @@ void test_integration_hiworld_console_0x3e5_ok_pipeline(void) {
     static const uint8_t w_ok[] = { 0x5A, 0xA5, 0x02, 0x21, 0x24, 0x01, 0x47 };
     check_3e5_pipeline(ok, w_ok);
 }
+
+void test_integration_hiworld_steering_angle_trajectory_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    uint8_t rx_buf[64];
+    size_t rx_len;
+
+    /* Steering frames outside reverse gear must not emit trajectory data */
+    can_frame_t sas = { .id = 0x10B, .dlc = 8, .data = { 0x00, 0xD2, 0, 0, 0, 0, 0, 0 } };
+    can_router_process_can(&sas);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    /* Engage reverse (0x0F6 Byte 7 bit 7): current angle (+21 deg Left) is pushed */
+    can_frame_t rev = { .id = 0x0F6, .dlc = 8, .data = { 0x8E, 0x58, 0, 0, 0, 0, 0, 0x80 } };
+    can_router_process_can(&rev);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t exp_21l[] = { 0x5A, 0xA5, 0x0A, 0x11, 0x27, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xEB, 0x5E, 0x22, 0xAB };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(exp_21l), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_21l, rx_buf, sizeof(exp_21l));
+
+    /* Centered */
+    memset(sas.data, 0, sizeof(sas.data));
+    can_router_process_can(&sas);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t exp_c[] = { 0x5A, 0xA5, 0x0A, 0x11, 0x27, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5E, 0x22, 0xC1 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(exp_c), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_c, rx_buf, sizeof(exp_c));
+
+    /* Unchanged angle: no retransmission (delta detection) */
+    can_router_process_can(&sas);
+    TEST_ASSERT_EQUAL_UINT32(0, read_uart_output(rx_buf, sizeof(rx_buf)));
+
+    /* Left +60.0 deg */
+    sas.data[0] = 0x02; sas.data[1] = 0x58;
+    can_router_process_can(&sas);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t exp_60l[] = { 0x5A, 0xA5, 0x0A, 0x11, 0x27, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xC4, 0x5E, 0x22, 0x84 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(exp_60l), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_60l, rx_buf, sizeof(exp_60l));
+
+    /* Right -90.0 deg */
+    sas.data[0] = 0xFC; sas.data[1] = 0x7C;
+    can_router_process_can(&sas);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t exp_90r[] = { 0x5A, 0xA5, 0x0A, 0x11, 0x27, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5A, 0x5E, 0x22, 0x1B };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(exp_90r), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_90r, rx_buf, sizeof(exp_90r));
+
+    /* Sensor error flag in Byte 3: frame discarded */
+    sas.data[0] = 0x00; sas.data[1] = 0x00; sas.data[3] = 0x01;
+    can_router_process_can(&sas);
+    TEST_ASSERT_EQUAL_UINT32(0, read_uart_output(rx_buf, sizeof(rx_buf)));
+}
