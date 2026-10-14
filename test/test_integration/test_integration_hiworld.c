@@ -875,3 +875,37 @@ void test_integration_hiworld_steering_angle_trajectory_pipeline(void) {
     can_router_process_can(&sas);
     TEST_ASSERT_EQUAL_UINT32(0, read_uart_output(rx_buf, sizeof(rx_buf)));
 }
+
+void test_integration_hiworld_outside_temp_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[256];
+    (void)read_uart_output(rx_buf, sizeof(rx_buf)); /* Drain pending output */
+
+    /* Vehicle log: 0x0F6 byte 5 = 0x7C -> 0x7C * 0.5 - 40 = 22 C */
+    can_frame_t bsi_0f6 = {
+        .id = 0x0F6,
+        .dlc = 8,
+        .data = { 0x88, 0x64, 0xFE, 0xFE, 0xFF, 0x7C, 0x7C, 0x00 }
+    };
+    can_router_process_can(&bsi_0f6);
+
+    TEST_ASSERT_EQUAL_HEX8(0x7C, can_router_get_state()->climate.outdoor_temp_raw);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found = false;
+    for (size_t i = 0; i + 16 <= rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i + 1] == 0xA5 && rx_buf[i + 3] == 0x31) {
+            TEST_ASSERT_EQUAL_HEX8(0x0C, rx_buf[i + 2]);
+            TEST_ASSERT_EQUAL_HEX8(0x7C, rx_buf[i + 4 + 11]); /* Payload byte 11 */
+            found = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found, "Hiworld 0x31 climate frame with outside temp not sent");
+
+    /* 0xFF is invalid: previous value is retained */
+    bsi_0f6.data[5] = 0xFF;
+    can_router_process_can(&bsi_0f6);
+    TEST_ASSERT_EQUAL_HEX8(0x7C, can_router_get_state()->climate.outdoor_temp_raw);
+}

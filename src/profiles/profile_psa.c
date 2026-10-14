@@ -91,6 +91,11 @@ static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t 
     if (frame->dlc >= 8) {
         s_reverse_from_0f6 = (frame->data[7] & (1 << 7)) != 0;
         state->reverse_gear = s_reverse_from_0f6 || s_reverse_from_036;
+
+        /* Outside temperature: Byte 5, Raw * 0.5 - 40 C (0xFF = invalid; keep last value) */
+        if (frame->data[5] != 0xFF) {
+            state->climate.outdoor_temp_raw = frame->data[5];
+        }
     }
 }
 
