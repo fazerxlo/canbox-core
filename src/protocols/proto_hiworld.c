@@ -66,6 +66,11 @@ void proto_hiworld_feed_byte(uint8_t byte) {
             s_rx_packet.cmd = byte;
             s_running_sum = (uint8_t)(s_running_sum + byte);
 
+            if (s_rx_packet.cmd == HIWORLD_CMD_VIRTUAL_CDC && s_rx_packet.payload_len >= 3) {
+                /* In case an uplink frame includes cmd in length (Len=3 -> Cmd + 2 payload bytes) */
+                s_rx_packet.payload_len = 2;
+            }
+
             if (s_rx_packet.payload_len == 0) {
                 s_state = HW_STATE_WAIT_CHECKSUM;
             } else {

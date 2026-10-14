@@ -1,5 +1,6 @@
 #include "core/vehicle_profile.h"
 #include "profiles/peugeot_407.h"
+#include "profiles/psa_virtual_cdc.h"
 #include <string.h>
 
 static inline uint16_t read_be16_local(const uint8_t *d) {
@@ -411,15 +412,79 @@ static void psa_decode_rd4_audio_settings_0x1e5_profile(const can_frame_t *frame
     psa_decode_rd4_audio_settings_0x1e5(frame->data, frame->dlc, &state->audio);
 }
 
+static psa_isotp_rx_ctx_t s_rd4_isotp_ctx;
+static psa_isotp_rx_ctx_t s_rd4_list_isotp_ctx;
+
+static void psa_decode_etat_autoradio_0x165_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_decode_radio_power_0x165(frame, state);
+    psa_rd4_process_can_0x165(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_station_list_0x125_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x125(&state->media.radio, &s_rd4_list_isotp_ctx, frame->data, frame->dlc);
+}
+
+static void psa_decode_etat_tuner_0x225_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x225(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_info_tuner_0x265_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x265(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_nom_station_0x2a5_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x2a5(&state->media.radio, frame->data, frame->dlc);
+}
+
+static void psa_decode_texte_radio_0x0a4_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x0a4(&state->media.radio, &s_rd4_isotp_ctx, frame->data, frame->dlc);
+}
+
+static void psa_decode_cd_tray_0x325_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc);
+}
+
+static void psa_decode_cd_disc_info_0x365_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x365(&state->media.cdc, frame->data, frame->dlc);
+}
+
+static void psa_decode_cd_play_0x3a5_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc);
+}
+
+static void psa_decode_cdc_cmd_0x131_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)state;
+    if (!frame) return;
+    psa_virtual_cdc_process_can_0x131(frame->data, frame->dlc);
+}
+
+static void psa_decode_cd_changer_0x3a6_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc);
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
+    { PSA_CAN_ID_CDC_CMD_131,        psa_decode_cdc_cmd_0x131_profile },
+    { PSA_CAN_ID_TEXTE_RADIO,        psa_decode_texte_radio_0x0a4_profile },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
     { 0x0F6,                         psa_decode_bsi_slow_0x0f6 },
     { PSA_CAN_ID_STEERING_SAS_10B,   psa_decode_steering_angle_0x10b_profile },
     { PSA_CAN_ID_STALK_21F,          psa_decode_stalk_0x21f_profile },
     { PSA_CAN_ID_CONSOLE_3E5,        psa_decode_console_0x3e5_profile },
     { PSA_CAN_ID_ALERT_JOURNAL,      psa_decode_alert_journal_0x120_profile },
+    { PSA_CAN_ID_STATION_LIST_125,   psa_decode_station_list_0x125_profile },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
+    { PSA_CAN_ID_ETAT_AUTORADIO,     psa_decode_etat_autoradio_0x165_profile },
     { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
     { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },
     { PSA_CAN_ID_RD4_VOLUME,         psa_decode_rd4_volume_0x1a5_profile },
@@ -430,12 +495,18 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_RD4_AUDIO_SETTINGS, psa_decode_rd4_audio_settings_0x1e5_profile },
     { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
     { PSA_CAN_ID_TRIP_INSTANT,       psa_decode_trip_0x221_profile },
-    { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
+    { PSA_CAN_ID_ETAT_TUNER,         psa_decode_etat_tuner_0x225_profile },
+    { PSA_CAN_ID_INFO_TUNER,         psa_decode_info_tuner_0x265_profile },
     { PSA_CAN_ID_TRIP2_ODB,          psa_decode_trip2_0x261_profile },
+    { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
+    { PSA_CAN_ID_NOM_STATION,        psa_decode_nom_station_0x2a5_profile },
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
     { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
-    { 0x165,                         psa_decode_radio_power_0x165 },
+    { PSA_CAN_ID_CD_TRAY_325,        psa_decode_cd_tray_0x325_profile },
+    { PSA_CAN_ID_CD_DISC_INFO_365,   psa_decode_cd_disc_info_0x365_profile },
+    { PSA_CAN_ID_CD_PLAY_3A5,        psa_decode_cd_play_0x3a5_profile },
+    { PSA_CAN_ID_CD_CHANGER,         psa_decode_cd_changer_0x3a6_profile },
 };
 
 static void psa_init(void) {
@@ -444,6 +515,8 @@ static void psa_init(void) {
     psa_stalk_init(NULL);
     psa_console_init(NULL);
     psa_journal_iso_tp_init(&s_journal_ctx);
+    psa_rd4_media_init(NULL, &s_rd4_isotp_ctx);
+    memset(&s_rd4_list_isotp_ctx, 0, sizeof(s_rd4_list_isotp_ctx));
 }
 
 static bool psa_reset_trip(uint8_t trip_index) {

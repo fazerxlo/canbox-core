@@ -3,6 +3,7 @@
 #include "core/vehicle_profile.h"
 #include "protocols/proto_hiworld.h"
 #include "protocols/hiworld_connection.h"
+#include "profiles/psa_virtual_cdc.h"
 #include "hal/hal_gpio.h"
 
 void test_integration_hiworld_steering_wheel_volume_up_pipeline(void) {
@@ -1037,4 +1038,522 @@ void test_integration_hiworld_rd4_volume_and_audio_pipeline(void) {
     can_router_process_can(&frame_vol_stopped);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+}
+
+void test_integration_hiworld_rd4_radio_tuner_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Source Tuner (0x165)
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xCC, 0x54, 0x10, 0x02 }
+    };
+    can_router_process_can(&frame_165);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 2. Tuner Frequency (0x225): FM1, Preset 1, RDS Lock, 102.50 MHz
+    can_frame_t frame_225 = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x20, 0x01, 0x90, 0x04, 0x1A }
+    };
+    can_router_process_can(&frame_225);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 3. Station Name (0x2A5): "RMF FM  "
+    can_frame_t frame_2a5 = {
+        .id = 0x2A5,
+        .dlc = 8,
+        .data = { 'R', 'M', 'F', ' ', 'F', 'M', ' ', ' ' }
+    };
+    can_router_process_can(&frame_2a5);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= 19);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[4]); /* FM1 -> 0x01 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[5]); /* 1025 & 0xFF (Little Endian for Hiworld) */
+    TEST_ASSERT_EQUAL_HEX8(0x04, rx_buf[6]); /* 1025 >> 8 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[9]);
+    TEST_ASSERT_EQUAL_STRING_LEN("RMF FM  ", (char *)&rx_buf[10], 8);
+}
+
+void test_integration_hiworld_rd4_radiotext_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // Inject ISO-TP multi-frame stream for "Queen - Bohemian Rhapsody" (29 bytes with 4-byte prefix)
+    const uint8_t can_ff[]  = { 0x10, 0x1D, 0x10, 0x00, 0x00, 0x00, 0x51, 0x75 };
+    const uint8_t can_cf1[] = { 0x21, 0x65, 0x65, 0x6E, 0x20, 0x2D, 0x20, 0x42 };
+    const uint8_t can_cf2[] = { 0x22, 0x6F, 0x68, 0x65, 0x6D, 0x69, 0x61, 0x6E };
+    const uint8_t can_cf3[] = { 0x23, 0x20, 0x52, 0x68, 0x61, 0x70, 0x73, 0x6F };
+    const uint8_t can_cf4[] = { 0x24, 0x64, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+    can_frame_t frame = { .id = 0x0A4, .dlc = 8 };
+
+    memcpy(frame.data, can_ff, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf1, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf2, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf3, 8);
+    can_router_process_can(&frame);
+    memcpy(frame.data, can_cf4, 8);
+    can_router_process_can(&frame);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(30, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(25, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x86, rx_buf[3]);
+    TEST_ASSERT_EQUAL_STRING_LEN("Queen - Bohemian Rhapsody", (char *)&rx_buf[4], 25);
+}
+
+void test_integration_hiworld_rd4_cd_changer_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // CAN 0x3A6: Disc 2, Track 14, Total 20, 03:45, Random
+    can_frame_t frame = {
+        .id = 0x3A6,
+        .dlc = 8,
+        .data = { 0x00, 0x02, 0x0E, 0x14, 0x03, 0x2D, 0x01, 0x00 }
+    };
+    can_router_process_can(&frame);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(16, rx_len);
+
+    /* 5A A5 0B 97 02 02 00 0E 00 03 2D 01 02 14 00 FA */
+    const uint8_t expected[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x02, 0x02, 0x00, 0x0E, 0x00, 0x03, 0x2D, 0x01, 0x02, 0x14, 0x00, 0xFA
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, 16);
+}
+
+void test_integration_hiworld_rd4_cd_in_dash_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[64];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Audio Source switch to CD (CAN 0x165 -> 0x20 = CD)
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x20, 0x00 }
+    };
+    can_router_process_can(&frame_165);
+
+    // Emits Cmd 0x84 (Audio Source = 0x30 CD)
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= 19);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x30, rx_buf[4]); /* CD Source */
+
+    // 2. CD Disc Info (CAN 0x365: Total Tracks = 18 = 0x12)
+    can_frame_t frame_365 = {
+        .id = 0x365,
+        .dlc = 5,
+        .data = { 0x12, 0x26, 0x02, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_365);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 3. CD Play Telemetry (CAN 0x3A5: Track 5, Playing, 02 min 35 sec)
+    can_frame_t frame_3a5 = {
+        .id = 0x3A5,
+        .dlc = 6,
+        .data = { 0x05, 0x03, 0x19, 0x02, 0x23, 0x00 }
+    };
+    can_router_process_can(&frame_3a5);
+
+    // Emits Cmd 0x97 (Single in-dash CD: 5A A5 0B 97 00 00 00 05 00 02 23 00 02 12 00 DF)
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(16, rx_len);
+
+    const uint8_t expected_cd_ex1[] = {
+        0x5A, 0xA5, 0x0B, 0x97, 0x00, 0x00, 0x00, 0x05, 0x00, 0x02, 0x23, 0x00, 0x02, 0x12, 0x00, 0xDF
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_cd_ex1, rx_buf, 16);
+
+    // 4. Switch back to Radio (CAN 0x165 -> 0x10 = FM1):
+    // MUST send Cmd 0x97 stopping CD playback first, then Cmd 0x84 for radio tuner
+    can_frame_t frame_radio = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_radio);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Buffer contains Cmd 0x97 (16 bytes) followed by Cmd 0x84 (19 bytes) = 35 bytes */
+    TEST_ASSERT_TRUE(rx_len >= 35);
+
+    // Verify first packet is Cmd 0x97 with play_status = 0x01 (Stop/Pause)
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[12]); /* play_status = 0x01 (Pause/Stop) */
+
+    // Verify second packet is Cmd 0x84 with Tuner mode
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[16]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[17]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[18]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[19]);
+
+    // Inject uninitialized sentinels while on Radio (must produce zero UART output)
+    can_frame_t frame_365_sentinel = {
+        .id = 0x365,
+        .dlc = 5,
+        .data = { 0xFF, 0xFF, 0xFF, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_365_sentinel);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    can_frame_t frame_3a5_sentinel = {
+        .id = 0x3A5,
+        .dlc = 6,
+        .data = { 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x00 }
+    };
+    can_router_process_can(&frame_3a5_sentinel);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+}
+
+void test_integration_hiworld_rd4_downlink_resume_queries(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Send Tuner Resume Query: forwardType(0x0F) -> 5A A5 00 0F 0E
+    const uint8_t q_tuner[] = { 0x5A, 0xA5, 0x00, 0x0F, 0x0E };
+    for (size_t i = 0; i < sizeof(q_tuner); i++) {
+        can_router_process_uart_byte(q_tuner[i]);
+    }
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= (6 + 19));
+    /* Universal ACK frame: 5A A5 01 FF 0F 0E */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x0F, rx_buf[4]);
+    /* Radio State response: 5A A5 0E 84 ... */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[9]);
+
+    // 2. Send Media Resume Query: forwardType(0x11) -> 5A A5 00 11 10
+    const uint8_t q_media[] = { 0x5A, 0xA5, 0x00, 0x11, 0x10 };
+    for (size_t i = 0; i < sizeof(q_media); i++) {
+        can_router_process_uart_byte(q_media[i]);
+    }
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(6 + 16, rx_len);
+    /* Universal ACK frame: 5A A5 01 FF 11 10 */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x11, rx_buf[4]);
+    /* Media State response: 5A A5 0B 97 ... */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[9]);
+}
+
+void test_integration_hiworld_rd4_preset_list_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Inject CAN 0x225 with Preset 1 active (87.5 MHz)
+    can_frame_t frame_225_p1 = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x20, 0x10, 0x10, 0x02, 0xEE }
+    };
+    can_router_process_can(&frame_225_p1);
+
+    // Should output Cmd 0x84 (Radio State) followed by Cmd 0x85 (Preset list freqs - 18 bytes)
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= (19 + 18));
+
+    // Find Cmd 0x85 in the stream
+    bool found_0x85 = false;
+    for (size_t i = 0; i < rx_len - 4; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x85) {
+            found_0x85 = true;
+            TEST_ASSERT_EQUAL_HEX8(0x0D, rx_buf[i+2]); /* Length 13 */
+            TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[i+4]); /* Band FM1 */
+            // Preset 1 frequency: 875 -> 0x036B
+            TEST_ASSERT_EQUAL_HEX8(0x03, rx_buf[i+5]);
+            TEST_ASSERT_EQUAL_HEX8(0x6B, rx_buf[i+6]);
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x85);
+
+    // 2. Inject native CAN 0x125 ISO-TP frames broadcasting station list
+    can_frame_t frame_125_ff  = { .id = 0x125, .dlc = 8, .data = { 0x10, 0x28, 0x10, 0x04, 0x00, 0x40, 0x4A, 0x45 } };
+    can_frame_t frame_125_cf1 = { .id = 0x125, .dlc = 8, .data = { 0x21, 0x44, 0x59, 0x4E, 0x4B, 0x41, 0x20, 0xB0 } };
+    can_frame_t frame_125_cf2 = { .id = 0x125, .dlc = 8, .data = { 0x22, 0x20, 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D } };
+    can_frame_t frame_125_cf3 = { .id = 0x125, .dlc = 8, .data = { 0x23, 0x20, 0xB0, 0x52, 0x4D, 0x46, 0x20, 0x4D } };
+    can_frame_t frame_125_cf4 = { .id = 0x125, .dlc = 8, .data = { 0x24, 0x41, 0x58, 0x58, 0xB0, 0x20, 0x54, 0x52 } };
+    can_frame_t frame_125_cf5 = { .id = 0x125, .dlc = 7, .data = { 0x25, 0x4F, 0x4A, 0x4B, 0x41, 0x20, 0xB0 } };
+
+    can_router_process_can(&frame_125_ff);
+    can_router_process_can(&frame_125_cf1);
+    can_router_process_can(&frame_125_cf2);
+    can_router_process_can(&frame_125_cf3);
+    can_router_process_can(&frame_125_cf4);
+    can_router_process_can(&frame_125_cf5);
+
+    // Should output Cmd 0x85 (Extended Station Names Mode - 54 bytes)
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= 54);
+
+    found_0x85 = false;
+    for (size_t i = 0; i < rx_len - 4; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x85) {
+            found_0x85 = true;
+            TEST_ASSERT_EQUAL_HEX8(0x31, rx_buf[i+2]); /* Length 49 */
+            TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[i+4]); /* Band FM1 */
+            TEST_ASSERT_EQUAL_STRING_LEN("JEDYNKA ", (char *)&rx_buf[i+5], 8);
+            TEST_ASSERT_EQUAL_STRING_LEN(" RMF FM ", (char *)&rx_buf[i+13], 8);
+            TEST_ASSERT_EQUAL_STRING_LEN("RMF MAXX", (char *)&rx_buf[i+21], 8);
+            TEST_ASSERT_EQUAL_STRING_LEN(" TROJKA ", (char *)&rx_buf[i+29], 8);
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x85);
+}
+
+void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    /* 1. Inject CAN 0x165 selecting AUX Input 1 (src = 0x4 -> source_mode 0x20) */
+    can_frame_t frame_aux = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x40, 0x00 }
+    };
+    can_router_process_can(&frame_aux);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Must output Cmd 0x84 (CarRadioState) indicating AUX 1 (0x20) */
+    TEST_ASSERT_EQUAL_UINT32(19, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[4]); /* Source = AUX 1 (0x20) */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[5]); /* Frequency LSB = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[6]); /* Frequency MSB = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[7]); /* Preset slot = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[8]); /* Indicators = 0 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[9]); /* Power status = 1 (Playing) */
+    TEST_ASSERT_EQUAL_STRING_LEN("        ", (char *)&rx_buf[10], 8); /* Blank station name */
+
+    /* Verify NO Cmd 0x85 (presets) was transmitted */
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x85) {
+            TEST_FAIL_MESSAGE("Cmd 0x85 should NOT be sent when audio source is AUX");
+        }
+    }
+
+    /* 2. Background CAN tuner frame 0x225 and station name 0x2A5 arrive from vehicle */
+    can_frame_t frame_225 = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x20, 0x60, 0x90, 0x03, 0x14 } /* Preset 6, FM1, 89.4 MHz */
+    };
+    can_router_process_can(&frame_225);
+
+    can_frame_t frame_2a5 = {
+        .id = 0x2A5,
+        .dlc = 8,
+        .data = { 'J', 'E', 'D', 'Y', 'N', 'K', 'A', ' ' }
+    };
+    can_router_process_can(&frame_2a5);
+
+    /* Must produce ZERO UART output: background tuner changes while in AUX must not spam serial or trigger Radio UI */
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    /* 3. Simulate periodic 60s resync ticks (600 ticks) */
+    for (int t = 0; t < 599; t++) {
+        if (t % 10 == 0) {
+            can_router_process_can(&frame_aux);
+        }
+        can_router_periodic_100ms();
+    }
+    /* Drain heartbeats accumulated during the 599 ticks */
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 600th tick triggers the 60s periodic bulk resync */
+    can_router_process_can(&frame_aux);
+    can_router_periodic_100ms();
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Resync in AUX mode must emit Cmd 0x84 (AUX 1), NEVER Cmd 0x85 (presets) or Cmd 0x86 (radiotext) */
+    bool found_0x84 = false;
+    bool found_0x85 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            if (rx_buf[i + 3] == 0x84) found_0x84 = true;
+            if (rx_buf[i + 3] == 0x85) found_0x85 = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x84);
+    TEST_ASSERT_FALSE(found_0x85);
+
+    /* 4. Transition back to Radio (CAN 0x165 -> Tuner 0x10 = FM1) */
+    can_frame_t frame_radio = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xC0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_radio);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    /* Transition to radio MUST output Cmd 0x84 (Radio State) followed by Cmd 0x85 (Preset list) */
+    found_0x84 = false;
+    found_0x85 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            if (rx_buf[i + 3] == 0x84) found_0x84 = true;
+            if (rx_buf[i + 3] == 0x85) found_0x85 = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x84);
+    TEST_ASSERT_TRUE(found_0x85);
+}
+
+void test_integration_hiworld_virtual_cdc_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+
+    /* Make sure bus is awake by feeding an active CAN frame */
+    can_frame_t frame_ign = {
+        .id = 0x036,
+        .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_ign);
+
+    /* Drain initial UART output */
+    uint8_t rx_buf[128];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 1. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x02, Param 0x01 (Audio Start / Play) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x01, 0xB2 ] */
+    const uint8_t hu_play_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x01, 0xB2 };
+    for (size_t i = 0; i < sizeof(hu_play_packet); i++) {
+        can_router_process_uart_byte(hu_play_packet[i]);
+    }
+
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_active());
+
+    /* Check UART output: ACK for 0xAD (0x5A, 0xA5, 0x01, 0xFF, 0xAD, 0xAC) and Cmd 0x84 (CDC 0x31) */
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_ack_0xad = false;
+    bool found_0x84_cdc = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            if (rx_buf[i + 3] == 0xFF && (i + 4) < rx_len && rx_buf[i + 4] == 0xAD) {
+                found_ack_0xad = true;
+            }
+            if (rx_buf[i + 3] == 0x84 && (i + 4) < rx_len && rx_buf[i + 4] == 0x31) {
+                found_0x84_cdc = true;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(found_ack_0xad);
+    TEST_ASSERT_TRUE(found_0x84_cdc);
+
+    /* 2. Run periodic 100ms ticks: verifies CAN 0x162 is transmitted every 100ms */
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    can_frame_t frame_sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_sent.id);
+    TEST_ASSERT_EQUAL_UINT8(7, frame_sent.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x06, frame_sent.data[5]); /* Source registration magic byte */
+
+    /* 3. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x02, Param 0x00 (Audio Stop / Standby) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x00, 0xB1 ] */
+    hal_can_native_clear_sent_frame();
+    const uint8_t hu_stop_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x02, 0x00, 0xB1 };
+    for (size_t i = 0; i < sizeof(hu_stop_packet); i++) {
+        can_router_process_uart_byte(hu_stop_packet[i]);
+    }
+
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* Verify 100ms tick continues broadcasting 0x162 presence in standby */
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x02, frame_sent.data[1] & 0x07); /* Status icon: 2 (Pause) */
+
+    /* 4. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x01, Param 0x00 (Disable Virtual CDC) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x00, 0xB0 ] */
+    hal_can_native_clear_sent_frame();
+    const uint8_t hu_disable_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x00, 0xB0 };
+    for (size_t i = 0; i < sizeof(hu_disable_packet); i++) {
+        can_router_process_uart_byte(hu_disable_packet[i]);
+    }
+
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_presence_enabled());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* Verify 100ms tick halts all transmission when disabled */
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+
+    /* 5. Downlink: Send Hiworld Cmd 0xAD SubCmd 0x01, Param 0x01 (Re-enable Virtual CDC) */
+    /* Wire packet: [ 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x01, 0xB1 ] */
+    const uint8_t hu_enable_packet[] = { 0x5A, 0xA5, 0x03, 0xAD, 0x01, 0x01, 0xB1 };
+    for (size_t i = 0; i < sizeof(hu_enable_packet); i++) {
+        can_router_process_uart_byte(hu_enable_packet[i]);
+    }
+
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame_sent.id);
 }

@@ -77,6 +77,15 @@ void test_peugeot_407_rd4_volume(void);
 void test_peugeot_407_rd4_audio_settings(void);
 void test_peugeot_407_rd4_hiworld_frame_build(void);
 void test_peugeot_407_cd_changer_and_rds(void);
+void test_peugeot_407_rd4_vector_1_fm_tuner(void);
+void test_peugeot_407_rd4_vector_2_isotp_radiotext(void);
+void test_peugeot_407_rd4_vector_3_cd_changer(void);
+void test_peugeot_407_rd4_cd_in_dash_playback(void);
+void test_peugeot_407_rd4_cd_tray_mechanism(void);
+void test_peugeot_407_rd4_cd_ground_truth_dump(void);
+void test_peugeot_407_rd4_source_and_wavebands(void);
+void test_peugeot_407_rd4_frequency_and_ta_stability(void);
+void test_peugeot_407_rd4_preset_memory_list(void);
 
 // Peugeot 407 SPEC_02 test declarations
 void test_psa_extended_tpms_numeric(void);
@@ -109,6 +118,10 @@ void test_peugeot_407_custom_cockpit_check_sequence(void);
 void test_peugeot_407_custom_summary_table_and_empty_clearance(void);
 void test_peugeot_407_custom_downlink_0x2f_response(void);
 void test_can_id_filter_enforcement(void);
+void test_peugeot_407_aux_mode_suppression(void);
+void test_peugeot_407_virtual_cdc_initial_state(void);
+void test_peugeot_407_virtual_cdc_downlink_controls(void);
+void test_peugeot_407_virtual_cdc_periodic_transmission(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -207,6 +220,15 @@ int main(void) {
     RUN_TEST(test_peugeot_407_rd4_audio_settings);
     RUN_TEST(test_peugeot_407_rd4_hiworld_frame_build);
     RUN_TEST(test_peugeot_407_cd_changer_and_rds);
+    RUN_TEST(test_peugeot_407_rd4_vector_1_fm_tuner);
+    RUN_TEST(test_peugeot_407_rd4_vector_2_isotp_radiotext);
+    RUN_TEST(test_peugeot_407_rd4_vector_3_cd_changer);
+    RUN_TEST(test_peugeot_407_rd4_cd_in_dash_playback);
+    RUN_TEST(test_peugeot_407_rd4_cd_tray_mechanism);
+    RUN_TEST(test_peugeot_407_rd4_cd_ground_truth_dump);
+    RUN_TEST(test_peugeot_407_rd4_source_and_wavebands);
+    RUN_TEST(test_peugeot_407_rd4_frequency_and_ta_stability);
+    RUN_TEST(test_peugeot_407_rd4_preset_memory_list);
 
     // Peugeot 407 SPEC_02 Extended Unit Tests & Verification Vectors
     RUN_TEST(test_psa_extended_tpms_numeric);
@@ -239,6 +261,10 @@ int main(void) {
     RUN_TEST(test_peugeot_407_custom_summary_table_and_empty_clearance);
     RUN_TEST(test_peugeot_407_custom_downlink_0x2f_response);
     RUN_TEST(test_can_id_filter_enforcement);
+    RUN_TEST(test_peugeot_407_aux_mode_suppression);
+    RUN_TEST(test_peugeot_407_virtual_cdc_initial_state);
+    RUN_TEST(test_peugeot_407_virtual_cdc_downlink_controls);
+    RUN_TEST(test_peugeot_407_virtual_cdc_periodic_transmission);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

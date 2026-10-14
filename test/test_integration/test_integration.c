@@ -71,6 +71,14 @@ void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void);
 void test_integration_hiworld_console_0x3e5_full_pipeline(void);
 void test_integration_hiworld_console_0x3e5_ok_pipeline(void);
 void test_integration_hiworld_rd4_volume_and_audio_pipeline(void);
+void test_integration_hiworld_rd4_radio_tuner_pipeline(void);
+void test_integration_hiworld_rd4_radiotext_pipeline(void);
+void test_integration_hiworld_rd4_cd_changer_pipeline(void);
+void test_integration_hiworld_rd4_cd_in_dash_pipeline(void);
+void test_integration_hiworld_rd4_downlink_resume_queries(void);
+void test_integration_hiworld_rd4_preset_list_pipeline(void);
+void test_integration_hiworld_rd4_aux_mode_pipeline(void);
+void test_integration_hiworld_virtual_cdc_pipeline(void);
 
 // 3. Bagoo Protocol Integration Tests (test_integration_bagoo.c)
 void test_integration_bagoo_steering_wheel_volume_up_pipeline(void);
@@ -112,6 +120,14 @@ int main(void) {
     RUN_TEST(test_integration_hiworld_console_0x3e5_full_pipeline);
     RUN_TEST(test_integration_hiworld_console_0x3e5_ok_pipeline);
     RUN_TEST(test_integration_hiworld_rd4_volume_and_audio_pipeline);
+    RUN_TEST(test_integration_hiworld_rd4_radio_tuner_pipeline);
+    RUN_TEST(test_integration_hiworld_rd4_radiotext_pipeline);
+    RUN_TEST(test_integration_hiworld_rd4_cd_changer_pipeline);
+    RUN_TEST(test_integration_hiworld_rd4_cd_in_dash_pipeline);
+    RUN_TEST(test_integration_hiworld_rd4_downlink_resume_queries);
+    RUN_TEST(test_integration_hiworld_rd4_preset_list_pipeline);
+    RUN_TEST(test_integration_hiworld_rd4_aux_mode_pipeline);
+    RUN_TEST(test_integration_hiworld_virtual_cdc_pipeline);
 
     // 3. Bagoo Protocol Integration Tests
     RUN_TEST(test_integration_bagoo_steering_wheel_volume_up_pipeline);
