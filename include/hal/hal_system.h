@@ -38,6 +38,14 @@ void hal_delay_ms(uint32_t ms);
  */
 void hal_system_reboot(void);
 
+/**
+ * @brief Enter low-power deep sleep mode (PowerDown / WFI).
+ * Arms wakeup sources (CAN RX edge, discrete ignition sense), isolates peripherals,
+ * and halts CPU until an external wake event occurs. Upon wake, restores clocks
+ * and normal peripheral state.
+ */
+void hal_system_enter_deep_sleep(void);
+
 #ifdef __cplusplus
 }
 #endif

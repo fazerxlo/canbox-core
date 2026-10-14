@@ -20,3 +20,7 @@ void hal_delay_ms(uint32_t ms) {
 void hal_system_reboot(void) {
     esp_restart();
 }
+
+void hal_system_enter_deep_sleep(void) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+}

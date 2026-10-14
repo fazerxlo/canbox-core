@@ -430,3 +430,11 @@ bool can_router_query_alert_journal(void) {
 bool can_router_is_bus_sleeping(void) {
     return s_can_bus_sleeping;
 }
+
+void can_router_notify_wake(void) {
+    if (s_can_bus_sleeping) {
+        hal_gpio_write(GPIO_PIN_CAN_STBY, false);
+        s_can_bus_sleeping = false;
+    }
+    s_can_inactivity_ticks = 0;
+}

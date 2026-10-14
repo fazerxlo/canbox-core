@@ -7,6 +7,23 @@ void SysTick_Handler(void) {
     s_ticks_ms++;
 }
 
+/* ISR Handlers for wake-up sources to clear flags and avoid Default_Handler hang */
+void PWRWU_IRQHandler(void) {
+    CLK->PWRCON |= CLK_PWRCON_PD_WU_STS_Msk; /* Clear power-down wake-up status */
+}
+
+void GPAB_IRQHandler(void) {
+    PA->ISRC = PA->ISRC; /* Clear Port A interrupt flags (e.g. PA0 ignition) */
+    PB->ISRC = PB->ISRC;
+}
+
+void GPCDEF_IRQHandler(void) {
+    PC->ISRC = PC->ISRC;
+    PD->ISRC = PD->ISRC; /* Clear Port D interrupt flags (e.g. PD6 CAN_RX) */
+    PE->ISRC = PE->ISRC;
+    PF->ISRC = PF->ISRC;
+}
+
 hal_status_t hal_system_init(void) {
     // Unlock protected registers
     SYS_UnlockReg();
@@ -47,4 +64,84 @@ void hal_delay_ms(uint32_t ms) {
 void hal_system_reboot(void) {
     SYS_UnlockReg();
     SYS_ResetChip();
+}
+
+static void hal_system_on_wakeup(void) {
+    SYS_UnlockReg();
+
+    // Clear Power-Down flag
+    CLK->PWRCON &= ~CLK_PWRCON_PWR_DOWN_EN_Msk;
+
+    // Restore PLL to 48 MHz and wait for oscillator stability
+    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_PLL_STB_Msk));
+
+    SYS_LockReg();
+
+    // Restore CAN transceiver active drive (PC3 = LOW)
+    PC->DOUT &= ~(1U << 3);
+
+    // Re-arm SysTick for exact 1ms task scheduler
+    CLK_EnableSysTick(CLK_CLKSEL0_STCLK_S_HCLK, SystemCoreClock / 1000);
+
+    // Disable wakeup interrupts to prevent re-triggering during active run
+    GPIO_DisableInt(PD, 6);
+    GPIO_DisableInt(PA, 0);
+    CAN_DISABLE_WAKEUP(CAN0);
+
+    NVIC_ClearPendingIRQ(GPCDEF_IRQn);
+    NVIC_ClearPendingIRQ(GPAB_IRQn);
+    NVIC_ClearPendingIRQ(PWRWU_IRQn);
+    NVIC_ClearPendingIRQ(CAN0_IRQn);
+}
+
+void hal_system_enter_deep_sleep(void) {
+    /* 1. Turn off all discrete vehicle outputs */
+    PA->DOUT &= ~((1U << 8) | (1U << 9) | (1U << 12) | (1U << 13));
+
+    /* 2. Put CAN transceiver in Standby (PC3 = HIGH) */
+    PC->DOUT |= (1U << 3);
+
+    /* 3. Disable SysTick timer to prevent 1ms wakeups */
+    SysTick->CTRL = 0;
+    SysTick->VAL  = 0;
+
+    /* 4. Configure Wakeup Interrupt Sources */
+    SYS_UnlockReg();
+
+    // Enable hardware CAN Wake-up on CAN0 Rx edge
+    CAN_ENABLE_WAKEUP(CAN0);
+    NVIC_ClearPendingIRQ(CAN0_IRQn);
+    NVIC_EnableIRQ(CAN0_IRQn);
+
+    // Enable EXTI on PD6 (CAN_RX) to wake on dominant CAN bus pulse
+    GPIO_EnableInt(PD, 6, GPIO_INT_FALLING);
+    NVIC_ClearPendingIRQ(GPCDEF_IRQn);
+    NVIC_EnableIRQ(GPCDEF_IRQn);
+
+    // Enable EXTI on PA0 (Hardware Ignition Sense line, if wired)
+    GPIO_EnableInt(PA, 0, GPIO_INT_RISING);
+    NVIC_ClearPendingIRQ(GPAB_IRQn);
+    NVIC_EnableIRQ(GPAB_IRQn);
+
+    // Enable Power-down Wake-up Interrupt in Clock Controller
+    CLK->PWRCON |= CLK_PWRCON_PD_WU_INT_EN_Msk;
+    NVIC_ClearPendingIRQ(PWRWU_IRQn);
+    NVIC_EnableIRQ(PWRWU_IRQn);
+
+    /* 5. Enable Cortex-M0 Deep Sleep in SCB */
+    SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+
+    /* 6. Enable Chip Power-Down mode and wait for CPU WFI */
+    CLK->PWRCON |= (CLK_PWRCON_PWR_DOWN_EN_Msk | CLK_PWRCON_PD_WAIT_CPU_Msk);
+
+    SYS_LockReg();
+
+    /* 7. Stop CPU core until external interrupt occurs */
+    __asm volatile("wfi");
+
+    /* ========================================================= */
+    /*   MCU WAKES UP HERE IMMEDIATELY UPON BUS/KEY TRANSITION   */
+    /* ========================================================= */
+
+    hal_system_on_wakeup();
 }

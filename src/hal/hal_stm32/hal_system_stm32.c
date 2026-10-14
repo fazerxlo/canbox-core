@@ -45,3 +45,7 @@ void hal_delay_ms(uint32_t ms) {
 void hal_system_reboot(void) {
     NVIC_SystemReset();
 }
+
+void hal_system_enter_deep_sleep(void) {
+    __WFI();
+}

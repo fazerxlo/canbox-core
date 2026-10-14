@@ -77,10 +77,10 @@ flowchart LR
 | **10. Date & Time Synchronization** | 2 | 1 | 1 | 0 | 0 | **50%** |
 | **11. RD4 Audio & Multimedia Passthrough**| 4 | 0 | 2 | 2 | 0 | **0%** |
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 1 | 0 | 0 | 0 | **100%** |
-| **13. Powertrain & Hardware GPIO Synthesis**| 4 | 4 | 0 | 0 | 0 | **100%** |
+| **13. Powertrain & Hardware GPIO Synthesis**| 5 | 5 | 0 | 0 | 0 | **100%** |
 | **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
 | **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 0 | **100%** |
-| **Overall** | **47** | **38** | **6** | **3** | **0** | **81%** |
+| **Overall** | **48** | **39** | **6** | **3** | **0** | **81%** |
 
 ---
 
@@ -295,12 +295,19 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Pin PB6 on STM32 (`volvo_od2` / `qemu`), PC3 on NUC131 (`vw_nc03`). Configured in Open-Drain mode (`0` / 0V = Normal high-speed TX/RX mode, `1` / float to pull-up = Standby / Silent low-power mode $< 15\ \mu\text{A}$).
   - Wake-on-CAN: Any CAN frame received via `can_router_process_can()` immediately asserts `false` (Normal Mode) and resets watchdog (`s_can_bus_sleeping = false`).
   - Inactivity Sleep Watchdog: 3.0-second silence watchdog in `can_router_periodic_100ms()` unconditionally forces `ignition_state = VEHICLE_IGNITION_OFF`, drops ACC (`GPIO_PIN_HEADUNIT_POWER`), drops ILL, drops REVERSE, asserts Standby mode (`GPIO_PIN_CAN_STBY = true`), sets `s_can_bus_sleeping = true`, and completely halts all periodic telemetry, door repeats, TPMS updates, and keep-alive heartbeats (`CMD 0xFF`).
+- **NUC131 Silicon Deep Sleep & 3-Layer Hardware Isolation (`hal_system_enter_deep_sleep`):**
+  - **Layer 1 (External 12V Cut):** PA8 (ACC), PA9 (ILL), PA12 (PARK), PA13 (REV) driven LOW (0V), cutting triggers to Android Head Unit and rear camera.
+  - **Layer 2 (CAN Transceiver Standby):** `PC3` asserted HIGH, putting TJA1050 / MCP2551 transceiver in low-power standby ($\sim 15\ \mu\text{A}$).
+  - **Layer 3 (Silicon Power-Down):** Disables SysTick, arms hardware CAN wake-up on CAN0 RX falling edge (`CAN_ENABLE_WAKEUP(CAN0)`), arms GPIO EXTI on `PD6` (`GPCDEF_IRQn`) and `PA0` (`GPAB_IRQn`), enables Power-down Wake-up interrupt (`PWRWU_IRQn`), sets `SCB->SCR.SLEEPDEEP`, asserts `CLK->PWRCON.PWR_DOWN_EN` and `WAIT_CPU`, and executes `__WFI()`. Internal 8 KB SRAM is 100% retained while total current drops to $< 35\ \mu\text{A}$.
+  - **Wakeup Restoration & Trap Prevention:** Concrete ISRs defined for `PWRWU_IRQHandler`, `GPAB_IRQHandler`, and `GPCDEF_IRQHandler` clearing source flags to prevent infinite `Default_Handler` hangs. Upon wake-up, `hal_system_on_wakeup()` restores clocks, waits for PLL stabilization (`CLK_CLKSTATUS_PLL_STB`), re-enables SysTick 1ms scheduler, drives `PC3 = LOW` (transceiver active), and disables wake interrupts.
+  - **Specification:** `doc/POWER_MANAGEMENT_NUC131.md`.
 - **Verification:**
   - `test_scenario_ignition_off_after_power_on`: Battery connect, key OFF (0x02 hold), deep sleep (0x00), and transceiver standby after 3.0s bus silence.
   - `test_scenario_ignition_silence_watchdog_forces_sleep_from_on`: Unconditional sleep enforcement from active IGN ON, ACC cut, CAN standby assertion, UART silencing, and CAN frame wake-up.
   - `test_scenario_ignition_economy_mode_forces_radio_off`: Economy mode 0x80 override, ACC shutdown, RD4 ignition lock.
   - `test_scenario_lights_off_side_light_on_headlights_on`: ILL output, illumination bit, brightness 15 -> 10, headlights.
   - `test_integration_hiworld_reverse_pipeline`: REVERSE output.
+  - **Live On-Chip Verification (Raise NUC131 via OpenOCD):** Flashed 18,952 bytes to `0x00002000` (100% verified). Confirmed execution hits `0x00003A1C` (`wfi` in `hal_system_enter_deep_sleep`) upon 3.0s bus silence, with `SCB_SCR = 0x00000004` (`SLEEPDEEP`), `CLK_PWRCON = 0x0000013C`, `GPIOA_DOUT = 0x00004CFF` (all triggers at 0V), and `GPIOC_DOUT = 0x000000CF` (`PC3 = 1` transceiver standby).
 
 ### 4.10 Protocol Connection, Handshake & Resync Lifecycle (`0x24`, `0xF0`, `0xFF`)
 - **Downlink Model Configuration (`0x24`):**

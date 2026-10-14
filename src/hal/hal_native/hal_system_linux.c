@@ -36,3 +36,7 @@ void hal_system_reboot(void) {
     printf("[SYS] Reboot invoked on desktop host. Exiting...\n");
     exit(0);
 }
+
+void hal_system_enter_deep_sleep(void) {
+    hal_delay_ms(10);
+}

@@ -202,6 +202,7 @@ const vehicle_state_t *can_router_get_state(void);
 bool can_router_reset_trip(uint8_t trip_index);
 bool can_router_query_alert_journal(void);
 bool can_router_is_bus_sleeping(void);
+void can_router_notify_wake(void);
 
 #ifdef __cplusplus
 }

@@ -36,6 +36,12 @@ int main(void) {
             activity = true;
         }
 
+        if (can_router_is_bus_sleeping()) {
+            hal_system_enter_deep_sleep();
+            can_router_notify_wake();
+            last_heartbeat = hal_get_tick_ms();
+        }
+
 #if defined(PLATFORM_LINUX)
         if (!activity) {
             hal_delay_ms(1);

@@ -110,6 +110,11 @@ hal_status_t hal_can_receive(can_frame_t *frame) {
 }
 
 void CAN0_IRQHandler(void) {
+    // Clear hardware CAN wake-up status flag if woke from sleep
+    if (CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk) {
+        CAN0->WU_STATUS = 0;
+    }
+
     uint32_t u32IIDRstatus = CAN0->IIDR;
 
     // Check if it's a status/error interrupt (reading STATUS clears it)
