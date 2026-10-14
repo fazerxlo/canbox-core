@@ -75,12 +75,12 @@ flowchart LR
 | **8. BSI Vehicle Alerts & Diagnostics** | 5 | 5 | 0 | 0 | 0 | **100%** |
 | **9. Central Personalization & Settings** | 4 | 2 | 2 | 0 | 0 | **50%** |
 | **10. Date & Time Synchronization** | 2 | 1 | 1 | 0 | 0 | **50%** |
-| **11. RD4 Audio & Multimedia Passthrough**| 4 | 0 | 2 | 2 | 0 | **0%** |
+| **11. RD4 Audio & Multimedia Passthrough**| 4 | 1 | 2 | 1 | 0 | **25%** |
 | **12. Dynamic Guidelines & Steering SAS**| 1 | 1 | 0 | 0 | 0 | **100%** |
 | **13. Powertrain & Hardware GPIO Synthesis**| 5 | 5 | 0 | 0 | 0 | **100%** |
 | **14. Dynamic CAN ID Pre-filtering & Router**| 1 | 1 | 0 | 0 | 0 | **100%** |
 | **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 0 | **100%** |
-| **Overall** | **48** | **39** | **6** | **3** | **0** | **81%** |
+| **Overall** | **48** | **40** | **6** | **2** | **0** | **83%** |
 
 ---
 
@@ -104,6 +104,7 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
 | `[x]` | `0x31` | **Dual-Zone Climate Status** | `0x0D` (13) | `0x1D0`<br>`0x1E3` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_hvac_hiworld`<br>`test_peugeot_407_rear_defrost_detection`<br>`test_integration_hiworld_outside_temp_pipeline`<br>Power, AC, auto, dual, defrost, fan (0..8), temps, AQS, airflow; outside temp from `0x0F6` byte 5 (raw*0.5-40 C, `0xFF` invalid) via `psa_decode_bsi_slow_0x0f6` in `src/profiles/profile_psa.c` -> payload[11] |
 | `[x]` | `0x41` | **Parking Radar Distance (OPS)** | `0x0D` (13) | `0x0E1` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center`<br>`test_integration_hiworld_radar_pipeline`<br>8 sensor bars (0..4 distance level); strictly CAN2004 `0x0E1` |
 | `[x]` | `0x42` | **PSA BSI Vehicle Alert DTCs** | `0x03` / `0x19` | `0x1A1`<br>`0x120` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_alert_single_abs`<br>`test_peugeot_407_alert_journal_multi`<br>Matches Section 5 DTC table; controlled via compile flag |
+| `[x]` | `0x56` | **RD4 Volume & Audio Settings (DSP)** | `0x0D` (13) | `0x1A5`<br>`0x1E5` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c`<br>`src/core/can_router.c` | `test_peugeot_407_rd4_volume`<br>`test_peugeot_407_rd4_audio_settings`<br>`test_peugeot_407_rd4_hiworld_frame_build`<br>`test_integration_hiworld_rd4_volume_and_audio_pipeline`<br>Spec: `doc/PEUGEOT_RD4_VOLUME_AND_DSP_SPEC.md`. Bias-63 level conversion (-9..0..+9 -> 0..9..18), EQ presets (0..5), loudness (0x10), speed-dependent volume boolean (0x01), master volume (0..30), activity flag decoding on `0x1A5` bits [7:5] (`0x00` active, `0xE0` idle unmuted, `0x80` mute), anti-flicker delta dispatch, and gated 1000ms passive sync |
 | `[x]` | `0x66` | **TPMS Direct Numeric Pressures** | `0x07` (7) | `0x3A1`<br>`0x361` | `src/profiles/peugeot_407.c`<br>`src/protocols/proto_hiworld_adapter.c` | `test_peugeot_407_tpms_hiworld_vector_1_nominal`<br>`test_integration_hiworld_tpms_pipeline`<br>4-wheel tire pressures in bar / deci-bar |
 | `[x]` | `0x71` | **Feature Enable Availability 1** | `0x03` (3) | Fixed / Config | `src/protocols/hiworld_connection.c` | `test_hiworld_verification_vector_3_feature_enables`<br>Reports supported vehicle feature bitmask (`0x60`, `0x12`) |
 | `[x]` | `0x72` | **Feature Enable Availability 2** | `0x09` (9) | Fixed / Config | `src/protocols/hiworld_connection.c` | `test_hiworld_verification_vector_3_feature_enables`<br>Reports supported feature bitmask (`0x00, 0x01, 0x80...`) |
@@ -335,6 +336,24 @@ Cross-referenced directly against `commands_and_payload_structure.md` and Androi
   - Preserves transceiver bus wake-up and inactivity watchdog (`s_can_inactivity_ticks`) upon detecting any bus traffic prior to rejection.
 - **Verification:**
   - Unit test `test_can_id_filter_enforcement` verifying profile rule ID acceptance, rejection of unmapped standard IDs (`0x7FF`, `0x111`, `0x260`), rejection of extended frames, and filter rebuild upon profile switching.
+
+### 4.12 RD4 Radio Audio & Volume Settings (DSP) (`Cmd 0x56`)
+- **Comfort CAN Telemetry Ingestion (125 kbps):**
+  - **CAN `0x1A5` (Volume Level & Activity State, DLC >= 1):** Decodes master volume ($0 \dots 30$, bits [4:0]) and knob activity from bits [7:5]:
+    - `0x00` (0b000): Knob actively rotating $\to$ sets `active_mode = 1`, `is_muted = false`, dispatches immediately.
+    - `0xE0` (0b111): Knob stationary / idle $\to$ sets `active_mode = 0` (dismisses volume OSD), `is_muted = false`. (Resolves false MUTE display bug from logs `dump_2026-10-14_19-51-25.log` where `0xEE`/`0xF0` top bits `0xE0` were misidentified as mute bit).
+    - `0x80` (0b100): Isolated bit 7 $\to$ explicit mute active (`is_muted = true`).
+  - **CAN `0x1E5` (Sound Settings, DLC >= 7):** Decodes Balance (`Byte 0`), Fader (`Byte 1`), Bass (`Byte 2`), and Treble (`Byte 4`) using bias-63 scaling into discrete $0 \dots 18$ steps ($\text{center} = 9$). Decodes Loudness toggle (`Byte 5` bit 6) and Speed-Dependent Volume boolean (`Byte 5` bits [2:0] == `0x07`). Decodes 6 equalizer presets from `Byte 6` bits [5:0] (`0x00`=None, `0x07`=Classical, `0x0B`=Jazz-Blues, `0x0F`=Pop-Rock, `0x13`=Vocals, `0x17`=Techno).
+- **Active Editing Mode & Transmission Rules:**
+  - Active mode detected from bitfields: Bass (2), Treble (3), Balance (4), Fader (5), Loudness (6), Speed Volume (7), Equalizer (8).
+  - Immediate dispatch on setting adjustments or sub-menu transitions (`active_mode = 2..8`).
+  - Menu Dismissal: Dispatches one frame with `active_mode = 0` when exiting the audio menu (`prev_mode >= 2` and `new_mode == 0`).
+  - Zero Jitter / Anti-Flicker: Suppresses transmission on identical repeated frames both in closed state and while actively navigating menus without parameter changes.
+  - Gated Passive Heartbeat Sync: Transmits cached audio state with `active_mode = 0` every 1000 ms strictly when `active_mode == 0`. Gated and suppressed during active editing (`active_mode != 0`) to prevent periodic timer from closing active menus (resolving the UI flickering bug from `dump_2026-10-14_19-50-36.log`).
+  - CAN Ground Truth as Single Source of Truth: In CAN `0x1E5`, the RD4 radio itself explicitly sets the active-mode bit while a menu is open and clears all active-mode bits to 0 upon menu timeout or user exit, serving as the direct authoritative signal for HUD open and dismissal without any artificial timers.
+- **Verification:**
+  - Unit tests: `test_peugeot_407_rd4_volume` (tests rotating `0x12`/`0x1F`, idle `0xEE`/`0xF0` unmuted mode 0, mute `0x92`), `test_peugeot_407_rd4_audio_settings` (tests all ranges, presets, mode detection, dismissal, and unchanged active frame anti-flicker), `test_peugeot_407_rd4_hiworld_frame_build`.
+  - End-to-end integration test: `test_integration_hiworld_rd4_volume_and_audio_pipeline` (verifies volume, sound settings, menu dismissal, 1000ms passive sync, anti-flicker suppression of mode 0 during active DSP editing, and `0xEE` idle volume unmuted dismissal).
 
 ### 4.15 Commercial Hardware Target Integration & Cadence Harmonization
 - **Drop-In Bare-Metal Targets (`platformio.ini`):**

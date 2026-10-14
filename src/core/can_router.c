@@ -8,6 +8,7 @@ static vehicle_state_t s_current_state;
 static vehicle_state_t s_last_sent_state;
 static uint16_t        s_tpms_periodic_timer = 0;
 static uint8_t         s_doors_periodic_timer = 0;
+static uint8_t         s_audio_sync_timer = 0;
 static uint16_t        s_bulk_resync_timer = 0;
 static bool            s_angle_reverse_synced = false;
 
@@ -46,8 +47,19 @@ bool can_router_is_id_allowed(uint32_t can_id) {
 void can_router_init(void) {
     memset(&s_current_state, 0, sizeof(s_current_state));
     memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
+    s_current_state.audio.master_volume = 15;
+    s_current_state.audio.bass = 9;
+    s_current_state.audio.treble = 9;
+    s_current_state.audio.balance = 9;
+    s_current_state.audio.fader = 9;
+    s_current_state.audio.eq_preset = 0;
+    s_current_state.audio.loudness = false;
+    s_current_state.audio.speed_volume = false;
+    s_current_state.audio.active_mode = 0;
+    s_last_sent_state.audio = s_current_state.audio;
     s_tpms_periodic_timer = 0;
     s_doors_periodic_timer = 0;
+    s_audio_sync_timer = 0;
     s_bulk_resync_timer = 0;
     s_angle_reverse_synced = false;
     s_initial_alerts_scanned = false;
@@ -321,6 +333,13 @@ void can_router_process_can(const can_frame_t *frame) {
 
         s_last_sent_state.alerts = s_current_state.alerts;
     }
+
+    // Immediately push audio settings updates on change
+    if (s_current_state.audio.updated) {
+        s_current_state.audio.updated = false;
+        hu_protocol_send_audio_settings(&s_current_state.audio);
+        s_last_sent_state.audio = s_current_state.audio;
+    }
 }
 
 void can_router_process_uart_byte(uint8_t byte) {
@@ -342,6 +361,7 @@ void can_router_periodic_100ms(void) {
             hal_gpio_write(GPIO_PIN_ILL_OUT, false);
             hal_gpio_write(GPIO_PIN_REVERSE_OUT, false);
             hal_gpio_write(GPIO_PIN_CAN_STBY, true); /* Silent/Standby mode */
+            s_audio_sync_timer = 0;
             s_can_bus_sleeping = true;
         }
     }
@@ -389,11 +409,32 @@ void can_router_periodic_100ms(void) {
         }
     }
 
+    // Periodic audio settings transmission:
+    // While inside an active DSP menu (active_mode >= 2), transmit every 1000ms (10 ticks)
+    // with the current active mode so the Head Unit display stays active and refreshed.
+    // When no menu is open (active_mode == 0), suppress 1 Hz periodic transmission to prevent
+    // unnecessary serial traffic (passive sync is handled via 60s bulk resync).
+    if (s_current_state.audio.valid) {
+        if (s_current_state.audio.active_mode >= 2) {
+            if (++s_audio_sync_timer >= 10) {
+                s_audio_sync_timer = 0;
+                hu_protocol_send_audio_settings(&s_current_state.audio);
+            }
+        } else {
+            s_audio_sync_timer = 0;
+        }
+    }
+
     // Periodic bulk state resync at 60 seconds (600 * 100ms = 60s)
     // Ensures Android Head Unit recovers state after a silent reboot or app restart
     if (++s_bulk_resync_timer >= 600) {
         s_bulk_resync_timer = 0;
         hu_protocol_send_doors(&s_current_state.doors);
+        if (s_current_state.audio.valid && s_current_state.audio.active_mode == 0) {
+            vehicle_audio_settings_t sync_audio = s_current_state.audio;
+            sync_audio.active_mode = 0;
+            hu_protocol_send_audio_settings(&sync_audio);
+        }
     }
 
     // BSI alert query timeout check (500ms / 5 ticks)

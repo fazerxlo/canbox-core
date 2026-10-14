@@ -1172,6 +1172,245 @@ void test_peugeot_407_jbl_amplifier(void) {
 }
 
 /* --------------------------------------------------------------------------
+ * 1.7b RD4 Radio Volume & Audio Settings (DSP) Tests
+ * -------------------------------------------------------------------------- */
+void test_peugeot_407_rd4_volume(void) {
+    vehicle_audio_settings_t audio;
+    memset(&audio, 0, sizeof(audio));
+    audio.master_volume = 15;
+
+    // 1. Invalid DLC (0 bytes) -> ignored
+    const uint8_t can_empty[] = { 0x00 };
+    psa_decode_rd4_volume_0x1a5(can_empty, 0, &audio);
+    TEST_ASSERT_FALSE(audio.valid);
+
+    // 2. Normal Volume Change: Vol=18, Unmuted
+    const uint8_t can_vol18[] = { 0x12 }; // 18 = 0x12
+    psa_decode_rd4_volume_0x1a5(can_vol18, sizeof(can_vol18), &audio);
+    TEST_ASSERT_TRUE(audio.valid);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(18, audio.master_volume);
+    TEST_ASSERT_FALSE(audio.is_muted);
+    TEST_ASSERT_EQUAL_UINT8(1, audio.active_mode);
+
+    // 3. Mute Toggle: Vol=18, Muted (0x80 | 18 = 0x92)
+    audio.updated = false;
+    const uint8_t can_mute[] = { 0x92 };
+    psa_decode_rd4_volume_0x1a5(can_mute, sizeof(can_mute), &audio);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(18, audio.master_volume);
+    TEST_ASSERT_TRUE(audio.is_muted);
+    TEST_ASSERT_EQUAL_UINT8(1, audio.active_mode);
+
+    // 4. Volume Clamping: 31 clamped to 30
+    audio.updated = false;
+    const uint8_t can_clamp[] = { 0x1F }; // 31
+    psa_decode_rd4_volume_0x1a5(can_clamp, sizeof(can_clamp), &audio);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(30, audio.master_volume);
+    TEST_ASSERT_FALSE(audio.is_muted);
+    TEST_ASSERT_EQUAL_UINT8(1, audio.active_mode);
+
+    // 5. Volume Stopped / Idle Frame (0xEE = 0xE0 | 14 from vehicle log):
+    // Bits [7:5] = 0xE0 means stopped, NOT muted! Dismisses volume mode 1 -> 0.
+    audio.updated = false;
+    const uint8_t can_idle[] = { 0xEE }; // Vol 14, stopped
+    psa_decode_rd4_volume_0x1a5(can_idle, sizeof(can_idle), &audio);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(14, audio.master_volume);
+    TEST_ASSERT_FALSE(audio.is_muted);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.active_mode);
+
+    // 6. Repeated Unchanged Idle Frame (0xEE): zero jitter / no UART spam
+    audio.updated = false;
+    psa_decode_rd4_volume_0x1a5(can_idle, sizeof(can_idle), &audio);
+    TEST_ASSERT_FALSE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(14, audio.master_volume);
+    TEST_ASSERT_FALSE(audio.is_muted);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.active_mode);
+
+    // 7. Idle Frame with Volume Change (0xF0 = 0xE0 | 16): Vol 16, unmuted, mode 0
+    audio.updated = false;
+    const uint8_t can_idle16[] = { 0xF0 }; // Vol 16, stopped
+    psa_decode_rd4_volume_0x1a5(can_idle16, sizeof(can_idle16), &audio);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(16, audio.master_volume);
+    TEST_ASSERT_FALSE(audio.is_muted);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.active_mode);
+}
+
+void test_peugeot_407_rd4_audio_settings(void) {
+    vehicle_audio_settings_t audio;
+    memset(&audio, 0, sizeof(audio));
+
+    // 1. Invalid DLC (< 7 bytes) -> ignored
+    const uint8_t can_short[] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_short, 6, &audio);
+    TEST_ASSERT_FALSE(audio.valid);
+
+    // 2. All Neutral / Center (bias 63 -> 9): Bal=9, Fad=9, Bass=9, Treb=9, Loud=OFF, SpdVol=OFF, EQ=None, Mode=0
+    const uint8_t can_neutral[] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_neutral, sizeof(can_neutral), &audio);
+    TEST_ASSERT_TRUE(audio.valid);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(9, audio.balance);
+    TEST_ASSERT_EQUAL_UINT8(9, audio.fader);
+    TEST_ASSERT_EQUAL_UINT8(9, audio.bass);
+    TEST_ASSERT_EQUAL_UINT8(9, audio.treble);
+    TEST_ASSERT_FALSE(audio.loudness);
+    TEST_ASSERT_FALSE(audio.speed_volume);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.eq_preset);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.active_mode);
+
+    // 3. Minimums (-9 -> 0): raw 54 (0x36)
+    audio.updated = false;
+    const uint8_t can_min[] = { 0x36, 0x36, 0x36, 0x00, 0x36, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_min, sizeof(can_min), &audio);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.balance);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.fader);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.bass);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.treble);
+
+    // 4. Maximums (+9 -> 18): raw 72 (0x48)
+    audio.updated = false;
+    const uint8_t can_max[] = { 0x48, 0x48, 0x48, 0x00, 0x48, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_max, sizeof(can_max), &audio);
+    TEST_ASSERT_TRUE(audio.updated);
+    TEST_ASSERT_EQUAL_UINT8(18, audio.balance);
+    TEST_ASSERT_EQUAL_UINT8(18, audio.fader);
+    TEST_ASSERT_EQUAL_UINT8(18, audio.bass);
+    TEST_ASSERT_EQUAL_UINT8(18, audio.treble);
+
+    // 5. Clamping out-of-bounds (< 54 and > 72)
+    const uint8_t can_oob[] = { 0x20, 0x70, 0x3F, 0x00, 0x3F, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_oob, sizeof(can_oob), &audio);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.balance);  // 32 (< 54) clamped to 0
+    TEST_ASSERT_EQUAL_UINT8(18, audio.fader);   // 112 (> 72) clamped to 18
+
+    // 6. Switches: Loudness ON (0x40), Speed Volume ON (0x07)
+    const uint8_t can_switches[] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x47, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_switches, sizeof(can_switches), &audio);
+    TEST_ASSERT_TRUE(audio.loudness);
+    TEST_ASSERT_TRUE(audio.speed_volume);
+
+    // 7. EQ Presets
+    const uint8_t eq_tests[5][2] = {
+        { 0x07, 1 }, // Classical
+        { 0x0B, 2 }, // Jazz-Blues
+        { 0x0F, 3 }, // Pop-Rock
+        { 0x13, 4 }, // Vocals
+        { 0x17, 5 }, // Techno
+    };
+    for (int i = 0; i < 5; i++) {
+        uint8_t can_eq[7] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x00, eq_tests[i][0] };
+        psa_decode_rd4_audio_settings_0x1e5(can_eq, sizeof(can_eq), &audio);
+        TEST_ASSERT_EQUAL_UINT8(eq_tests[i][1], audio.eq_preset);
+    }
+
+    // 8. Active Mode Detection:
+    // Bass active (Byte 2 Bit 7) -> Mode 2
+    uint8_t can_mode2[] = { 0x3F, 0x3F, 0xBF, 0x00, 0x3F, 0x00, 0x00 }; // 0x3F | 0x80 = 0xBF
+    psa_decode_rd4_audio_settings_0x1e5(can_mode2, sizeof(can_mode2), &audio);
+    TEST_ASSERT_EQUAL_UINT8(2, audio.active_mode);
+    TEST_ASSERT_TRUE(audio.updated);
+
+    // Treble active (Byte 4 Bit 7) -> Mode 3
+    uint8_t can_mode3[] = { 0x3F, 0x3F, 0x3F, 0x00, 0xBF, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_mode3, sizeof(can_mode3), &audio);
+    TEST_ASSERT_EQUAL_UINT8(3, audio.active_mode);
+
+    // Balance active (Byte 0 Bit 7) -> Mode 4
+    uint8_t can_mode4[] = { 0xBF, 0x3F, 0x3F, 0x00, 0x3F, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_mode4, sizeof(can_mode4), &audio);
+    TEST_ASSERT_EQUAL_UINT8(4, audio.active_mode);
+
+    // Fader active (Byte 1 Bit 7) -> Mode 5
+    uint8_t can_mode5[] = { 0x3F, 0xBF, 0x3F, 0x00, 0x3F, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_mode5, sizeof(can_mode5), &audio);
+    TEST_ASSERT_EQUAL_UINT8(5, audio.active_mode);
+
+    // Loudness active (Byte 5 Bit 7) -> Mode 6
+    uint8_t can_mode6[] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x80, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_mode6, sizeof(can_mode6), &audio);
+    TEST_ASSERT_EQUAL_UINT8(6, audio.active_mode);
+
+    // Speed Volume active (Byte 5 Bit 4) -> Mode 7
+    uint8_t can_mode7[] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x10, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_mode7, sizeof(can_mode7), &audio);
+    TEST_ASSERT_EQUAL_UINT8(7, audio.active_mode);
+
+    // Equalizer active (Byte 6 Bit 6) -> Mode 8
+    uint8_t can_mode8[] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x00, 0x40 };
+    psa_decode_rd4_audio_settings_0x1e5(can_mode8, sizeof(can_mode8), &audio);
+    TEST_ASSERT_EQUAL_UINT8(8, audio.active_mode);
+
+    // 9. Menu Dismissal: transition from active (Mode 8) to closed (Mode 0)
+    audio.updated = false;
+    const uint8_t can_dismiss[] = { 0x3F, 0x3F, 0x3F, 0x00, 0x3F, 0x00, 0x00 };
+    psa_decode_rd4_audio_settings_0x1e5(can_dismiss, sizeof(can_dismiss), &audio);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.active_mode);
+    TEST_ASSERT_TRUE(audio.updated); // Must trigger update for menu dismissal
+
+    // 10. Menu Closed / Inactive Repeated Frame: zero jitter / no update spam
+    audio.updated = false;
+    psa_decode_rd4_audio_settings_0x1e5(can_dismiss, sizeof(can_dismiss), &audio);
+    TEST_ASSERT_EQUAL_UINT8(0, audio.active_mode);
+    TEST_ASSERT_FALSE(audio.updated); // Unchanged closed state -> no update
+
+    // 11. Active Mode Repeated Unchanged Frame: zero flicker / no redundant update spam while in menu
+    psa_decode_rd4_audio_settings_0x1e5(can_mode2, sizeof(can_mode2), &audio); // Re-enter Bass mode
+    TEST_ASSERT_EQUAL_UINT8(2, audio.active_mode);
+    TEST_ASSERT_TRUE(audio.updated);
+    audio.updated = false;
+    psa_decode_rd4_audio_settings_0x1e5(can_mode2, sizeof(can_mode2), &audio); // Repeated unchanged frame in mode 2
+    TEST_ASSERT_EQUAL_UINT8(2, audio.active_mode);
+    TEST_ASSERT_FALSE(audio.updated); // Must NOT trigger redundant update while in menu!
+}
+
+void test_peugeot_407_rd4_hiworld_frame_build(void) {
+    vehicle_audio_settings_t audio;
+    memset(&audio, 0, sizeof(audio));
+    audio.master_volume = 18;
+    audio.is_muted = false;
+    audio.bass = 11;
+    audio.treble = 9;
+    audio.balance = 9;
+    audio.fader = 8;
+    audio.eq_preset = 3;
+    audio.loudness = true;
+    audio.speed_volume = true;
+    audio.active_mode = 2; // Bass active
+
+    uint8_t out[16];
+    size_t len = build_hiworld_audio_settings(&audio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(13, len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, out[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, out[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x08, out[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x56, out[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x02, out[4]);  // Unmuted (0x00) | Mode 2 = 0x02
+    TEST_ASSERT_EQUAL_UINT8(11, out[5]);  // Bass
+    TEST_ASSERT_EQUAL_UINT8(9, out[6]);   // Treble
+    TEST_ASSERT_EQUAL_UINT8(9, out[7]);   // Balance
+    TEST_ASSERT_EQUAL_UINT8(8, out[8]);   // Fader
+    TEST_ASSERT_EQUAL_UINT8(3, out[9]);   // EQ Preset
+    TEST_ASSERT_EQUAL_HEX8(0x11, out[10]); // Loudness (0x10) | SpeedVol (0x01)
+    TEST_ASSERT_EQUAL_UINT8(18, out[11]); // Master Volume
+    TEST_ASSERT_EQUAL_HEX8(0xAA, out[12]); // Checksum
+
+    // Muted test:
+    audio.is_muted = true;
+    len = build_hiworld_audio_settings(&audio, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(13, len);
+    TEST_ASSERT_EQUAL_HEX8(0x82, out[4]); // Muted (0x80) | Mode 2 = 0x82
+    TEST_ASSERT_EQUAL_HEX8(0x2A, out[12]); // Checksum: 0xAA + 0x80 = 0x12A & 0xFF = 0x2A
+
+    // Buffer too small -> return 0
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_audio_settings(&audio, out, 12));
+}
+
+/* --------------------------------------------------------------------------
  * 1.8 RD4 Radio & CD Changer Tests
  * -------------------------------------------------------------------------- */
 void test_peugeot_407_cd_changer_and_rds(void) {

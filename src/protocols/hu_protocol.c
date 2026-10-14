@@ -154,6 +154,12 @@ void hu_protocol_send_alerts_summary(const vehicle_alert_item_t *alerts, uint8_t
     }
 }
 
+void hu_protocol_send_audio_settings(const vehicle_audio_settings_t *audio) {
+    if (s_active_driver && s_active_driver->send_audio_settings) {
+        s_active_driver->send_audio_settings(audio);
+    }
+}
+
 void hu_protocol_send_heartbeat(void) {
     if (s_active_driver && s_active_driver->send_heartbeat) {
         s_active_driver->send_heartbeat();

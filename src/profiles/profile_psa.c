@@ -401,6 +401,16 @@ static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, veh
     }
 }
 
+static void psa_decode_rd4_volume_0x1a5_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_decode_rd4_volume_0x1a5(frame->data, frame->dlc, &state->audio);
+}
+
+static void psa_decode_rd4_audio_settings_0x1e5_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_decode_rd4_audio_settings_0x1e5(frame->data, frame->dlc, &state->audio);
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
@@ -412,10 +422,12 @@ static const profile_can_rule_t s_psa_rules[] = {
     { 0x128,                         psa_decode_wheel_keys_0x128 },
     { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
     { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },
+    { PSA_CAN_ID_RD4_VOLUME,         psa_decode_rd4_volume_0x1a5_profile },
     { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
     { 0x0B6,                         psa_decode_engine_speed_0x0b6 },
     { PSA_CAN_ID_CLIMATE_HVAC,       psa_decode_hvac_0x1d0_profile },
     { 0x1E3,                         psa_decode_hvac_0x1e3_profile },
+    { PSA_CAN_ID_RD4_AUDIO_SETTINGS, psa_decode_rd4_audio_settings_0x1e5_profile },
     { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
     { PSA_CAN_ID_TRIP_INSTANT,       psa_decode_trip_0x221_profile },
     { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },

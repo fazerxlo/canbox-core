@@ -1177,6 +1177,155 @@ size_t build_raise_amplifier(const jbl_amplifier_state_t *st, uint8_t *out, size
 }
 
 /* --------------------------------------------------------------------------
+ * 1.7b RD4 Radio Volume & Audio Settings (DSP)
+ * -------------------------------------------------------------------------- */
+static inline uint8_t rd4_clamp18(int val) {
+    if (val < 0) return 0;
+    if (val > 18) return 18;
+    return (uint8_t)val;
+}
+
+void psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio) {
+    if (!data || !audio || dlc < 1) {
+        return;
+    }
+
+    uint8_t new_vol = data[0] & 0x1F;
+    if (new_vol > 30) {
+        new_vol = 30;
+    }
+
+    /* Bits [7:5]:
+     * 0x00 (0b000) -> Volume knob is actively rotating / changing
+     * 0xE0 (0b111) -> Volume knob is idle / stationary
+     * 0x80 (0b100) -> Mute active (isolated bit 7)
+     */
+    uint8_t status_flags = data[0] & 0xE0;
+    bool is_turning = (status_flags == 0x00);
+    bool is_muted   = (status_flags == 0x80);
+
+    uint8_t prev_mode = audio->active_mode;
+    uint8_t new_mode;
+    if (is_turning || is_muted) {
+        new_mode = 1; /* Master volume active */
+    } else if (prev_mode == 1) {
+        new_mode = 0; /* Stopped rotating -> dismiss volume OSD */
+    } else {
+        new_mode = prev_mode; /* Retain active DSP mode if user was in DSP menu */
+    }
+
+    bool changed = (!audio->valid) ||
+                   (new_vol != audio->master_volume) ||
+                   (is_muted != audio->is_muted) ||
+                   (new_mode != prev_mode);
+
+    audio->master_volume = new_vol;
+    audio->is_muted      = is_muted;
+    audio->active_mode   = new_mode;
+    audio->valid         = true;
+
+    if (changed) {
+        audio->updated = true;
+    }
+}
+
+void psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio) {
+    if (!data || !audio || dlc < 7) {
+        return;
+    }
+
+    uint8_t new_bal   = rd4_clamp18(((int)(data[0] & 0x7F) - 63) + 9);
+    uint8_t new_fad   = rd4_clamp18(((int)(data[1] & 0x7F) - 63) + 9);
+    uint8_t new_bass  = rd4_clamp18(((int)(data[2] & 0x7F) - 63) + 9);
+    uint8_t new_treb  = rd4_clamp18(((int)(data[4] & 0x7F) - 63) + 9);
+    bool    new_loud  = (data[5] & 0x40) != 0;
+    bool    new_spd   = ((data[5] & 0x07) == 0x07);
+
+    uint8_t new_eq;
+    switch (data[6] & 0xBF) {
+        case 0x07: new_eq = 1; break; /* Classical */
+        case 0x0B: new_eq = 2; break; /* Jazz-Blues */
+        case 0x0F: new_eq = 3; break; /* Pop-Rock */
+        case 0x13: new_eq = 4; break; /* Vocals */
+        case 0x17: new_eq = 5; break; /* Techno */
+        default:   new_eq = 0; break; /* None */
+    }
+
+    uint8_t dsp_mode = 0;
+    if (data[2] & 0x80)      dsp_mode = 2; /* Bass */
+    else if (data[4] & 0x80) dsp_mode = 3; /* Treble */
+    else if (data[0] & 0x80) dsp_mode = 4; /* Balance */
+    else if (data[1] & 0x80) dsp_mode = 5; /* Fader */
+    else if (data[5] & 0x80) dsp_mode = 6; /* Loudness */
+    else if (data[5] & 0x10) dsp_mode = 7; /* Speed Volume */
+    else if (data[6] & 0x40) dsp_mode = 8; /* Equalizer */
+    else                     dsp_mode = 0; /* None / Closed */
+
+    uint8_t prev_mode = audio->active_mode;
+    uint8_t new_mode;
+    if (dsp_mode >= 2) {
+        new_mode = dsp_mode;
+    } else if (prev_mode >= 2) {
+        new_mode = 0; /* DSP menu dismissed / closed */
+    } else {
+        new_mode = prev_mode; /* Retain volume active mode (1) or idle (0) */
+    }
+
+    bool values_changed = (!audio->valid) ||
+                          (audio->balance != new_bal) ||
+                          (audio->fader != new_fad) ||
+                          (audio->bass != new_bass) ||
+                          (audio->treble != new_treb) ||
+                          (audio->loudness != new_loud) ||
+                          (audio->speed_volume != new_spd) ||
+                          (audio->eq_preset != new_eq);
+
+    bool mode_changed = (new_mode != prev_mode);
+
+    audio->balance      = new_bal;
+    audio->fader        = new_fad;
+    audio->bass         = new_bass;
+    audio->treble       = new_treb;
+    audio->loudness     = new_loud;
+    audio->speed_volume = new_spd;
+    audio->eq_preset    = new_eq;
+    audio->active_mode  = new_mode;
+    audio->valid        = true;
+
+    if (mode_changed || values_changed) {
+        audio->updated = true;
+    }
+}
+
+size_t build_hiworld_audio_settings(const vehicle_audio_settings_t *audio, uint8_t *out, size_t max_len) {
+    if (!audio || !out || max_len < 13) {
+        return 0;
+    }
+
+    out[0] = 0x5A;
+    out[1] = 0xA5;
+    out[2] = 0x08; /* Length */
+    out[3] = 0x56; /* Opcode Cmd 0x56 */
+
+    out[4] = (uint8_t)((audio->is_muted ? 0x80 : 0x00) | (audio->active_mode & 0x0F));
+    out[5] = audio->bass;
+    out[6] = audio->treble;
+    out[7] = audio->balance;
+    out[8] = audio->fader;
+    out[9] = audio->eq_preset;
+    out[10] = (uint8_t)((audio->loudness ? 0x10 : 0x00) | (audio->speed_volume ? 0x01 : 0x00));
+    out[11] = audio->master_volume;
+
+    uint16_t sum = (uint16_t)(out[2] + out[3]);
+    for (size_t i = 4; i < 12; i++) {
+        sum = (uint16_t)(sum + out[i]);
+    }
+    out[12] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 13;
+}
+
+/* --------------------------------------------------------------------------
  * 1.8 RD4 Radio & CD Changer Media Data
  * -------------------------------------------------------------------------- */
 void psa_decode_cd_changer_0x3a6(const uint8_t *data, uint8_t dlc, cd_changer_state_t *cdc) {

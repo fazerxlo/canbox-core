@@ -27,6 +27,7 @@ void hu_protocol_send_reverse(bool reverse_active);
 void hu_protocol_send_steering_angle(int16_t angle_deg);
 void hu_protocol_send_alert_single(const vehicle_alert_item_t *alert);
 void hu_protocol_send_alerts_summary(const vehicle_alert_item_t *alerts, uint8_t count);
+void hu_protocol_send_audio_settings(const vehicle_audio_settings_t *audio);
 
 #ifdef __cplusplus
 }

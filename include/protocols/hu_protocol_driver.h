@@ -38,6 +38,7 @@ typedef struct {
     void           (*send_steering_angle)(int16_t angle_deg);
     void           (*send_alert_single)(const vehicle_alert_item_t *alert);
     void           (*send_alerts_summary)(const vehicle_alert_item_t *alerts, uint8_t count);
+    void           (*send_audio_settings)(const vehicle_audio_settings_t *audio);
     void           (*send_heartbeat)(void);
 } hu_protocol_driver_t;
 

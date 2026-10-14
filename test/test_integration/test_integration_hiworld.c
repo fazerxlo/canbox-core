@@ -909,3 +909,132 @@ void test_integration_hiworld_outside_temp_pipeline(void) {
     can_router_process_can(&bsi_0f6);
     TEST_ASSERT_EQUAL_HEX8(0x7C, can_router_get_state()->climate.outdoor_temp_raw);
 }
+
+void test_integration_hiworld_rd4_volume_and_audio_pipeline(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+    can_router_rebuild_filter();
+
+    uint8_t rx_buf[256];
+    (void)read_uart_output(rx_buf, sizeof(rx_buf)); /* Drain pending UART */
+
+    // 1. Inject Volume Frame 0x1A5: Vol=18 (0x12), Unmuted
+    can_frame_t frame_vol = {
+        .id = 0x1A5,
+        .dlc = 1,
+        .data = { 0x12 }
+    };
+    can_router_process_can(&frame_vol);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(13, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x08, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x56, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[4]); // Mode 1 (Volume active), unmuted
+    TEST_ASSERT_EQUAL_UINT8(18, rx_buf[11]); // Master Volume
+
+    // 2. Inject Sound Settings 0x1E5: Bass active (0xBF = 0x3F | 0x80), Treble=9, Bal=9, Fad=9, Loudness=ON, SpdVol=ON
+    can_frame_t frame_audio = {
+        .id = 0x1E5,
+        .dlc = 7,
+        .data = { 0x3F, 0x3F, 0xBF, 0x00, 0x3F, 0x47, 0x00 }
+    };
+    can_router_process_can(&frame_audio);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(13, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x02, rx_buf[4]); // Mode 2 (Bass active), unmuted
+    TEST_ASSERT_EQUAL_UINT8(9, rx_buf[5]);  // Bass = 9
+    TEST_ASSERT_EQUAL_UINT8(9, rx_buf[6]);  // Treble = 9
+    TEST_ASSERT_EQUAL_UINT8(9, rx_buf[7]);  // Balance = 9
+    TEST_ASSERT_EQUAL_UINT8(9, rx_buf[8]);  // Fader = 9
+    TEST_ASSERT_EQUAL_HEX8(0x11, rx_buf[10]); // Loudness ON (0x10) | SpdVol ON (0x01)
+    TEST_ASSERT_EQUAL_UINT8(18, rx_buf[11]); // Master volume retained
+
+    // 3. Menu Dismissal: 0x1E5 arrives with all active mode bits = 0
+    frame_audio.data[2] = 0x3F; // Bass active bit cleared
+    can_router_process_can(&frame_audio);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(13, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[4]); // Mode 0 (Menu dismissal HUD dismiss)
+
+    // 4. Repeated unchanged 0x1E5 frame: zero jitter / no UART traffic
+    can_router_process_can(&frame_audio);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    // 5. Idle Menu Closed Suppression: 10 ticks of can_router_periodic_100ms() MUST NOT emit 0x56 when idle
+    for (int i = 0; i < 10; i++) {
+        can_router_periodic_100ms();
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool idle_audio_sync_sent = false;
+    for (size_t i = 0; i + 13 <= rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i + 1] == 0xA5 && rx_buf[i + 2] == 0x08 && rx_buf[i + 3] == 0x56) {
+            idle_audio_sync_sent = true;
+            break;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(idle_audio_sync_sent, "Audio Cmd 0x56 was unexpectedly sent periodically while menu was closed!");
+
+    // 6. Active Menu Refresh: while active_mode >= 2 (e.g. Bass Mode 2 or Balance Mode 4),
+    // periodic timer MUST transmit Cmd 0x56 every 1000ms with the active mode to keep HU menu open!
+    frame_audio.data[2] = 0xBF; // Re-enter Bass active mode (Mode 2)
+    can_router_process_can(&frame_audio);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(13, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x02, rx_buf[4]); // Mode 2
+
+    // Run 10 ticks (1000ms) of periodic timer while in active mode
+    for (int i = 0; i < 9; i++) {
+        can_router_periodic_100ms();
+    }
+    (void)read_uart_output(rx_buf, sizeof(rx_buf)); // Drain heartbeats
+
+    // 10th tick must fire active menu refresh
+    can_router_periodic_100ms();
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool active_refresh_sent = false;
+    for (size_t i = 0; i + 13 <= rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i + 1] == 0xA5 && rx_buf[i + 2] == 0x08 && rx_buf[i + 3] == 0x56) {
+            TEST_ASSERT_EQUAL_HEX8(0x02, rx_buf[i + 4]); // Must be Mode 2 (NOT 0!)
+            TEST_ASSERT_EQUAL_UINT8(18, rx_buf[i + 11]); // Master Vol
+            active_refresh_sent = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(active_refresh_sent, "Periodic timer failed to refresh active DSP menu after 1000ms!");
+    TEST_ASSERT_EQUAL_UINT8(2, can_router_get_state()->audio.active_mode); // State must retain mode 2!
+
+    // 7. Volume knob stopped / idle frame (0xEE = 0xE0 | 14 from vehicle log):
+    // Must dismiss volume mode 1 -> 0 WITHOUT sending mute bit (D0 must be 0x00, NOT 0x80)
+    can_frame_t frame_vol_turning = {
+        .id = 0x1A5,
+        .dlc = 1,
+        .data = { 0x0F } // Vol 15, rotating
+    };
+    can_router_process_can(&frame_vol_turning);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(13, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[4]); // Mode 1, unmuted
+    TEST_ASSERT_EQUAL_UINT8(15, rx_buf[11]);
+
+    can_frame_t frame_vol_stopped = {
+        .id = 0x1A5,
+        .dlc = 1,
+        .data = { 0xEE } // Vol 14, stopped / idle (0xE0 | 14)
+    };
+    can_router_process_can(&frame_vol_stopped);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(13, rx_len);
+    TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[4]); // Dismissal: Mode 0, unmuted (0x00, NOT 0x80!)
+    TEST_ASSERT_EQUAL_UINT8(14, rx_buf[11]); // Master Vol = 14
+
+    // Repeated identical idle frame: zero UART traffic
+    can_router_process_can(&frame_vol_stopped);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+}

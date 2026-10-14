@@ -27,8 +27,10 @@ extern "C" {
 #define PSA_CAN_ID_JBL_AMPLIFIER    0x1A0
 #define PSA_CAN_ID_ALERT_MESSAGE    0x1A1
 #define PSA_CAN_ID_TRIP1            0x1A5
+#define PSA_CAN_ID_RD4_VOLUME       0x1A5
 #define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
+#define PSA_CAN_ID_RD4_AUDIO_SETTINGS 0x1E5
 #define PSA_CAN_ID_STALK_21F        0x21F
 #define PSA_CAN_ID_DOORS_BODY_220   0x220
 #define PSA_CAN_ID_DOORS_BODY       0x220
@@ -346,6 +348,13 @@ typedef struct {
 
 void psa_decode_amplifier_0x1a0(const uint8_t *data, uint8_t dlc, jbl_amplifier_state_t *amp);
 size_t build_raise_amplifier(const jbl_amplifier_state_t *st, uint8_t *out, size_t max_len);
+
+/* --------------------------------------------------------------------------
+ * 1.7b RD4 Radio Volume & Audio Settings (DSP)
+ * -------------------------------------------------------------------------- */
+void psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
+void psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
+size_t build_hiworld_audio_settings(const vehicle_audio_settings_t *audio, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.8 RD4 Radio & CD Changer Media Data

@@ -73,6 +73,9 @@ void test_peugeot_407_psa_doors_ctx_pipeline(void);
 void test_peugeot_407_hiworld_doors_boundary_checks(void);
 void test_peugeot_407_steering_wheel_angle(void);
 void test_peugeot_407_jbl_amplifier(void);
+void test_peugeot_407_rd4_volume(void);
+void test_peugeot_407_rd4_audio_settings(void);
+void test_peugeot_407_rd4_hiworld_frame_build(void);
 void test_peugeot_407_cd_changer_and_rds(void);
 
 // Peugeot 407 SPEC_02 test declarations
@@ -200,6 +203,9 @@ int main(void) {
     RUN_TEST(test_peugeot_407_hiworld_doors_boundary_checks);
     RUN_TEST(test_peugeot_407_steering_wheel_angle);
     RUN_TEST(test_peugeot_407_jbl_amplifier);
+    RUN_TEST(test_peugeot_407_rd4_volume);
+    RUN_TEST(test_peugeot_407_rd4_audio_settings);
+    RUN_TEST(test_peugeot_407_rd4_hiworld_frame_build);
     RUN_TEST(test_peugeot_407_cd_changer_and_rds);
 
     // Peugeot 407 SPEC_02 Extended Unit Tests & Verification Vectors

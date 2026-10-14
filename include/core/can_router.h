@@ -160,7 +160,22 @@ typedef struct {
     bool                 journal_updated;  /* Summary list changed */
 } vehicle_alerts_t;
 
-typedef vehicle_alerts_t alerts_state_t;
+typedef struct {
+    uint8_t master_volume;  /* 0..30 */
+    bool    is_muted;       /* true if muted */
+    uint8_t bass;           /* 0..18, 9 = Center */
+    uint8_t treble;         /* 0..18, 9 = Center */
+    uint8_t balance;        /* 0..18, 9 = Center */
+    uint8_t fader;          /* 0..18, 9 = Center */
+    uint8_t eq_preset;      /* 0..5 */
+    bool    loudness;       /* true/false */
+    bool    speed_volume;   /* true/false (ON/OFF only) */
+    uint8_t active_mode;    /* 0..8 */
+    bool    valid;
+    bool    updated;
+} vehicle_audio_settings_t;
+
+typedef vehicle_audio_settings_t audio_settings_state_t;
 
 typedef struct {
     vehicle_doors_t          doors;
@@ -172,6 +187,7 @@ typedef struct {
     vehicle_trip_t           trip;
     vehicle_radar_t          radar;
     vehicle_alerts_t         alerts;
+    vehicle_audio_settings_t audio;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;

@@ -523,6 +523,38 @@ static void hiworld_send_alerts_summary(const vehicle_alert_item_t *alerts, uint
 #endif
 }
 
+static void hiworld_send_audio_settings(const vehicle_audio_settings_t *audio) {
+    if (!audio) return;
+    ensure_hiworld_initialized();
+
+    /* Hiworld Audio/DSP Settings (Cmd 0x56): 8 payload bytes
+     * Byte 0: (is_muted ? 0x80 : 0x00) | (active_mode & 0x0F)
+     * Byte 1: Bass (0..18, 9 = Center)
+     * Byte 2: Treble (0..18, 9 = Center)
+     * Byte 3: Balance (0..18, 9 = Center)
+     * Byte 4: Fader (0..18, 9 = Center)
+     * Byte 5: EQ Preset Profile (0=None, 1=Classical, 2=Jazz-Blues, 3=Pop-Rock, 4=Vocals, 5=Techno)
+     * Byte 6: Flags: Bit 4 (0x10): Loudness (1=ON, 0=OFF); Bit 0 (0x01): Speed-Dependent Volume (1=ON, 0=OFF)
+     * Byte 7: Master Volume (0..30)
+     */
+    uint8_t payload[8];
+    payload[0] = (uint8_t)((audio->is_muted ? 0x80 : 0x00) | (audio->active_mode & 0x0F));
+    payload[1] = audio->bass;
+    payload[2] = audio->treble;
+    payload[3] = audio->balance;
+    payload[4] = audio->fader;
+    payload[5] = audio->eq_preset;
+    payload[6] = (uint8_t)((audio->loudness ? 0x10 : 0x00) | (audio->speed_volume ? 0x01 : 0x00));
+    payload[7] = audio->master_volume;
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_AUDIO_SETTINGS, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -544,5 +576,6 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_steering_angle = hiworld_send_steering_angle,
     .send_alert_single = hiworld_send_alert_single,
     .send_alerts_summary = hiworld_send_alerts_summary,
+    .send_audio_settings = hiworld_send_audio_settings,
     .send_heartbeat = hiworld_send_heartbeat,
 };
