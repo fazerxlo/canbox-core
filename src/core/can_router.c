@@ -355,52 +355,65 @@ void can_router_process_can(const can_frame_t *frame) {
     if (s_current_state.media.radio.updated) {
         s_current_state.media.radio.updated = false;
 
-        bool radio_changed = false;
-        if (s_current_state.media.radio.source_mode >= 0x20) {
-            /* External sources (AUX, CD, CDC, OFF): only source_mode or power_status changes matter */
-            if (s_current_state.media.radio.source_mode != s_last_sent_state.media.radio.source_mode ||
-                s_current_state.media.radio.power_status != s_last_sent_state.media.radio.power_status) {
-                radio_changed = true;
-            }
-        } else {
-            /* Radio tuner mode: any change in frequency, band, preset, indicators, name, power, or source */
-            if (memcmp(&s_current_state.media.radio, &s_last_sent_state.media.radio, sizeof(vehicle_radio_t)) != 0) {
-                radio_changed = true;
-            }
-        }
+        /* If RD4 radio is off, do NOT send any CD/Tuner frames to HU */
+        bool is_radio_off = (s_current_state.radio_present && !s_current_state.radio_on);
 
-        if (radio_changed) {
+        if (is_radio_off) {
             uint8_t old_src = s_last_sent_state.media.radio.source_mode;
-            uint8_t new_src = s_current_state.media.radio.source_mode;
-
-            /* If transitioning away from CD (0x30) or CDC (0x31), notify HU that CD playback has stopped */
-            if ((old_src == 0x30 || old_src == 0x31) && (new_src != 0x30 && new_src != 0x31)) {
+            if (old_src == 0x30 || old_src == 0x31) {
                 s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
-                hu_protocol_send_media_state(&s_current_state.media.cdc);
                 s_last_sent_state.media.cdc = s_current_state.media.cdc;
             }
-
-            hu_protocol_send_radio_state(&s_current_state.media.radio);
-
-            /* If transitioning to radio mode, also refresh presets and radio text */
-            if (old_src >= 0x20 && new_src < 0x20) {
-                hu_protocol_send_radio_presets(&s_current_state.media.radio);
-                if (s_current_state.media.radio.radio_text_len > 0) {
-                    hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+            s_last_sent_state.media.radio = s_current_state.media.radio;
+        } else {
+            bool radio_changed = false;
+            if (s_current_state.media.radio.source_mode >= 0x20) {
+                /* External sources (AUX, CD, CDC, OFF): only source_mode or power_status changes matter */
+                if (s_current_state.media.radio.source_mode != s_last_sent_state.media.radio.source_mode ||
+                    s_current_state.media.radio.power_status != s_last_sent_state.media.radio.power_status) {
+                    radio_changed = true;
+                }
+            } else {
+                /* Radio tuner mode: any change in frequency, band, preset, indicators, name, power, or source */
+                if (memcmp(&s_current_state.media.radio, &s_last_sent_state.media.radio, sizeof(vehicle_radio_t)) != 0) {
+                    radio_changed = true;
                 }
             }
 
-            s_last_sent_state.media.radio = s_current_state.media.radio;
-        } else if (s_current_state.media.radio.source_mode >= 0x20) {
-            /* Keep cached radio state aligned without sending serial frames */
-            s_last_sent_state.media.radio = s_current_state.media.radio;
+            if (radio_changed) {
+                uint8_t old_src = s_last_sent_state.media.radio.source_mode;
+                uint8_t new_src = s_current_state.media.radio.source_mode;
+
+                /* If transitioning away from CD (0x30) or CDC (0x31), notify HU that CD playback has stopped */
+                if ((old_src == 0x30 || old_src == 0x31) && (new_src != 0x30 && new_src != 0x31)) {
+                    s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
+                    hu_protocol_send_media_state(&s_current_state.media.cdc);
+                    s_last_sent_state.media.cdc = s_current_state.media.cdc;
+                }
+
+                hu_protocol_send_radio_state(&s_current_state.media.radio);
+
+                /* If transitioning to radio mode, also refresh presets and radio text */
+                if (old_src >= 0x20 && new_src < 0x20) {
+                    hu_protocol_send_radio_presets(&s_current_state.media.radio);
+                    if (s_current_state.media.radio.radio_text_len > 0) {
+                        hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+                    }
+                }
+
+                s_last_sent_state.media.radio = s_current_state.media.radio;
+            } else if (s_current_state.media.radio.source_mode >= 0x20) {
+                /* Keep cached radio state aligned without sending serial frames */
+                s_last_sent_state.media.radio = s_current_state.media.radio;
+            }
         }
     }
 
     // Immediately push radio preset list updates on change (only if currently in radio mode)
     if (s_current_state.media.radio.preset_updated) {
         s_current_state.media.radio.preset_updated = false;
-        if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
+        bool is_radio_off = (s_current_state.radio_present && !s_current_state.radio_on);
+        if (!is_radio_off && s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_presets(&s_current_state.media.radio);
         }
         memcpy(s_last_sent_state.media.radio.preset_freqs, s_current_state.media.radio.preset_freqs, sizeof(s_last_sent_state.media.radio.preset_freqs));
@@ -410,7 +423,8 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push dynamic RDS RadioText on change (only if currently in radio mode)
     if (s_current_state.media.radio.radio_text_updated) {
         s_current_state.media.radio.radio_text_updated = false;
-        if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
+        bool is_radio_off = (s_current_state.radio_present && !s_current_state.radio_on);
+        if (!is_radio_off && s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
         }
         s_last_sent_state.media.radio.radio_text_len = s_current_state.media.radio.radio_text_len;
@@ -420,10 +434,11 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push CD Changer (CDC) updates on change
     if (s_current_state.media.cdc.updated) {
         s_current_state.media.cdc.updated = false;
-        /* Only push media state to HU if current source is CD (0x30) or CDC (0x31) */
+        bool is_radio_off = (s_current_state.radio_present && !s_current_state.radio_on);
+        /* Only push media state to HU if current source is CD (0x30) or CDC (0x31) and radio is not off */
         uint8_t src = s_current_state.media.radio.source_mode;
         bool is_cd_source = (src == 0x30 || src == 0x31 || s_current_state.media.cdc.active_disc != 0);
-        if (is_cd_source && memcmp(&s_current_state.media.cdc, &s_last_sent_state.media.cdc, sizeof(vehicle_cdc_t)) != 0) {
+        if (!is_radio_off && is_cd_source && memcmp(&s_current_state.media.cdc, &s_last_sent_state.media.cdc, sizeof(vehicle_cdc_t)) != 0) {
             hu_protocol_send_media_state(&s_current_state.media.cdc);
             s_last_sent_state.media.cdc = s_current_state.media.cdc;
         }
@@ -542,17 +557,19 @@ void can_router_periodic_100ms(void) {
     // Periodic slow resync for Radio & Media states (60 seconds / 600 ticks)
     if (++s_media_resync_timer >= 600) {
         s_media_resync_timer = 0;
-        if (s_current_state.media.radio.power_status != 0) {
-            hu_protocol_send_radio_state(&s_current_state.media.radio);
-            if (s_current_state.media.radio.source_mode < 0x20) {
-                hu_protocol_send_radio_presets(&s_current_state.media.radio);
-                if (s_current_state.media.radio.radio_text_len > 0) {
-                    hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+        bool is_radio_off = (s_current_state.radio_present && !s_current_state.radio_on);
+        if (!is_radio_off) {
+            if (s_current_state.media.radio.power_status != 0) {
+                hu_protocol_send_radio_state(&s_current_state.media.radio);
+                if (s_current_state.media.radio.source_mode < 0x20) {
+                    hu_protocol_send_radio_presets(&s_current_state.media.radio);
+                    if (s_current_state.media.radio.radio_text_len > 0) {
+                        hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+                    }
+                } else if (s_current_state.media.radio.source_mode == 0x30 || s_current_state.media.radio.source_mode == 0x31) {
+                    hu_protocol_send_media_state(&s_current_state.media.cdc);
                 }
             }
-        }
-        if (s_current_state.media.cdc.active_disc != 0) {
-            hu_protocol_send_media_state(&s_current_state.media.cdc);
         }
     }
 

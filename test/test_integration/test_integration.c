@@ -78,6 +78,7 @@ void test_integration_hiworld_rd4_cd_in_dash_pipeline(void);
 void test_integration_hiworld_rd4_downlink_resume_queries(void);
 void test_integration_hiworld_rd4_preset_list_pipeline(void);
 void test_integration_hiworld_rd4_aux_mode_pipeline(void);
+void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void);
 void test_integration_hiworld_virtual_cdc_pipeline(void);
 
 // 3. Bagoo Protocol Integration Tests (test_integration_bagoo.c)
@@ -127,6 +128,7 @@ int main(void) {
     RUN_TEST(test_integration_hiworld_rd4_downlink_resume_queries);
     RUN_TEST(test_integration_hiworld_rd4_preset_list_pipeline);
     RUN_TEST(test_integration_hiworld_rd4_aux_mode_pipeline);
+    RUN_TEST(test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames);
     RUN_TEST(test_integration_hiworld_virtual_cdc_pipeline);
 
     // 3. Bagoo Protocol Integration Tests

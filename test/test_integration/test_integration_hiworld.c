@@ -1460,6 +1460,128 @@ void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
     TEST_ASSERT_TRUE(found_0x85);
 }
 
+void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+
+    uint8_t rx_buf[128];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 1. Power ON RD4 radio in Tuner mode (CAN 0x165: 0xCC, 0x54, 0x10, 0x02) */
+    can_frame_t frame_on = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xCC, 0x54, 0x10, 0x02 }
+    };
+    can_router_process_can(&frame_on);
+
+    can_frame_t frame_225 = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x20, 0x01, 0x90, 0x04, 0x1A }
+    };
+    can_router_process_can(&frame_225);
+
+    /* Verify 0x84 received while radio is ON */
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_0x84 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len && rx_buf[i + 3] == 0x84) {
+            found_0x84 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x84);
+
+    /* 2. RD4 Radio turned OFF (CAN 0x165: 0x48, 0xC8, 0x00, 0x00 from dump_2026-10-15_18-37-15.log) */
+    can_frame_t frame_off = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x48, 0xC8, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_off);
+
+    /* Radio OFF must NOT emit any 0x84, 0x85, 0x86, 0x97 frames to HU */
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            uint8_t cmd = rx_buf[i + 3];
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x84, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x85, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x86, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x97, cmd);
+        }
+    }
+
+    /* 3. Inject background CAN tuner status (CAN 0x225 from dump log) */
+    can_frame_t frame_225_bg = {
+        .id = 0x225,
+        .dlc = 5,
+        .data = { 0x30, 0x00, 0x10, 0x03, 0xDC }
+    };
+    can_router_process_can(&frame_225_bg);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            uint8_t cmd = rx_buf[i + 3];
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x84, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x85, cmd);
+        }
+    }
+
+    /* 4. Inject background CAN CD track telemetry (CAN 0x3A5 from dump log) */
+    can_frame_t frame_3a5_bg = {
+        .id = 0x3A5,
+        .dlc = 6,
+        .data = { 0x0B, 0x02, 0x24, 0x02, 0x0E, 0x00 }
+    };
+    can_router_process_can(&frame_3a5_bg);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            uint8_t cmd = rx_buf[i + 3];
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x97, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x84, cmd);
+        }
+    }
+
+    /* 5. Inject background CAN Station Name (0x2A5) */
+    can_frame_t frame_2a5_bg = {
+        .id = 0x2A5,
+        .dlc = 8,
+        .data = { 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D, 0x20, 0x20 }
+    };
+    can_router_process_can(&frame_2a5_bg);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    /* 6. Verify 60s periodic resync does NOT emit any radio or CD packets when radio is off */
+    for (int t = 0; t < 600; t++) {
+        can_router_periodic_100ms();
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
+            uint8_t cmd = rx_buf[i + 3];
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x84, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x85, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x86, cmd);
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x97, cmd);
+        }
+    }
+
+    /* 7. Turn RD4 radio back ON: verification that telemetry resumes immediately */
+    can_router_process_can(&frame_on);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    found_0x84 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len && rx_buf[i + 3] == 0x84) {
+            found_0x84 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x84);
+}
+
 void test_integration_hiworld_virtual_cdc_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
     can_router_init();

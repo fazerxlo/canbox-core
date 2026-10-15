@@ -43,4 +43,16 @@
   - Enhanced `tools/flash_hiworld_serial.py` to auto-detect active `0x5A 0xA5` telemetry ports, and flush buffers before password transmission.
 - Verified on live NUC131 hardware: 100% wireless serial firmware update completed all 192 records (26,112 bytes) in 9.20s with zero acoustic buzzer whine, zero CAN bus disruption, and immediate application boot.
 
-7. [ ] When RD4 radio is off the RACIO is continously activating switching 
+7. [x] When RD4 radio is off the RACIO is continously activating switching (RESOLVED)
+- Root cause:
+  - From `dump_2026-10-15_18-37-15.log`, when the factory RD4 radio is turned off (`0x165` byte 0 bit 7 = 0), background CAN telemetry from the RD4 tuner (`0x225`) and CD drive (`0x3A5`) continues to be broadcast periodically.
+  - Previously, `psa_rd4_process_can_0x165()` only checked if `data[0] == 0x00` to detect standby/off, missing valid standby states like `0x48 c8 00 00` where bit 7 (`0x80`) is clear.
+  - In addition, decoders in `src/profiles/profile_psa.c` (`0x225`, `0x265`, `0x2A5`, `0x0A4`, `0x125`, `0x325`, `0x365`, `0x3A5`, `0x3A6`) continued to decode background traffic into `state->media`, which marked `radio.updated = true` and `cdc.updated = true`.
+  - In `src/core/can_router.c`, receiving `0x225` or `0x3A5` caused the router to dispatch `0x84 0x01` (Tuner ON FM1) / `0x85` (presets), followed by `0x84 0xFF` (Radio OFF). This continuous flip-flopping every ~500 ms caused the Android Head Unit to repeatedly activate/switch to the Radio app.
+- Fixes applied:
+  - In `src/profiles/peugeot_407.c` (`psa_rd4_process_can_0x165`): Verified bit 7 (`data[0] & 0x80`) as authoritative RD4 audio power flag. If bit 7 is clear, sets `source_mode = 0xFF`, `power_status = 0x00`, and `radio->updated = true`.
+  - In `src/profiles/profile_psa.c`: Added guard `if (state->radio_present && !state->radio_on) return;` across tuner and CD decoder hooks (`0x225`, `0x265`, `0x2A5`, `0x0A4`, `0x125`, `0x325`, `0x365`, `0x3A5`, `0x3A6`), so background bus traffic from an idle RD4 tuner/CD drive does not alter active canonical state or wake the radio when it is confirmed off.
+  - In `src/core/can_router.c`: Added `is_radio_off = (s_current_state.radio_present && !s_current_state.radio_on);` checks across `radio.updated`, `preset_updated`, `radio_text_updated`, `cdc.updated`, and the 60s media slow resync. When radio is confirmed off, OpenCanbox completely suppresses `0x84`, `0x85`, `0x86`, and `0x97` serial frames to the Head Unit, while silently keeping `s_last_sent_state.media` synchronized.
+- Verified:
+  - Integration test `test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames` transcribing the exact vector sequence from `dump_2026-10-15_18-37-15.log` (`0x165` off `48 c8 00 00`, background `0x225`, `0x3A5`, `0x2A5`, 60s resync, and subsequent turn ON).
+  - All 110 unit tests in `native_test_runner` and 39 integration tests in `integration_test` passed with zero errors.

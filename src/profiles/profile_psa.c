@@ -423,41 +423,49 @@ static void psa_decode_etat_autoradio_0x165_profile(const can_frame_t *frame, ve
 
 static void psa_decode_station_list_0x125_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x125(&state->media.radio, &s_rd4_list_isotp_ctx, frame->data, frame->dlc);
 }
 
 static void psa_decode_etat_tuner_0x225_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x225(&state->media.radio, frame->data, frame->dlc);
 }
 
 static void psa_decode_info_tuner_0x265_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x265(&state->media.radio, frame->data, frame->dlc);
 }
 
 static void psa_decode_nom_station_0x2a5_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x2a5(&state->media.radio, frame->data, frame->dlc);
 }
 
 static void psa_decode_texte_radio_0x0a4_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x0a4(&state->media.radio, &s_rd4_isotp_ctx, frame->data, frame->dlc);
 }
 
 static void psa_decode_cd_tray_0x325_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc);
 }
 
 static void psa_decode_cd_disc_info_0x365_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x365(&state->media.cdc, frame->data, frame->dlc);
 }
 
 static void psa_decode_cd_play_0x3a5_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc);
 }
 
@@ -469,6 +477,7 @@ static void psa_decode_cdc_cmd_0x131_profile(const can_frame_t *frame, vehicle_s
 
 static void psa_decode_cd_changer_0x3a6_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
+    if (state->radio_present && !state->radio_on) return;
     psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc);
 }
 

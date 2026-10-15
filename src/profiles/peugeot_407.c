@@ -1402,6 +1402,15 @@ void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp) {
 void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 3) return;
 
+    /* Bit 7 of byte 0: radio audio power on/off */
+    bool radio_powered = (data[0] & 0x80) != 0;
+    if (!radio_powered) {
+        radio->source_mode = 0xFF;
+        radio->power_status = 0x00;
+        radio->updated = true;
+        return;
+    }
+
     uint8_t src = (data[2] >> 4) & 0x0F;
     switch (src) {
         case 0x1: /* Tuner */
