@@ -62,8 +62,31 @@ void hal_delay_ms(uint32_t ms) {
 }
 
 void hal_system_reboot(void) {
+    /* Safe Hardware Isolation Sequence prior to Reset:
+     * 1. Assert ACC ON (PA8 = HIGH) so Head Unit remains awake during flash/reboot
+     * 2. De-assert other outputs (PA9 ILL, PA12 BRAKE, PA13 REV = LOW)
+     * 3. Silence buzzer drive lines (PB3, PB12 driven HIGH)
+     * 4. Assert CAN transceiver Standby (PC3 = HIGH) to isolate differential CAN bus
+     * 5. Disconnect CAN0 peripheral from PD6/PD7 and drive PD7 push-pull recessive HIGH
+     * 6. Wait for UART0 TX FIFO to drain completely
+     */
+    PA->DOUT = (PA->DOUT & ~((1U << 9) | (1U << 12) | (1U << 13))) | (1U << 8);
+    PB->DOUT |= (1U << 3) | (1U << 12);
+    PC->DOUT |= (1U << 3);
+
     SYS_UnlockReg();
+    SYS->GPD_MFP &= ~(SYS_GPD_MFP_PD6_Msk | SYS_GPD_MFP_PD7_Msk);
+    PD->DOUT |= (1U << 7);
+    PD->PMD = (PD->PMD & ~GPIO_PMD_PMD7_Msk) | (GPIO_PMD_OUTPUT << GPIO_PMD_PMD7_Pos);
+
+    /* Wait for UART0 TX FIFO and shift register to drain */
+    while (!(UART0->FSR & UART_FSR_TE_FLAG_Msk));
+
+    /* Brief settling delay before asserting chip reset */
+    for (volatile int i = 0; i < 50000; i++);
+
     SYS_ResetChip();
+    while (1);
 }
 
 static void hal_system_on_wakeup(void) {
@@ -86,6 +109,7 @@ static void hal_system_on_wakeup(void) {
     // Disable wakeup interrupts to prevent re-triggering during active run
     GPIO_DisableInt(PD, 6);
     GPIO_DisableInt(PA, 0);
+    GPIO_DisableInt(PB, 0);
     CAN_DISABLE_WAKEUP(CAN0);
 
     NVIC_ClearPendingIRQ(GPCDEF_IRQn);
@@ -120,6 +144,11 @@ void hal_system_enter_deep_sleep(void) {
 
     // Enable EXTI on PA0 (Hardware Ignition Sense line, if wired)
     GPIO_EnableInt(PA, 0, GPIO_INT_RISING);
+    NVIC_ClearPendingIRQ(GPAB_IRQn);
+    NVIC_EnableIRQ(GPAB_IRQn);
+
+    // Enable EXTI on PB0 (UART0_RXD) to wake on incoming Head Unit / Flasher serial commands
+    GPIO_EnableInt(PB, 0, GPIO_INT_FALLING);
     NVIC_ClearPendingIRQ(GPAB_IRQn);
     NVIC_EnableIRQ(GPAB_IRQn);
 

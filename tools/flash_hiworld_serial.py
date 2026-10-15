@@ -32,7 +32,7 @@ DEFAULT_KEY         = bytes([0x19, 0x84, 0x07, 0x42])
 
 
 def find_serial_port() -> str:
-    """Finds an available USB-to-serial port (/dev/ttyUSB* or COM*)."""
+    """Finds an available USB-to-serial port connected to the CAN Box."""
     if sys.platform.startswith("win"):
         ports = [f"COM{i}" for i in range(1, 32)]
     else:
@@ -40,15 +40,19 @@ def find_serial_port() -> str:
         if not ports:
             ports = sorted(glob.glob("/dev/ttyACM*"))
 
+    # Detect which port is actively streaming Hiworld frames (0x5A 0xA5)
     for p in ports:
         try:
-            s = serial.Serial(p)
+            s = serial.Serial(p, 38400, timeout=0.3)
+            sample = s.read(64)
             s.close()
-            return p
+            if b"\x5A\xA5" in sample:
+                return p
         except Exception:
             pass
 
-    return "/dev/ttyUSB1" if os.path.exists("/dev/ttyUSB1") else "/dev/ttyUSB0"
+    print("[-] No Hiworld adapter found. Please provide port via parameter (-p / --port).")
+    sys.exit(1)
 
 
 def build_firmware(pio_env: str) -> str:
@@ -144,6 +148,10 @@ def update_firmware(port: str, baudrate: int, iap_data: bytes):
         ser.close()
         sys.exit(1)
     print(" [OK]")
+
+    # Brief delay for bootloader UART FIFO to settle, and flush any stale bytes
+    time.sleep(0.05)
+    ser.reset_input_buffer()
 
     # Step B: Send unlock password (19 78 02 17)
     print("      Unlocking flash and erasing partition...", end="", flush=True)

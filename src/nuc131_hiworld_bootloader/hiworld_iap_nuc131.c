@@ -5,6 +5,7 @@
 #define SYS_BASE                (0x50000000UL)
 #define CLK_BASE                (0x50000200UL)
 #define FMC_BASE                (0x5000C000UL)
+#define GPIOA_BASE              (0x50004000UL)
 #define GPIOB_BASE              (0x50004040UL)
 #define GPIOC_BASE              (0x50004080UL)
 #define GPIOD_BASE              (0x500040C0UL)
@@ -27,6 +28,8 @@
 #define FMC_ISPTRG              (*(volatile uint32_t *)(FMC_BASE + 0x10))
 
 /* GPIO Registers */
+#define GPIOA_PMD               (*(volatile uint32_t *)(GPIOA_BASE + 0x00))
+#define GPIOA_DOUT              (*(volatile uint32_t *)(GPIOA_BASE + 0x08))
 #define GPIOB_PMD               (*(volatile uint32_t *)(GPIOB_BASE + 0x00))
 #define GPIOB_DOUT              (*(volatile uint32_t *)(GPIOB_BASE + 0x08))
 #define GPIOC_PMD               (*(volatile uint32_t *)(GPIOC_BASE + 0x00))
@@ -63,19 +66,23 @@ void iap_init_hardware(void) {
     SYS_REGWRPROT = 0x16;
     SYS_REGWRPROT = 0x88;
 
-    /* 1. Enable UART0 peripheral clock in APBCLK (bit 16) */
+    /* 1. Ensure PD6 and PD7 are standard GPIO, NOT CAN peripheral */
+    SYS_GPD_MFP &= ~((1U << 6) | (1U << 7));
+
+    /* 2. Enable UART0 peripheral clock in APBCLK (bit 16) */
     CLK_APBCLK |= (1U << 16);
 
-    /* 2. Configure PB0 as UART0_RXD and PB1 as UART0_TXD in GPB_MFP */
+    /* 3. Configure PB0 as UART0_RXD and PB1 as UART0_TXD in GPB_MFP */
     SYS_GPB_MFP &= ~((1U << 0) | (1U << 1));
     SYS_GPB_MFP |=  ((1U << 0) | (1U << 1));
 
     SYS_REGWRPROT = 0x00;
 
-    /* 3. Configure pin directions, isolate CAN in Standby (PC3=1), drive CAN_TX (PD7) HIGH (Recessive), and silence buzzer:
+    /* 4. Configure pin directions, isolate CAN in Standby (PC3=1), drive CAN_TX (PD7) HIGH (Recessive), and silence buzzer:
      * PC_DOUT = 0x00cf, PC_PMD = 0x0000f045 (PC3=1 Standby)
-     * PB_DOUT = 0x113f, PB_PMD = 0x43030ff4
+     * PB_DOUT = 0x113f, PB_PMD = 0x43030ff4 (PB1=1 TX, PB3=1, PB12=1 silence buzzer)
      * PD_DOUT = 0x00c0, PD_PMD = 0x00007000 (PD7=1 CAN_TX Recessive Push-Pull, PD6=Input)
+     * PA_DOUT = 0x00004cff, PA_PMD = 0x75f5ff0f (All vehicle outputs off: PA8, PA9, PA12, PA13 = 0)
      */
     GPIOC_DOUT = 0x000000CF;
     GPIOC_PMD  = 0x0000F045;
@@ -86,10 +93,16 @@ void iap_init_hardware(void) {
     GPIOB_DOUT = 0x0000113F;
     GPIOB_PMD  = 0x43030FF4;
 
+    GPIOA_DOUT = 0x00004DFF; /* PA8 (ACC) = 1 (ON to prevent Head Unit sleep), PA9/12/13 = 0 (OFF) */
+    GPIOA_PMD  = 0x75F5FF0F;
+
     /* 5. Configure UART0 for 38,400 bps 8-N-1 on default reset clock (22.1184 MHz HIRC) */
     /* Mode 0 (16x oversampling): BRD = (22,118,400 / (16 * 38,400)) - 2 = 34 (0.00% error) */
     UART0_BAUD = 34;
     UART0_LCR  = 0x03;
+
+    /* 6. Clear UART0 RX and TX FIFOs */
+    UART0_FSR |= (1U << 1) | (1U << 2);
 }
 
 /* --- FMC Flash Drivers --- */
@@ -202,10 +215,10 @@ void iap_run(void) {
         /* Wait for Password (19 78 02 17) within 1,000 ms */
         uint8_t rx_pw[4];
         if (!uart_recv_exact(rx_pw, 4, 1000) || memcmp(rx_pw, EXPECTED_PASSWORD, 4) != 0) {
-            if (app_valid) {
+            if (app_valid && !force_iap) {
                 jump_to_app();
             }
-            continue; /* Application invalid: stay in bootloader retry loop */
+            continue; /* Application invalid or upgrade forced: stay in bootloader retry loop */
         }
 
         /* Password matched: Unlock Flash & Erase Application Partition */
@@ -224,7 +237,7 @@ void iap_run(void) {
         /* Phase 3: Receive 136-byte records */
         while (1) {
             if (!uart_recv_exact(record, IAP_REC_SIZE, 5000)) {
-                uart_send_byte(0x52); /* 'R' = Timeout / Error */
+                uart_send_byte(0x54); /* 'T' = Timeout receiving 136 bytes */
                 break;
             }
 
@@ -243,7 +256,7 @@ void iap_run(void) {
                                      ((uint32_t)record[135] << 24);
 
             if (expected_csum != received_csum) {
-                uart_send_byte(0x52); /* 'R' = Reject block */
+                uart_send_byte(0x43); /* 'C' = Checksum mismatch */
                 break;
             }
 
@@ -253,7 +266,7 @@ void iap_run(void) {
             /* Derive target address strictly from 16-bit sequence number (Bytes 128..129) */
             uint16_t seq = (uint16_t)record[128] | ((uint16_t)record[129] << 8);
             if (seq == 0) {
-                uart_send_byte(0x52);
+                uart_send_byte(0x5A); /* 'Z' = Zero sequence */
                 break;
             }
             uint32_t rec_target_addr = APP_BASE_ADDR + ((uint32_t)(seq - 1) * IAP_DATA_SIZE);
@@ -272,7 +285,7 @@ void iap_run(void) {
             }
 
             if (!write_ok) {
-                uart_send_byte(0x52); /* 'R' = Flash write verify failure */
+                uart_send_byte(0x50); /* 'P' = Flash write verify failure */
                 break;
             }
 
@@ -315,8 +328,7 @@ static void jump_to_app(void) {
     *(volatile uint32_t *)0xE000E180 = 0xFFFFFFFF; /* NVIC->ICER[0] */
     *(volatile uint32_t *)0xE000E280 = 0xFFFFFFFF; /* NVIC->ICPR[0] */
 
-    /* Release CAN Transceiver Standby: pull PC3 LOW (0 = Active) so CAN transceiver is awake for app */
-    GPIOC_DOUT &= ~(1U << 3);
+    /* Keep CAN transceiver standby (PC3 = 1) held until application initializes CAN */
 
     /* FMC Hardware Vector Remap: ISPCMD = 0x2E */
     SYS_REGWRPROT = 0x59;

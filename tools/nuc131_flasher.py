@@ -43,8 +43,22 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
 
     total_pages = len(data) // PAGE_SIZE
 
-    # Unlock FMC ISP
+    # 1. Reset halt target
     client.cmd("reset halt")
+
+    # 2. Immediately enforce GPIO isolation during SWD halt:
+    # - Clear GPD_MFP to disconnect CAN0 peripheral
+    # - PC_DOUT = 0x00CF, PC_PMD = 0x0000F045 (PC3=1 Standby transceiver, silence buzzer)
+    # - PD_DOUT = 0x00C0, PD_PMD = 0x00007000 (PD7=1 CAN_TX Recessive Push-Pull, PD6=Input)
+    # - PB_DOUT = 0x0000113F, PB_PMD = 0x43030FF4 (Silence buzzer lines PB3/PB12)
+    # - PA_DOUT = 0x00004DFF, PA_PMD = 0x75F5FF0F (ACC ON, other outputs off)
+    client.cmd("mww 0x5000003C 0x00000000")
+    client.cmd("mww 0x50004088 0x000000CF; mww 0x50004080 0x0000F045")
+    client.cmd("mww 0x500040C8 0x000000C0; mww 0x500040C0 0x00007000")
+    client.cmd("mww 0x50004048 0x0000113F; mww 0x50004040 0x43030FF4")
+    client.cmd("mww 0x50004008 0x00004DFF; mww 0x50004000 0x75F5FF0F")
+
+    # 3. Unlock FMC ISP
     client.cmd("mww 0x50000100 0x59")
     client.cmd("mww 0x50000100 0x16")
     client.cmd("mww 0x50000100 0x88")

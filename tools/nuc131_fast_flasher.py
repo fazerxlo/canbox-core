@@ -129,8 +129,15 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
 
     total_pages = len(data) // PAGE_SIZE
 
-    # 1. Reset halt & unlock FMC ISP
+    # 1. Reset halt & enforce GPIO isolation during SWD halt
     client.cmd("reset halt")
+    client.cmd("mww 0x5000003C 0x00000000")
+    client.cmd("mww 0x50004088 0x000000CF; mww 0x50004080 0x0000F045")
+    client.cmd("mww 0x500040C8 0x000000C0; mww 0x500040C0 0x00007000")
+    client.cmd("mww 0x50004048 0x0000113F; mww 0x50004040 0x43030FF4")
+    client.cmd("mww 0x50004008 0x00004DFF; mww 0x50004000 0x75F5FF0F")
+
+    # 2. Unlock FMC ISP
     client.cmd("mww 0x50000100 0x59")
     client.cmd("mww 0x50000100 0x16")
     client.cmd("mww 0x50000100 0x88")

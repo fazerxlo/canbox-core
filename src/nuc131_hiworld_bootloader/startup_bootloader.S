@@ -69,6 +69,23 @@ Reset_Handler:
     ldr r0, =_estack
     msr msp, r0
 
+    /* 0. Disconnect PD6 and PD7 from CAN peripheral in SYS_GPD_MFP */
+    ldr r2, =0x50000100   /* SYS_REGWRPROT */
+    ldr r1, =0x59
+    str r1, [r2]
+    ldr r1, =0x16
+    str r1, [r2]
+    ldr r1, =0x88
+    str r1, [r2]
+    ldr r2, =0x5000003C   /* SYS_GPD_MFP */
+    ldr r1, [r2]
+    ldr r3, =0x000000C0
+    bics r1, r3
+    str r1, [r2]
+    ldr r2, =0x50000100
+    movs r1, #0
+    str r1, [r2]
+
     /* 1. Silence buzzer, isolate CAN transceiver in Standby (PC3=1), apply factory GPIO outputs:
      * PC_DOUT = 0x00cf, PC_PMD = 0x0000f045 (PC0=1, PC1=1, PC2=1, PC3=1 Standby, PC6=1, PC7=1)
      * PB_DOUT = 0x113f, PB_PMD = 0x43030ff4 (PB1=1 TX, PB3=1, PB12=1, PB15=0)
@@ -98,7 +115,7 @@ Reset_Handler:
     str r1, [r2]
 
     ldr r2, =0x50004008   /* GPIOA_DOUT */
-    ldr r1, =0x00004CFF
+    ldr r1, =0x00004DFF   /* PA8 (ACC) = 1 (ON to prevent Head Unit sleep), PA15=0, PA9/12/13=0 */
     str r1, [r2]
     ldr r2, =0x50004000   /* GPIOA_PMD */
     ldr r1, =0x75F5FF0F
