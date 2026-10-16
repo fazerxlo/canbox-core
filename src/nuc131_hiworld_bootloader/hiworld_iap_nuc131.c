@@ -18,7 +18,11 @@
 #define SYS_GPD_MFP             (*(volatile uint32_t *)(SYS_BASE + 0x03C))
 
 /* Clock Control */
+#define CLK_PWRCON              (*(volatile uint32_t *)(CLK_BASE + 0x000))
 #define CLK_APBCLK              (*(volatile uint32_t *)(CLK_BASE + 0x008))
+#define CLK_CLKSTATUS           (*(volatile uint32_t *)(CLK_BASE + 0x00C))
+#define CLK_CLKSEL1             (*(volatile uint32_t *)(CLK_BASE + 0x014))
+#define CLK_CLKDIV              (*(volatile uint32_t *)(CLK_BASE + 0x018))
 
 /* Flash Memory Controller */
 #define FMC_ISPCON              (*(volatile uint32_t *)(FMC_BASE + 0x00))
@@ -69,8 +73,18 @@ void iap_init_hardware(void) {
     /* 1. Ensure PD6 and PD7 are standard GPIO, NOT CAN peripheral */
     SYS_GPD_MFP &= ~((1U << 6) | (1U << 7));
 
-    /* 2. Enable UART0 peripheral clock in APBCLK (bit 16) */
-    CLK_APBCLK |= (1U << 16);
+    /* 2. Configure UART0 clock:
+     * - Ensure internal 22.1184 MHz high-speed RC (HIRC) is enabled and stable
+     * - Select HIRC as UART0 clock source in CLKSEL1 (bits [25:24] = 11b)
+     * - Set UART0 clock divider to 1 (bits [11:8] = 0000b)
+     * - Enable UART0 peripheral clock in APBCLK (bit 16)
+     */
+    CLK_PWRCON |= (1U << 2);
+    while (!(CLK_CLKSTATUS & (1U << 4)));
+
+    CLK_CLKSEL1 = (CLK_CLKSEL1 & ~(3U << 24)) | (3U << 24);
+    CLK_CLKDIV  &= ~(0xFU << 8);
+    CLK_APBCLK  |= (1U << 16);
 
     /* 3. Configure PB0 as UART0_RXD and PB1 as UART0_TXD in GPB_MFP */
     SYS_GPB_MFP &= ~((1U << 0) | (1U << 1));
@@ -156,7 +170,8 @@ static bool uart_recv_byte(uint8_t *b, uint32_t timeout_loops) {
 
 static bool uart_recv_exact(uint8_t *buf, uint32_t len, uint32_t timeout_ms) {
     for (uint32_t i = 0; i < len; i++) {
-        if (!uart_recv_byte(&buf[i], timeout_ms * 1000)) {
+        uint32_t loops = (i == 0) ? (timeout_ms * 1000) : (100 * 1000);
+        if (!uart_recv_byte(&buf[i], loops)) {
             return false;
         }
     }
@@ -197,9 +212,18 @@ void iap_run(void) {
                       (app_reset & 1) && app_reset >= APP_BASE_ADDR && app_reset < APP_MAX_ADDR);
 
     if (!force_iap && app_valid) {
-        /* Cold-boot listen window: Listen for Hiworld sync header 0x5A for 500 ms */
-        uint8_t peek;
-        if (!uart_recv_byte(&peek, 500 * 1000) || peek != 0x5A) {
+        /* Cold-boot rescue window: Listen briefly (~50 ms) for 0xE0 upgrade trigger from host */
+        uint8_t peek = 0;
+        if (uart_recv_byte(&peek, 20000) && peek == 0x5A) {
+            uint8_t hdr[3] = {0};
+            if (uart_recv_byte(&hdr[0], 20000) && hdr[0] == 0xA5 &&
+                uart_recv_byte(&hdr[1], 20000) &&
+                uart_recv_byte(&hdr[2], 20000) && hdr[2] == 0xE0) {
+                force_iap = true;
+            } else {
+                jump_to_app();
+            }
+        } else {
             jump_to_app();
         }
     }
@@ -209,25 +233,38 @@ void iap_run(void) {
 
     /* Persistent connection loop */
     while (1) {
-        /* Phase 2: Send 'U' prompt */
-        uart_send_byte(0x55); /* 'U' */
-
-        /* Wait for Password (19 78 02 17) within 1,000 ms */
+        /* Phase 2: Send 'U' prompt with 100 ms retry cadence */
         uint8_t rx_pw[4];
-        if (!uart_recv_exact(rx_pw, 4, 1000) || memcmp(rx_pw, EXPECTED_PASSWORD, 4) != 0) {
-            if (app_valid && !force_iap) {
-                jump_to_app();
+        bool pw_matched = false;
+
+        while (!pw_matched) {
+            uart_send_byte(0x55); /* 'U' */
+
+            /* Wait up to 100 ms for first byte of password */
+            uint8_t b = 0;
+            if (uart_recv_byte(&b, 37000)) {
+                if (b == EXPECTED_PASSWORD[0]) {
+                    rx_pw[0] = b;
+                    if (uart_recv_byte(&rx_pw[1], 80000) &&
+                        uart_recv_byte(&rx_pw[2], 80000) &&
+                        uart_recv_byte(&rx_pw[3], 80000)) {
+                        if (memcmp(rx_pw, EXPECTED_PASSWORD, 4) == 0) {
+                            pw_matched = true;
+                            break;
+                        }
+                    }
+                } else if (b == 0x5A) {
+                    /* Drain any retransmitted 0xE0 trigger from HU */
+                    uint8_t dummy;
+                    for (int k = 0; k < 6; k++) {
+                        uart_recv_byte(&dummy, 5000);
+                    }
+                }
             }
-            continue; /* Application invalid or upgrade forced: stay in bootloader retry loop */
         }
 
-        /* Password matched: Unlock Flash & Erase Application Partition */
+        /* Password matched: Unlock Flash and immediately acknowledge with 'B', 'S' */
         fmc_unlock();
-        for (uint32_t page = APP_BASE_ADDR; page < APP_MAX_ADDR; page += FMC_PAGE_SIZE) {
-            fmc_erase_page(page);
-        }
-
-        /* Signal ready to Head Unit: 'B', 'S' */
         uart_send_byte(0x42); /* 'B' */
         uart_send_byte(0x53); /* 'S' */
 
@@ -270,6 +307,16 @@ void iap_run(void) {
                 break;
             }
             uint32_t rec_target_addr = APP_BASE_ADDR + ((uint32_t)(seq - 1) * IAP_DATA_SIZE);
+
+            if (rec_target_addr < APP_BASE_ADDR || (rec_target_addr + IAP_DATA_SIZE) > APP_MAX_ADDR) {
+                uart_send_byte(0x46); /* 'F' = Flash boundary overflow */
+                break;
+            }
+
+            /* Erase new 512-byte flash page on demand at page boundary */
+            if ((rec_target_addr % FMC_PAGE_SIZE) == 0) {
+                fmc_erase_page(rec_target_addr);
+            }
 
             /* Program 128 bytes (32 words) with write verification */
             bool write_ok = true;

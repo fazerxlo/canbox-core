@@ -154,7 +154,7 @@ def update_firmware(port: str, baudrate: int, iap_data: bytes):
     ser.reset_input_buffer()
 
     # Step B: Send unlock password (19 78 02 17)
-    print("      Unlocking flash and erasing partition...", end="", flush=True)
+    print("      Unlocking flash...", end="", flush=True)
     ser.write(UNLOCK_PASSWORD)
     ser.flush()
 
@@ -170,7 +170,7 @@ def update_firmware(port: str, baudrate: int, iap_data: bytes):
 
     if b"BS" not in ack:
         print(" FAILED!")
-        print(f"[-] Error: Bootloader failed to acknowledge flash erase. Received: {ack.hex(' ')}")
+        print(f"[-] Error: Bootloader failed to acknowledge unlock. Received: {ack.hex(' ')}")
         ser.close()
         sys.exit(1)
     print(" [READY]")
@@ -199,7 +199,15 @@ def update_firmware(port: str, baudrate: int, iap_data: bytes):
         else:
             # Intermediate record expects 'S' (0x53)
             if resp != b"S":
-                print(f"\n[-] Record {rec_idx + 1}/{total_records} rejected! Resp: {resp}")
+                err_map = {
+                    b"C": "Checksum mismatch",
+                    b"T": "Timeout receiving record",
+                    b"P": "Flash write verification failed",
+                    b"Z": "Zero sequence index",
+                    b"F": "Flash address out of bounds",
+                }
+                desc = err_map.get(resp, "Unknown error")
+                print(f"\n[-] Record {rec_idx + 1}/{total_records} rejected! Resp: {resp} ({desc})")
                 ser.close()
                 sys.exit(1)
 
