@@ -13,7 +13,7 @@ Because of this split architecture:
 2. **RD4 receives control frames** from steering column stalks and front panel buttons.
 3. **RD4 receives vehicle status frames** for ignition power management, anti-theft VIN pairing, and audio synthesis (warning chimes and parking sensor beeps).
 
-Detailed signal specifications in the project are documented in [doc/CAN2004_radio.md](file:///home/Fazer/git/simulator/doc/CAN2004_radio.md) and defined in [signal-db/radio.yaml](file:///home/Fazer/git/simulator/signal-db/radio.yaml).
+Detailed signal specifications in the project are documented in [doc/CAN2004_radio.md](simulator/doc/CAN2004_radio.md) and defined in [signal-db/radio.yaml](simulator/signal-db/radio.yaml).
 
 ---
 

@@ -8,15 +8,15 @@ All code modifications, protocol decoders, UI bindings, auto-switch hooks, Radio
 
 | Component | Target File | Action Taken |
 |---|---|---|
-| **Data Model** | [`CarRadioState.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali_classes2/com/qf/vehicle/entity/CarRadioState.smali) | Added `.field public mStationName:Ljava/lang/String;` and `.field public mRadioText:Ljava/lang/String;` initialized to `""` in `<init>()`. |
-| **UART Protocol Whitelist** | [`PeugeotDataDefine$Handle.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataDefine$Handle.smali) | Registered `CarRadioState:B = -0x7ct` (`0x84`) and `RadioTextInfo:B = -0x7at` (`0x86`). Expanded `ids` and `stringIds` arrays from `0x1c` to `0x1e` to route packets from the UART reader. |
-| **Packet Decoder** | [`PeugeotDataParser.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali) | Added routing for opcodes `-0x7ct` (`0x84`) and `-0x7at` (`0x86`). Implemented `parseCarRadioState(...)`: decodes audio source/band, frequency, preset slot, RDS indicators (ST, RDS, TA, SCAN, REG, RDTEXT, AUTO.P), power status, 8-byte ASCII RDS station name, and optional trailing Radio Text string (`Data[14..N]`). Implemented `parseRadioText(...)`: decodes standalone `0x86` payloads directly into `mRadioText`. |
-| **UI Marquee View** | [`res/layout/car_radio.xml`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/res/layout/car_radio.xml), [`res/values/ids.xml`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/res/values/ids.xml), [`res/values/public.xml`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/res/values/public.xml) | Declared view ID `tv_radio_text` (`0x7f08098d`). Inserted full-width marquee `TextView` (20sp, cyan `#33ffff`, single-line, horizontally scrolling marquee) above preset buttons. |
-| **UI Binding & Animation** | [`OriginalTuner.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalTuner.smali) | Bound `tv_radio_text = findViewById(0x7f08098d)` in `initView()`. Implemented dedicated helper method `updateRadioText()V` called during `update()`: displays `mRadioText`, triggers `setSelected(true)` to start hardware marquee scrolling, or hides view (`GONE`) when empty/off. |
-| **Controller & UI Cache** | [`PeugeotDataController.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataController.smali) | Added field `lastAudioSource:B = -1`. Updated `forwardType(B)` to immediately respond to resume queries: `0x0F` forwards cached `mCarRadioInfo` to `OriginalTuner`, and `0x11`/`0x12` forwards cached `mCarCdPlayInfo` to `OriginalMediaPlayer`. |
-| **Auto-Switch Callback** | [`PeugeotDataController$3.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataController$3.smali) | Implemented `notifyCarRadioState`: forwards state to UI and automatically switches active app on source change: Radio / AUX &rarr; [`OriginalTuner`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalTuner.smali); CD / CDC &rarr; [`OriginalMediaPlayer`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalMediaPlayer.smali) (debounced against `lastAudioSource`). In `notifyCarMediaState`, active playback triggers auto-switch to `OriginalMediaPlayer`. |
-| **App Launcher Visibility** | [`PeugeotConstant.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/PeugeotConstant.smali) | Unconditionally called `VehicleConfigUtil.setUserCarOriginalRadio(context, true)` and enabled `setCarMediaPlayerEnable(context, true)` for all standard Peugeot 407 profiles (`peugeot_407_06_all`). |
-| **Changelog Record** | [`CHANGELOG.md`](file:///home/Fazer/git/QF_Canbus_system/CHANGELOG.md) | Added Sections 19, 20, and 21 documenting all modified components and rationale per project guidelines. |
+| **Data Model** | [`CarRadioState.smali`](QF_Canbus_system/QF_Canbus_system/smali_classes2/com/qf/vehicle/entity/CarRadioState.smali) | Added `.field public mStationName:Ljava/lang/String;` and `.field public mRadioText:Ljava/lang/String;` initialized to `""` in `<init>()`. |
+| **UART Protocol Whitelist** | [`PeugeotDataDefine$Handle.smali`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataDefine$Handle.smali) | Registered `CarRadioState:B = -0x7ct` (`0x84`) and `RadioTextInfo:B = -0x7at` (`0x86`). Expanded `ids` and `stringIds` arrays from `0x1c` to `0x1e` to route packets from the UART reader. |
+| **Packet Decoder** | [`PeugeotDataParser.smali`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataParser.smali) | Added routing for opcodes `-0x7ct` (`0x84`) and `-0x7at` (`0x86`). Implemented `parseCarRadioState(...)`: decodes audio source/band, frequency, preset slot, RDS indicators (ST, RDS, TA, SCAN, REG, RDTEXT, AUTO.P), power status, 8-byte ASCII RDS station name, and optional trailing Radio Text string (`Data[14..N]`). Implemented `parseRadioText(...)`: decodes standalone `0x86` payloads directly into `mRadioText`. |
+| **UI Marquee View** | [`res/layout/car_radio.xml`](QF_Canbus_system/QF_Canbus_system/res/layout/car_radio.xml), [`res/values/ids.xml`](QF_Canbus_system/QF_Canbus_system/res/values/ids.xml), [`res/values/public.xml`](QF_Canbus_system/QF_Canbus_system/res/values/public.xml) | Declared view ID `tv_radio_text` (`0x7f08098d`). Inserted full-width marquee `TextView` (20sp, cyan `#33ffff`, single-line, horizontally scrolling marquee) above preset buttons. |
+| **UI Binding & Animation** | [`OriginalTuner.smali`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalTuner.smali) | Bound `tv_radio_text = findViewById(0x7f08098d)` in `initView()`. Implemented dedicated helper method `updateRadioText()V` called during `update()`: displays `mRadioText`, triggers `setSelected(true)` to start hardware marquee scrolling, or hides view (`GONE`) when empty/off. |
+| **Controller & UI Cache** | [`PeugeotDataController.smali`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataController.smali) | Added field `lastAudioSource:B = -1`. Updated `forwardType(B)` to immediately respond to resume queries: `0x0F` forwards cached `mCarRadioInfo` to `OriginalTuner`, and `0x11`/`0x12` forwards cached `mCarCdPlayInfo` to `OriginalMediaPlayer`. |
+| **Auto-Switch Callback** | [`PeugeotDataController$3.smali`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataController$3.smali) | Implemented `notifyCarRadioState`: forwards state to UI and automatically switches active app on source change: Radio / AUX &rarr; [`OriginalTuner`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalTuner.smali); CD / CDC &rarr; [`OriginalMediaPlayer`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalMediaPlayer.smali) (debounced against `lastAudioSource`). In `notifyCarMediaState`, active playback triggers auto-switch to `OriginalMediaPlayer`. |
+| **App Launcher Visibility** | [`PeugeotConstant.smali`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/PeugeotConstant.smali) | Unconditionally called `VehicleConfigUtil.setUserCarOriginalRadio(context, true)` and enabled `setCarMediaPlayerEnable(context, true)` for all standard Peugeot 407 profiles (`peugeot_407_06_all`). |
+| **Changelog Record** | [`CHANGELOG.md`](QF_Canbus_system/CHANGELOG.md) | Added Sections 19, 20, and 21 documenting all modified components and rationale per project guidelines. |
 
 ---
 
@@ -92,7 +92,7 @@ When implementing CAN box firmware (e.g. STM32, ESP32, Arduino CAN Shield):
 
 ### 4. Simulation & Test Generator (`send_peugeot_radio.py`)
 
-The Python test script [`scenarios/send_peugeot_radio.py`](file:///home/Fazer/git/QF_Canbus_system/scenarios/send_peugeot_radio.py) supports serial transmission over USB-UART as well as ADB shell injection:
+The Python test script [`scenarios/send_peugeot_radio.py`](QF_Canbus_system/scenarios/send_peugeot_radio.py) supports serial transmission over USB-UART as well as ADB shell injection:
 
 ```bash
 # 1. FM Radio with RDS Station Name and Radio Text (Song title) appended to Cmd 0x84:
@@ -118,7 +118,7 @@ python3 scenarios/send_peugeot_radio.py --dry-run --band FM1 --freq 102.50 --sta
 
 ### 5. Application Launch & Auto-Switching Triggers
 
-This section documents the exact mechanisms, byte conditions, and code paths that trigger [`OriginalTuner`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalTuner.smali) and [`OriginalMediaPlayer`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalMediaPlayer.smali) to open on the Android Head Unit.
+This section documents the exact mechanisms, byte conditions, and code paths that trigger [`OriginalTuner`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalTuner.smali) and [`OriginalMediaPlayer`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/activities/OriginalMediaPlayer.smali) to open on the Android Head Unit.
 
 #### 5.1 Overview: Launch Modes
 There are two ways the applications are launched:
@@ -157,7 +157,7 @@ There are two ways the applications are launched:
 ---
 
 #### 5.2 Enabling App Visibility in the ROM
-By default on many QingFang ROMs, original OEM car apps are hidden unless explicit car profile flags are enabled. In [`PeugeotConstant.smali`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/PeugeotConstant.smali):
+By default on many QingFang ROMs, original OEM car apps are hidden unless explicit car profile flags are enabled. In [`PeugeotConstant.smali`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/PeugeotConstant.smali):
 - `VehicleConfigUtil.setUserCarOriginalRadio(context, true)`: Enables the OEM Tuner activity (`OriginalTuner`) in the system app launcher and assigns task affinity `com.qf.vehicle.tuner`.
 - `VehicleConfigUtil.setCarMediaPlayerEnable(context, true)`: Enables the OEM CD/Media Player activity (`OriginalMediaPlayer`).
 - Both activities are declared with `android:launchMode="singleTask"` in `AndroidManifest.xml`, ensuring only one instance exists and preventing duplicate screen stacking.
@@ -166,7 +166,7 @@ By default on many QingFang ROMs, original OEM car apps are hidden unless explic
 
 #### 5.3 Auto-Switching Rules for `OriginalTuner` (Radio vs External Sources)
 
-The automatic trigger is implemented in [`PeugeotDataController$3.smali::notifyCarRadioState(CarRadioState)`](file:///home/Fazer/git/QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataController$3.smali):
+The automatic trigger is implemented in [`PeugeotDataController$3.smali::notifyCarRadioState(CarRadioState)`](QF_Canbus_system/QF_Canbus_system/smali/com/qf/vehicle/band/peugeot/parse/wc/PeugeotDataController$3.smali):
 
 1. **Incoming Frame:** `Cmd 0x84` is received over UART and parsed into `CarRadioState`.
 2. **Power Evaluation:**
