@@ -444,6 +444,15 @@ void psa_hvac_process_can_0x12d(vehicle_climate_t *climate, const uint8_t *data,
     (void)dlc;
 }
 
+void psa_hvac_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    if (frame->id == PSA_CAN_ID_CLIMATE_HVAC) {
+        psa_hvac_process_can_0x1d0(&state->climate, frame->data, frame->dlc);
+    } else if (frame->id == 0x1E3) {
+        psa_hvac_process_can_0x1e3(&state->climate, frame->data, frame->dlc);
+    }
+}
+
 /* --------------------------------------------------------------------------
  * 1.3 Ultrasonic Parking Sensors (Front & Rear AAS)
  * -------------------------------------------------------------------------- */
@@ -503,7 +512,7 @@ size_t build_raise_front_radar(uint8_t fl, uint8_t fc, uint8_t fr,
     return 8;
 }
 
-size_t build_hiworld_radar(const psa_radar_state_t *radar, uint8_t *out, size_t max_len) {
+size_t build_hiworld_radar(const vehicle_radar_t *radar, uint8_t *out, size_t max_len) {
     if (!radar || !out || max_len < 17) {
         return 0;
     }
@@ -537,51 +546,27 @@ size_t build_hiworld_radar(const psa_radar_state_t *radar, uint8_t *out, size_t 
     return 17;
 }
 
-void psa_radar_init(psa_radar_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
-    if (!ctx) return;
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->state.rear_left_outer    = PSA_RADAR_DIST_INACTIVE;
-    ctx->state.rear_left_center   = PSA_RADAR_DIST_INACTIVE;
-    ctx->state.rear_right_center  = PSA_RADAR_DIST_INACTIVE;
-    ctx->state.rear_right_outer   = PSA_RADAR_DIST_INACTIVE;
-    ctx->state.front_left_outer   = PSA_RADAR_DIST_INACTIVE;
-    ctx->state.front_left_center  = PSA_RADAR_DIST_INACTIVE;
-    ctx->state.front_right_center = PSA_RADAR_DIST_INACTIVE;
-    ctx->state.front_right_outer  = PSA_RADAR_DIST_INACTIVE;
-    ctx->uart_tx = uart_tx;
-}
-
-void psa_radar_send_hiworld(psa_radar_ctx_t *ctx) {
-    if (!ctx || !ctx->uart_tx) return;
-
-    uint8_t p[17];
-    size_t len = build_hiworld_radar(&ctx->state, p, sizeof(p));
-    if (len > 0) {
-        ctx->uart_tx(p, len);
-    }
-}
-
 uint8_t psa_radar_map_zone(uint8_t raw3bit) {
     if (raw3bit >= 7) return PSA_RADAR_DIST_INACTIVE;
     return raw3bit;
 }
 
-void psa_radar_process_can_0x0e1(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 6) return;
+void psa_radar_process_can_0x0e1(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc) {
+    if (!radar || !data || dlc < 6) return;
 
-    ctx->state.rear_active    = (data[1] >> 6) & 1;
-    ctx->state.front_active   = (data[1] >> 4) & 1;
-    ctx->state.display_active = (data[5] & 0x02) ? true : false;
+    radar->rear_active    = (data[1] >> 6) & 1;
+    radar->front_active   = (data[1] >> 4) & 1;
+    radar->display_active = (data[5] & 0x02) ? true : false;
 
-    if (!ctx->state.display_active && !ctx->state.rear_active && !ctx->state.front_active) {
-        ctx->state.rear_left_outer    = PSA_RADAR_DIST_INACTIVE;
-        ctx->state.rear_left_center   = PSA_RADAR_DIST_INACTIVE;
-        ctx->state.rear_right_center  = PSA_RADAR_DIST_INACTIVE;
-        ctx->state.rear_right_outer   = PSA_RADAR_DIST_INACTIVE;
-        ctx->state.front_left_outer   = PSA_RADAR_DIST_INACTIVE;
-        ctx->state.front_left_center  = PSA_RADAR_DIST_INACTIVE;
-        ctx->state.front_right_center = PSA_RADAR_DIST_INACTIVE;
-        ctx->state.front_right_outer  = PSA_RADAR_DIST_INACTIVE;
+    if (!radar->display_active && !radar->rear_active && !radar->front_active) {
+        radar->rear_left_outer    = PSA_RADAR_DIST_INACTIVE;
+        radar->rear_left_center   = PSA_RADAR_DIST_INACTIVE;
+        radar->rear_right_center  = PSA_RADAR_DIST_INACTIVE;
+        radar->rear_right_outer   = PSA_RADAR_DIST_INACTIVE;
+        radar->front_left_outer   = PSA_RADAR_DIST_INACTIVE;
+        radar->front_left_center  = PSA_RADAR_DIST_INACTIVE;
+        radar->front_right_center = PSA_RADAR_DIST_INACTIVE;
+        radar->front_right_outer  = PSA_RADAR_DIST_INACTIVE;
     } else {
         uint8_t rl = (data[3] >> 5) & 0x07;
         uint8_t rc = (data[3] >> 2) & 0x07;
@@ -590,45 +575,53 @@ void psa_radar_process_can_0x0e1(psa_radar_ctx_t *ctx, const uint8_t *data, uint
         uint8_t fc = (data[5] >> 5) & 0x07;
         uint8_t fr = (data[5] >> 2) & 0x07;
 
-        ctx->state.rear_left_outer    = psa_radar_map_zone(rl);
-        ctx->state.rear_left_center   = psa_radar_map_zone(rc);
-        ctx->state.rear_right_center  = psa_radar_map_zone(rc);
-        ctx->state.rear_right_outer   = psa_radar_map_zone(rr);
+        radar->rear_left_outer    = psa_radar_map_zone(rl);
+        radar->rear_left_center   = psa_radar_map_zone(rc);
+        radar->rear_right_center  = psa_radar_map_zone(rc);
+        radar->rear_right_outer   = psa_radar_map_zone(rr);
 
-        ctx->state.front_left_outer   = psa_radar_map_zone(fl);
-        ctx->state.front_left_center  = psa_radar_map_zone(fc);
-        ctx->state.front_right_center = psa_radar_map_zone(fc);
-        ctx->state.front_right_outer  = psa_radar_map_zone(fr);
+        radar->front_left_outer   = psa_radar_map_zone(fl);
+        radar->front_left_center  = psa_radar_map_zone(fc);
+        radar->front_right_center = psa_radar_map_zone(fc);
+        radar->front_right_outer  = psa_radar_map_zone(fr);
     }
-
-    psa_radar_send_hiworld(ctx);
+    radar->valid = true;
+    radar->updated = true;
 }
 
-void psa_radar_process_can_0x260(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 3) return;
+void psa_radar_process_can_0x260(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc) {
+    if (!radar || !data || dlc < 3) return;
 
-    ctx->state.rear_left_outer   = data[0];
-    ctx->state.rear_left_center  = data[1];
-    ctx->state.rear_right_center = data[1];
-    ctx->state.rear_right_outer  = data[2];
+    radar->rear_left_outer   = data[0];
+    radar->rear_left_center  = data[1];
+    radar->rear_right_center = data[1];
+    radar->rear_right_outer  = data[2];
 
     if (dlc >= 4) {
-        ctx->state.rear_active  = (data[3] & 0x80) ? true : false;
-        ctx->state.system_fault = (data[3] & 0x01) ? true : false;
+        radar->rear_active  = (data[3] & 0x80) ? true : false;
+        radar->system_fault = (data[3] & 0x01) ? true : false;
     }
-
-    psa_radar_send_hiworld(ctx);
+    radar->valid = true;
+    radar->updated = true;
 }
 
-void psa_radar_process_can_0x270(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 3) return;
+void psa_radar_process_can_0x270(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc) {
+    if (!radar || !data || dlc < 3) return;
 
-    ctx->state.front_left_outer   = data[0];
-    ctx->state.front_left_center  = data[1];
-    ctx->state.front_right_center = data[1];
-    ctx->state.front_right_outer  = data[2];
+    radar->front_left_outer   = data[0];
+    radar->front_left_center  = data[1];
+    radar->front_right_center = data[1];
+    radar->front_right_outer  = data[2];
 
-    psa_radar_send_hiworld(ctx);
+    radar->valid = true;
+    radar->updated = true;
+}
+
+void psa_radar_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    if (frame->id == PSA_CAN_ID_RADAR_0E1) {
+        psa_radar_process_can_0x0e1(&state->radar, frame->data, frame->dlc);
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -757,7 +750,7 @@ void psa_reverse_set_hardware_trigger(bool reverse_active) {
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, reverse_active);
 }
 
-size_t build_hiworld_trip_instant(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
+size_t build_hiworld_trip_instant(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
     if (!trip || !out || max_len < 15) {
         return 0;
     }
@@ -784,7 +777,7 @@ size_t build_hiworld_trip_instant(const psa_trip_state_t *trip, uint8_t *out, si
     return 15;
 }
 
-size_t build_hiworld_trip1(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
+size_t build_hiworld_trip1(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
     if (!trip || !out || max_len < 11) {
         return 0;
     }
@@ -807,7 +800,7 @@ size_t build_hiworld_trip1(const psa_trip_state_t *trip, uint8_t *out, size_t ma
     return 11;
 }
 
-size_t build_hiworld_trip2(const psa_trip_state_t *trip, uint8_t *out, size_t max_len) {
+size_t build_hiworld_trip2(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
     if (!trip || !out || max_len < 11) {
         return 0;
     }
@@ -830,89 +823,99 @@ size_t build_hiworld_trip2(const psa_trip_state_t *trip, uint8_t *out, size_t ma
     return 11;
 }
 
-void psa_trip_init(psa_trip_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
-    if (!ctx) return;
-    memset(ctx, 0, sizeof(psa_trip_ctx_t));
-    ctx->uart_tx = uart_tx;
+void psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
+    if (!trip || !data || dlc < 7) return;
+
+    /* Byte 0 Bit 7: Fuel info hidden/invalid.
+     * Also guard against uninitialized/BSI status frames where all data is 0xFF.
+     */
+    if ((data[0] & 0x80) != 0) return;
+    uint16_t fuel = read_be16(&data[1]);
+    uint16_t range = read_be16(&data[3]);
+    if (fuel == 0xFFFF && range == 0xFFFF) return;
+
+    trip->instant_fuel_deci = fuel;
+    trip->range_km          = range;
+    trip->dest_dist_km      = read_be16(&data[5]);
+    trip->instant_valid     = true;
+    trip->updated_page      = 1;
 }
 
-void psa_trip_send_instant(psa_trip_ctx_t *ctx) {
-    if (!ctx || !ctx->uart_tx) return;
+void psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
+    if (!trip || !data || dlc < 5) return;
 
-    uint8_t p[16];
-    size_t len = build_hiworld_trip_instant(&ctx->state, p, sizeof(p));
-    if (len > 0) {
-        ctx->uart_tx(p, len);
-    }
+    trip->trip1_distance_km = read_be16(&data[1]);
+    trip->trip1_avg_fuel    = read_be16(&data[3]);
+    trip->trip1_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
+    trip->trip1_valid       = true;
+    trip->updated_page      = 2;
 }
 
-void psa_trip_send_trip1(psa_trip_ctx_t *ctx) {
-    if (!ctx || !ctx->uart_tx) return;
+void psa_trip_process_can_0x261(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
+    if (!trip || !data || dlc < 5) return;
 
-    uint8_t p[11];
-    size_t len = build_hiworld_trip1(&ctx->state, p, sizeof(p));
-    if (len > 0) {
-        ctx->uart_tx(p, len);
-    }
+    trip->trip2_distance_km = read_be16(&data[1]);
+    trip->trip2_avg_fuel    = read_be16(&data[3]);
+    trip->trip2_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
+    trip->trip2_valid       = true;
+    trip->updated_page      = 3;
 }
 
-void psa_trip_send_trip2(psa_trip_ctx_t *ctx) {
-    if (!ctx || !ctx->uart_tx) return;
-
-    uint8_t p[11];
-    size_t len = build_hiworld_trip2(&ctx->state, p, sizeof(p));
-    if (len > 0) {
-        ctx->uart_tx(p, len);
-    }
-}
-
-void psa_trip_process_can_0x0b6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 4) return;
+void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc) {
+    if (!state || !data || dlc < 4) return;
     uint16_t raw_rpm = read_be16(&data[0]);
     uint16_t raw_spd = read_be16(&data[2]);
 
-    ctx->state.rpm = (raw_rpm == 0xFFFF) ? 0 : (raw_rpm >> 3);
-    ctx->state.speed_kmh = (raw_spd == 0xFFFF) ? 0 : (raw_spd / 100);
+    state->rpm = (raw_rpm == 0xFFFF) ? 0 : (raw_rpm >> 3);
+    state->speed_kmh = (raw_spd == 0xFFFF) ? 0 : (raw_spd / 100);
 }
 
-void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 7) return;
-
-    ctx->state.instant_fuel_deci = read_be16(&data[1]);
-    ctx->state.range_km          = read_be16(&data[3]);
-    ctx->state.dest_dist_km      = read_be16(&data[5]);
-
-    psa_trip_send_instant(ctx);
-}
-
-void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 5) return;
-
-    ctx->state.trip1_distance_km = read_be16(&data[1]);
-    ctx->state.trip1_avg_fuel    = read_be16(&data[3]);
-    ctx->state.trip1_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
-
-    psa_trip_send_trip1(ctx);
-}
-
-void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 5) return;
-
-    ctx->state.trip2_distance_km = read_be16(&data[1]);
-    ctx->state.trip2_avg_fuel    = read_be16(&data[3]);
-    ctx->state.trip2_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
-
-    psa_trip_send_trip2(ctx);
-}
-
-void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 8) return;
-
-    ctx->state.coolant_c = (int8_t)((int16_t)data[1] - 40);
-    if (data[5] != 0xFF) {
-        ctx->state.ambient_c = (int8_t)(((int16_t)data[5] * 5 - 400) / 10);
+void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    if (frame->id == 0x0B6) {
+        psa_engine_process_can_0x0b6(state, frame->data, frame->dlc);
     }
-    ctx->state.reverse_active = (data[7] & 0x80) != 0;
+}
+
+void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc) {
+    if (!state || !data || dlc < 8) return;
+    state->reverse_gear = (data[7] & 0x80) != 0;
+    if (data[5] != 0xFF) {
+        state->climate.outdoor_temp_raw = data[5];
+    }
+}
+
+void psa_stalk_process_tip_0x221(vehicle_wheel_t *wheel, const uint8_t *data, uint8_t dlc) {
+    if (!wheel || !data || dlc < 1) return;
+    bool curr_trip = (data[0] & 0x08) != 0;
+    bool prev_trip = (g_stalk_state.prev_trip_tip != 0);
+
+    if (curr_trip && !prev_trip) {
+        wheel->active_key = WHEEL_KEY_TRIP;
+        wheel->press_state = 1;
+    } else if (!curr_trip && prev_trip) {
+        wheel->active_key = WHEEL_KEY_NONE;
+        wheel->press_state = 0;
+    }
+    g_stalk_state.prev_trip_tip = curr_trip ? 1 : 0;
+}
+
+void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    switch (frame->id) {
+        case PSA_CAN_ID_TRIP_INSTANT: /* 0x221 */
+            psa_stalk_process_tip_0x221(&state->wheel, frame->data, frame->dlc);
+            psa_trip_process_can_0x221(&state->trip, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_TRIP1_ODB: /* 0x2A1 */
+            psa_trip_process_can_0x2a1(&state->trip, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_TRIP2_ODB: /* 0x261 */
+            psa_trip_process_can_0x261(&state->trip, frame->data, frame->dlc);
+            break;
+        default:
+            break;
+    }
 }
 
 bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame) {
@@ -1041,8 +1044,8 @@ size_t build_hiworld_doors(const psa_doors_body_t *doors, uint8_t *out, size_t m
     return 15;
 }
 
-size_t build_hiworld_doors_state(const psa_doors_state_t *state, uint8_t *out, size_t max_len) {
-    if (!state || !out || max_len < 15) {
+size_t build_hiworld_doors_state(const vehicle_doors_t *doors, uint8_t *out, size_t max_len) {
+    if (!doors || !out || max_len < 15) {
         return 0;
     }
 
@@ -1054,12 +1057,12 @@ size_t build_hiworld_doors_state(const psa_doors_state_t *state, uint8_t *out, s
     out[5] = 0x04;                /* Byte 1 */
 
     uint8_t b2 = 0x04;          /* Base active flag */
-    if (state->door_front_left)  b2 |= 0x80;
-    if (state->door_front_right) b2 |= 0x40;
-    if (state->door_rear_left)   b2 |= 0x20;
-    if (state->door_rear_right)  b2 |= 0x10;
-    if (state->trunk_open)       b2 |= 0x08;
-    if (state->hood_open)        b2 |= 0x04;
+    if (doors->door_driver)     b2 |= 0x80;
+    if (doors->door_passenger)  b2 |= 0x40;
+    if (doors->door_rear_left)  b2 |= 0x20;
+    if (doors->door_rear_right) b2 |= 0x10;
+    if (doors->trunk)           b2 |= 0x08;
+    if (doors->hood)            b2 |= 0x04;
     out[6] = b2;
 
     out[7]  = 0x00;
@@ -1079,43 +1082,27 @@ size_t build_hiworld_doors_state(const psa_doors_state_t *state, uint8_t *out, s
     return 15;
 }
 
-void psa_doors_init(psa_doors_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
-    if (!ctx) return;
-    memset(ctx, 0, sizeof(psa_doors_ctx_t));
-    ctx->uart_tx = uart_tx;
-}
-
-void psa_doors_send_hiworld(psa_doors_ctx_t *ctx) {
-    if (!ctx || !ctx->uart_tx) return;
-
-    uint8_t p[16];
-    size_t len = build_hiworld_doors_state(&ctx->state, p, sizeof(p));
-    if (len > 0) {
-        ctx->uart_tx(p, len);
-    }
-}
-
-void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 1) return;
+void psa_doors_process_can_0x220(vehicle_doors_t *doors, bool *handbrake, const uint8_t *data, uint8_t dlc) {
+    if (!doors || !data || dlc < 1) return;
 
     uint8_t b0 = data[0];
-    ctx->state.door_front_left   = (b0 & 0x80) ? true : false;
-    ctx->state.door_front_right  = (b0 & 0x40) ? true : false;
-    ctx->state.door_rear_left    = (b0 & 0x20) ? true : false;
-    ctx->state.door_rear_right   = (b0 & 0x10) ? true : false;
-    ctx->state.trunk_open        = (b0 & 0x08) ? true : false;
-    ctx->state.hood_open         = (b0 & 0x04) ? true : false;
-    ctx->state.rear_window_open  = (b0 & 0x02) ? true : false;
-    ctx->state.fuel_flap_open    = (b0 & 0x01) ? true : false;
+    doors->door_driver     = (b0 & 0x80) ? true : false;
+    doors->door_passenger  = (b0 & 0x40) ? true : false;
+    doors->door_rear_left  = (b0 & 0x20) ? true : false;
+    doors->door_rear_right = (b0 & 0x10) ? true : false;
+    doors->trunk           = (b0 & 0x08) ? true : false;
+    doors->hood            = (b0 & 0x04) ? true : false;
 
-    if (dlc >= 2) {
-        ctx->state.auto_rear_wiper_active = (data[1] & 0x80) ? true : false;
-        ctx->state.auto_locking_active    = (data[1] & 0x10) ? true : false;
-        ctx->state.parking_radar_enabled  = (data[1] & 0x08) ? true : false;
-        ctx->state.handbrake_pulled       = (data[1] & 0x01) ? true : false;
+    if (dlc >= 2 && handbrake) {
+        *handbrake = (data[1] & 0x01) ? true : false;
     }
+}
 
-    psa_doors_send_hiworld(ctx);
+void psa_doors_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    if (frame->id == PSA_CAN_ID_DOORS_BODY_220) {
+        psa_doors_process_can_0x220(&state->doors, &state->handbrake, frame->data, frame->dlc);
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -2074,17 +2061,16 @@ size_t build_hiworld_radio_preset_names(const vehicle_radio_t *radio, uint8_t *o
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */
-void psa_tpms_init(psa_tpms_ctx_t *ctx, canbox_uart_tx_fn uart_tx) {
-    if (!ctx) return;
-    memset(ctx, 0, sizeof(psa_tpms_ctx_t));
-    ctx->state.fl_press_bar_deci = 24; /* 2.4 Bar default */
-    ctx->state.fr_press_bar_deci = 24;
-    ctx->state.rr_press_bar_deci = 22; /* 2.2 Bar default */
-    ctx->state.rl_press_bar_deci = 22;
-    ctx->uart_tx = uart_tx;
+void psa_tpms_init(vehicle_tpms_t *tpms) {
+    if (!tpms) return;
+    memset(tpms, 0, sizeof(vehicle_tpms_t));
+    tpms->pressure_bar_deci[0] = 24; /* 2.4 Bar default */
+    tpms->pressure_bar_deci[1] = 24;
+    tpms->pressure_bar_deci[2] = 22; /* 2.2 Bar default */
+    tpms->pressure_bar_deci[3] = 22;
 }
 
-size_t build_hiworld_tpms_numeric(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len) {
+size_t build_hiworld_tpms_numeric(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len) {
     if (!tpms || !out || max_len < 11) {
         return 0;
     }
@@ -2093,10 +2079,10 @@ size_t build_hiworld_tpms_numeric(const psa_tpms_state_t *tpms, uint8_t *out, si
     out[2] = 0x06;                     /* Length: 6 Payload bytes */
     out[3] = HIWORLD_CMD_TPMS_NUMERIC; /* Cmd 0x66 */
     out[4] = 0x01;                     /* Mode: Live */
-    out[5] = tpms->fl_press_bar_deci;
-    out[6] = tpms->fr_press_bar_deci;
-    out[7] = tpms->rl_press_bar_deci;
-    out[8] = tpms->rr_press_bar_deci;
+    out[5] = tpms->pressure_bar_deci[0];
+    out[6] = tpms->pressure_bar_deci[1];
+    out[7] = tpms->pressure_bar_deci[2];
+    out[8] = tpms->pressure_bar_deci[3];
     out[9] = 0x00;                     /* Unit: Bar */
 
     uint8_t sum = 0;
@@ -2107,7 +2093,7 @@ size_t build_hiworld_tpms_numeric(const psa_tpms_state_t *tpms, uint8_t *out, si
     return 11;
 }
 
-size_t build_hiworld_tpms_discrete(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len) {
+size_t build_hiworld_tpms_discrete(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len) {
     if (!tpms || !out || max_len < 9) {
         return 0;
     }
@@ -2115,10 +2101,10 @@ size_t build_hiworld_tpms_discrete(const psa_tpms_state_t *tpms, uint8_t *out, s
     out[1] = HIWORLD_SOF2;
     out[2] = 0x04;                      /* Length: 4 Payload bytes */
     out[3] = HIWORLD_CMD_TPMS_DISCRETE; /* Cmd 0x18 */
-    out[4] = tpms->fl_state;
-    out[5] = tpms->fr_state;
-    out[6] = tpms->rl_state;
-    out[7] = tpms->rr_state;
+    out[4] = tpms->alarm_state[0];
+    out[5] = tpms->alarm_state[1];
+    out[6] = tpms->alarm_state[2];
+    out[7] = tpms->alarm_state[3];
 
     uint8_t sum = 0;
     for (size_t i = 2; i <= 7; i++) {
@@ -2128,77 +2114,55 @@ size_t build_hiworld_tpms_discrete(const psa_tpms_state_t *tpms, uint8_t *out, s
     return 9;
 }
 
-void psa_tpms_send_numeric(psa_tpms_ctx_t *ctx) {
-    if (!ctx || !ctx->uart_tx) return;
-
-    uint8_t p[11];
-    size_t len = build_hiworld_tpms_numeric(&ctx->state, p, sizeof(p));
-    if (len > 0) {
-        ctx->uart_tx(p, len);
-    }
-}
-
-void psa_tpms_send_discrete(psa_tpms_ctx_t *ctx) {
-    if (!ctx || !ctx->uart_tx) return;
-
-    uint8_t p[9];
-    size_t len = build_hiworld_tpms_discrete(&ctx->state, p, sizeof(p));
-    if (len > 0) {
-        ctx->uart_tx(p, len);
-    }
-}
-
-void psa_tpms_process_can_0x361(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 8) return;
+void psa_tpms_process_can_0x361(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
+    if (!tpms || !data || dlc < 8) return;
 
     uint16_t fl_raw = read_be16(&data[0]);
     uint16_t fr_raw = read_be16(&data[2]);
     uint16_t rr_raw = read_be16(&data[4]);
     uint16_t rl_raw = read_be16(&data[6]);
 
-    ctx->state.fl_state = (uint8_t)((fl_raw >> 14) & 0x03);
-    ctx->state.fr_state = (uint8_t)((fr_raw >> 14) & 0x03);
-    ctx->state.rr_state = (uint8_t)((rr_raw >> 14) & 0x03);
-    ctx->state.rl_state = (uint8_t)((rl_raw >> 14) & 0x03);
+    tpms->alarm_state[0] = (uint8_t)((fl_raw >> 14) & 0x03);
+    tpms->alarm_state[1] = (uint8_t)((fr_raw >> 14) & 0x03);
+    tpms->alarm_state[2] = (uint8_t)((rl_raw >> 14) & 0x03);
+    tpms->alarm_state[3] = (uint8_t)((rr_raw >> 14) & 0x03);
 
-    if (ctx->state.fl_state != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
-        ctx->state.fl_press_bar_deci = (uint8_t)(fl_raw & 0x3FFF);
+    if (tpms->alarm_state[0] != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
+        tpms->pressure_bar_deci[0] = (uint8_t)(fl_raw & 0x3FFF);
     } else {
-        ctx->state.fl_press_bar_deci = 0;
+        tpms->pressure_bar_deci[0] = 0;
     }
-    if (ctx->state.fr_state != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
-        ctx->state.fr_press_bar_deci = (uint8_t)(fr_raw & 0x3FFF);
+    if (tpms->alarm_state[1] != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
+        tpms->pressure_bar_deci[1] = (uint8_t)(fr_raw & 0x3FFF);
     } else {
-        ctx->state.fr_press_bar_deci = 0;
+        tpms->pressure_bar_deci[1] = 0;
     }
-    if (ctx->state.rr_state != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
-        ctx->state.rr_press_bar_deci = (uint8_t)(rr_raw & 0x3FFF);
+    if (tpms->alarm_state[2] != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
+        tpms->pressure_bar_deci[2] = (uint8_t)(rl_raw & 0x3FFF);
     } else {
-        ctx->state.rr_press_bar_deci = 0;
+        tpms->pressure_bar_deci[2] = 0;
     }
-    if (ctx->state.rl_state != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
-        ctx->state.rl_press_bar_deci = (uint8_t)(rl_raw & 0x3FFF);
+    if (tpms->alarm_state[3] != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
+        tpms->pressure_bar_deci[3] = (uint8_t)(rr_raw & 0x3FFF);
     } else {
-        ctx->state.rl_press_bar_deci = 0;
+        tpms->pressure_bar_deci[3] = 0;
     }
 
-    psa_tpms_send_numeric(ctx);
-    psa_tpms_send_discrete(ctx);
+    tpms->valid = true;
 }
 
-void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 4) return;
+void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
+    if (!tpms || !data || dlc < 4) return;
 
-    ctx->state.fl_press_bar_deci = (uint8_t)((data[0] * 5 + 5) / 10);
-    ctx->state.fr_press_bar_deci = (uint8_t)((data[1] * 5 + 5) / 10);
-    ctx->state.rr_press_bar_deci = (uint8_t)((data[2] * 5 + 5) / 10);
-    ctx->state.rl_press_bar_deci = (uint8_t)((data[3] * 5 + 5) / 10);
-
-    psa_tpms_send_numeric(ctx);
+    tpms->pressure_bar_deci[0] = (uint8_t)((data[0] * 5 + 5) / 10);
+    tpms->pressure_bar_deci[1] = (uint8_t)((data[1] * 5 + 5) / 10);
+    tpms->pressure_bar_deci[2] = (uint8_t)((data[3] * 5 + 5) / 10); /* RL */
+    tpms->pressure_bar_deci[3] = (uint8_t)((data[2] * 5 + 5) / 10); /* RR */
+    tpms->valid = true;
 }
 
-void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
-    if (!ctx || !data || dlc < 4) return;
+void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
+    if (!tpms || !data || dlc < 4) return;
 
     /* PSA 0x1E1 bits 5..3 carry RT4 tyre state enum:
        0=OK, 1=LOW, 2=FLAT, 3=NO_DATA, 4=BATTERY_LOW */
@@ -2209,12 +2173,28 @@ void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_
 
     /* Map PSA enum to Hiworld discrete alarm:
        0=Normal, 1=Low, 2=Puncture, 3=Fault/Offline */
-    ctx->state.fl_state = (fl_st >= 3) ? 3 : fl_st;
-    ctx->state.fr_state = (fr_st >= 3) ? 3 : fr_st;
-    ctx->state.rr_state = (rr_st >= 3) ? 3 : rr_st;
-    ctx->state.rl_state = (rl_st >= 3) ? 3 : rl_st;
+    tpms->alarm_state[0] = (fl_st >= 3) ? 3 : fl_st;
+    tpms->alarm_state[1] = (fr_st >= 3) ? 3 : fr_st;
+    tpms->alarm_state[2] = (rl_st >= 3) ? 3 : rl_st;
+    tpms->alarm_state[3] = (rr_st >= 3) ? 3 : rr_st;
+    tpms->valid = true;
+}
 
-    psa_tpms_send_discrete(ctx);
+void psa_tpms_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    switch (frame->id) {
+        case PSA_CAN_ID_TPMS_DIRECT_361:
+            psa_tpms_process_can_0x361(&state->tpms, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_TPMS_PRESSURES_3A1:
+            psa_tpms_process_can_0x3a1(&state->tpms, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_TPMS_STATUS_1E1:
+            psa_tpms_process_can_0x1e1(&state->tpms, frame->data, frame->dlc);
+            break;
+        default:
+            break;
+    }
 }
 
 size_t build_raise_tpms_numeric(const canbox_tpms_state_t *tpms, uint8_t *out) {

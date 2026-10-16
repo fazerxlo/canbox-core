@@ -167,6 +167,7 @@ void psa_decode_hvac_0x1d0(const uint8_t *data, uint8_t dlc, hvac_state_t *st);
 void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
 void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
 void psa_hvac_process_can_0x12d(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
+void psa_hvac_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 size_t build_raise_hvac_packet(const hvac_state_t *st, uint8_t *out_buf, size_t max_len);
 
 /* --------------------------------------------------------------------------
@@ -191,33 +192,14 @@ size_t build_raise_front_radar(uint8_t fl, uint8_t fc, uint8_t fr,
 #define HIWORLD_CMD_RADAR_STATE  0x41
 #endif
 
-typedef struct {
-    uint8_t rear_left_outer;
-    uint8_t rear_left_center;
-    uint8_t rear_right_center;
-    uint8_t rear_right_outer;
-    uint8_t front_left_outer;
-    uint8_t front_left_center;
-    uint8_t front_right_center;
-    uint8_t front_right_outer;
-    bool    rear_active;
-    bool    front_active;
-    bool    display_active;
-    bool    system_fault;
-} psa_radar_state_t;
+typedef vehicle_radar_t psa_radar_state_t;
 
-typedef struct {
-    psa_radar_state_t state;
-    canbox_uart_tx_fn uart_tx;
-} psa_radar_ctx_t;
-
-void psa_radar_init(psa_radar_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
-void psa_radar_send_hiworld(psa_radar_ctx_t *ctx);
 uint8_t psa_radar_map_zone(uint8_t raw3bit);
-void psa_radar_process_can_0x0e1(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_radar_process_can_0x260(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_radar_process_can_0x270(psa_radar_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-size_t build_hiworld_radar(const psa_radar_state_t *radar, uint8_t *out, size_t max_len);
+void psa_radar_process_can_0x0e1(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc);
+void psa_radar_process_can_0x260(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc);
+void psa_radar_process_can_0x270(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc);
+void psa_radar_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
+size_t build_hiworld_radar(const vehicle_radar_t *radar, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.4 Trip Computer & Engine Telemetry
@@ -250,45 +232,23 @@ void psa_reverse_set_hardware_trigger(bool reverse_active);
 #define HIWORLD_CMD_ECU_P1  0x14
 #define HIWORLD_CMD_ECU_P2  0x15
 
-typedef struct {
-    uint16_t rpm;
-    uint16_t speed_kmh;
-    int8_t   coolant_c;
-    int8_t   ambient_c;
-    bool     reverse_active;
-    
-    uint16_t instant_fuel_deci; /* 0.1 L/100km */
-    uint16_t range_km;          /* Distance to Empty */
-    uint16_t dest_dist_km;      /* Remaining Destination Distance / Target Mileage */
-    
-    uint16_t trip1_avg_fuel;    /* 0.1 L/100km */
-    uint8_t  trip1_avg_speed;   /* km/h */
-    uint16_t trip1_distance_km; /* km */
+typedef vehicle_trip_t psa_trip_state_t;
 
-    uint16_t trip2_avg_fuel;    /* 0.1 L/100km */
-    uint8_t  trip2_avg_speed;   /* km/h */
-    uint16_t trip2_distance_km; /* km */
-} psa_trip_state_t;
+size_t build_hiworld_trip_instant(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
+size_t build_hiworld_trip1(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
+size_t build_hiworld_trip2(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
 
-typedef struct {
-    psa_trip_state_t  state;
-    canbox_uart_tx_fn uart_tx;
-} psa_trip_ctx_t;
+void psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
+void psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
+void psa_trip_process_can_0x261(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
+void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 
-void psa_trip_init(psa_trip_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
-void psa_trip_send_instant(psa_trip_ctx_t *ctx);
-void psa_trip_send_trip1(psa_trip_ctx_t *ctx);
-void psa_trip_send_trip2(psa_trip_ctx_t *ctx);
+void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
+void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
+void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
 
-size_t build_hiworld_trip_instant(const psa_trip_state_t *trip, uint8_t *out, size_t max_len);
-size_t build_hiworld_trip1(const psa_trip_state_t *trip, uint8_t *out, size_t max_len);
-size_t build_hiworld_trip2(const psa_trip_state_t *trip, uint8_t *out, size_t max_len);
+void psa_stalk_process_tip_0x221(vehicle_wheel_t *wheel, const uint8_t *data, uint8_t dlc);
 
-void psa_trip_process_can_0x0b6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
 bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame);
 hal_status_t psa_trip_send_reset(uint8_t trip_index);
 
@@ -314,35 +274,16 @@ typedef struct {
     bool parking_radar_enabled;
 } psa_doors_body_t;
 
-typedef struct {
-    bool door_front_left;
-    bool door_front_right;
-    bool door_rear_left;
-    bool door_rear_right;
-    bool trunk_open;
-    bool hood_open;
-    bool handbrake_pulled;
-    bool rear_window_open;
-    bool fuel_flap_open;
-    bool auto_rear_wiper_active;
-    bool auto_locking_active;
-    bool parking_radar_enabled;
-} psa_doors_state_t;
+typedef vehicle_doors_t psa_doors_state_t;
 
-typedef struct {
-    psa_doors_state_t state;
-    canbox_uart_tx_fn uart_tx;
-} psa_doors_ctx_t;
-
-void psa_doors_init(psa_doors_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
-void psa_doors_send_hiworld(psa_doors_ctx_t *ctx);
-void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
+void psa_doors_process_can_0x220(vehicle_doors_t *doors, bool *handbrake, const uint8_t *data, uint8_t dlc);
+void psa_doors_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 
 void psa_decode_doors_0x220(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors);
 void psa_decode_doors_0x221(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors);
 size_t build_raise_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len);
 size_t build_hiworld_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len);
-size_t build_hiworld_doors_state(const psa_doors_state_t *state, uint8_t *out, size_t max_len);
+size_t build_hiworld_doors_state(const vehicle_doors_t *state, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.6 Steering Wheel Angle & Dynamic Trajectory
@@ -438,31 +379,16 @@ size_t build_hiworld_media_state(const vehicle_cdc_t *cdc, uint8_t *out_buf, siz
 #define HIWORLD_CMD_TPMS_NUMERIC  0x66
 #define HIWORLD_CMD_TPMS_DISCRETE 0x18
 
-typedef struct {
-    uint8_t fl_press_bar_deci; /* 0.1 Bar: 24 = 2.4 Bar */
-    uint8_t fr_press_bar_deci;
-    uint8_t rl_press_bar_deci;
-    uint8_t rr_press_bar_deci;
-    uint8_t fl_state;          /* 0=OK, 1=LOW, 2=PUNCTURE, 3=FAULT */
-    uint8_t fr_state;
-    uint8_t rl_state;
-    uint8_t rr_state;
-} psa_tpms_state_t;
+typedef vehicle_tpms_t psa_tpms_state_t;
 
-typedef struct {
-    psa_tpms_state_t  state;
-    canbox_uart_tx_fn uart_tx;
-} psa_tpms_ctx_t;
+void psa_tpms_init(vehicle_tpms_t *tpms);
+void psa_tpms_process_can_0x361(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc);
+void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc);
+void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc);
+void psa_tpms_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 
-void psa_tpms_init(psa_tpms_ctx_t *ctx, canbox_uart_tx_fn uart_tx);
-void psa_tpms_send_numeric(psa_tpms_ctx_t *ctx);
-void psa_tpms_send_discrete(psa_tpms_ctx_t *ctx);
-void psa_tpms_process_can_0x361(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc);
-
-size_t build_hiworld_tpms_numeric(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len);
-size_t build_hiworld_tpms_discrete(const psa_tpms_state_t *tpms, uint8_t *out, size_t max_len);
+size_t build_hiworld_tpms_numeric(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len);
+size_t build_hiworld_tpms_discrete(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len);
 
 typedef struct {
     uint16_t pressure_dbar[4]; /* FL, FR, RL, RR in 0.1 Bar */

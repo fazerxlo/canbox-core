@@ -95,11 +95,11 @@ void test_integration_raise_door_status_pipeline(void) {
 void test_integration_raise_telemetry_periodic_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_RAISE);
 
-    // Engine RPM & Speed CAN frame
+    // Engine RPM & Speed CAN frame: RPM=1000 (8000 = 0x1F40), Speed=50 km/h (5000 = 0x1388)
     can_frame_t b6_frame = {
         .id = 0x0B6,
         .dlc = 8,
-        .data = { 0x1F, 0x40, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00 }
+        .data = { 0x1F, 0x40, 0x13, 0x88, 0x00, 0x00, 0x00, 0x00 }
     };
     can_router_process_can(&b6_frame);
 

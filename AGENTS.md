@@ -42,14 +42,14 @@ Before proposing code changes or completing a task, ensure the change compiles a
 ~/.platformio/penv/bin/pio test -e integration_test
 ```
 
-* **Build STM32 Firmware Target:**
+* **Build STM32 Firmware Target (Silent to prevent context token inflation):**
 ```bash
-~/.platformio/penv/bin/pio run -e stm32_cbox
+~/.platformio/penv/bin/pio run -s -e stm32_cbox
 ```
 
-* **Build ESP32 Firmware Target:**
+* **Build ESP32 Firmware Target (Silent to prevent context token inflation):**
 ```bash
-~/.platformio/penv/bin/pio run -e esp32_cbox
+~/.platformio/penv/bin/pio run -s -e esp32_cbox
 ```
 
 * **Execute Interactive Desktop Simulator:**
@@ -184,22 +184,31 @@ When adding or editing a car profile:
 
 To complete tasks rapidly with minimal token and tool-call overhead:
 
-1. **Large-Window File Reads (No Micro-Slicing):**
+1. **Silent PlatformIO Builds (`-s`):**
+   - Always run firmware builds with `-s` (`--silent`): `~/.platformio/penv/bin/pio run -s -e stm32_cbox` and `~/.platformio/penv/bin/pio run -s -e esp32_cbox`.
+   - Suppresses voluminous object file compilation chatter (saving 5,000–10,000 tokens per build cycle). Only compiler warnings and errors are streamed into context.
+2. **Surgical Edits vs. Full Block Replacements:**
+   - In `replace_file_content`, target only the exact lines, variables, or function signatures needing modification rather than wrapping entire multi-hundred-line functions into the replacement block.
+   - When extracting or decoupling modules, create fresh files using `write_to_file` instead of generating massive replacement diffs inside monolithic files.
+3. **Targeted Line-Number Discovery via Grep (No Speculative Reading):**
+   - Use `grep -n` or `rg -n` first to locate exact symbol line ranges before calling `view_file` or `replace_file_content`, rather than executing multiple speculative `view_file` scrolling calls across large files.
+4. **Filtered Test Iteration (`-f`), Full Suite on Gate Only:**
+   - During code iteration, run only the targeted test binary with `-f` (e.g. `pio test -e native_test_runner -f test_protocol_parser` or `pio test -e integration_test -f test_integration`).
+   - Run the full 4-target verification suite (`native_test_runner`, `integration_test`, `stm32_cbox`, `esp32_cbox`) once at the end of the phase.
+5. **Large-Window File Reads (No Micro-Slicing):**
    - `view_file` supports up to **800 lines per call**. Read 300–800 lines in a single call rather than chaining multiple 20–50 line reads across the same file.
-2. **Parallel Tool Call Batching:**
+6. **Parallel Tool Call Batching:**
    - Always batch independent `view_file`, search, or command calls in parallel within a single turn rather than issuing them sequentially one per turn.
-3. **Log-Fix Short-Circuit (`[APP_UART_TX]` Awareness):**
+7. **Log-Fix Short-Circuit (`[APP_UART_TX]` Awareness):**
    - When the user provides an E2E dump log (`dump_*.log`) **and** explicitly states the required fix rule (e.g., *"When RD4 radio is off, do not send CD/Tuner frames"*), extract only the relevant `[CAN_RX]` test vectors from the log and proceed directly to code implementation.
    - Remember that `[APP_UART_TX]` in bench/vehicle logs is emitted by the *firmware binary flashed on the MCU at capture time* (which may be an older build), not necessarily the current local source code. Never spend tool calls hunting through local C files to explain historical `[APP_UART_TX]` anomalies if the current code path is already clear.
-4. **PSA Two-Layer Decoder Map (Skip Exploratory Grepping):**
+8. **PSA Two-Layer Decoder Map (Skip Exploratory Grepping):**
    - `src/profiles/profile_psa.c`: Contains `s_psa_rules[]` CAN ID routing table, routing all RD4 CAN IDs (`0x165`, `0x1A5`, `0x1E5`, `0x125`, `0x225`, `0x265`, `0x2A5`, `0x0A4`, `0x325`, `0x365`, `0x3A5`, `0x3A6`) directly to `psa_rd4_decode_frame()`.
    - `src/profiles/peugeot_407.c`: Contains `psa_rd4_decode_frame()`, detailed subsystem decoders (`psa_rd4_process_can_*`, `psa_hvac_process_can_*`), and Hiworld wire builders (`build_hiworld_*`). CAN `0x165` is the sole authority over `state->media.radio` power (`power_status`), presence (`present`), sleep (`sleep`), and active source (`source_mode`).
    - `src/core/can_router.c`: Handles delta detection (`*.updated`) in `can_router_process_can()` and the 60-second periodic resync in `can_router_periodic_100ms()`.
-5. **State-Machine-First Design (No Ad-Hoc Boolean Patching):**
+9. **State-Machine-First Design (No Ad-Hoc Boolean Patching):**
    - For stateful subsystems (RD4 `source_mode`, HVAC flap/AQS modes, DSP menu activity), define a clean `(Current State, Event) -> Next State & Serial Action` transition rule upfront rather than adding extra boolean flags across layers.
    - Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) always cache their data into `state->media` without turning the radio ON or overwriting `source_mode == 0xFF` (`OFF`) or `>= 0x20` (`AUX`/`CD`/`CDC`).
    - `can_router.c` dispatches `0x84`/`0x85`/`0x86`/`0x97` strictly based on `source_mode` (`< 0x20` Tuner, `0x20..0x21` AUX, `0x30..0x31` CD/CDC, `0xFF` one-shot OFF).
-6. **Filtered Test Iteration, Parallel Final Verification:**
-   - During code iteration, run only the targeted test binary with `-f` (e.g. `pio test -e integration_test -f test_integration`). Run the full 4-target verification suite (`native_test_runner`, `integration_test`, `stm32_cbox`, `esp32_cbox`) once at the end.
 
 

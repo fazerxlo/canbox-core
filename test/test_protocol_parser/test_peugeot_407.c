@@ -474,76 +474,74 @@ void test_peugeot_407_front_parking_radar(void) {
 }
 
 void test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center(void) {
-    psa_radar_ctx_t ctx;
-    psa_radar_init(&ctx, test_radar_uart_tx);
-    s_radar_uart_tx_calls = 0;
+    vehicle_radar_t radar;
+    memset(&radar, 0, sizeof(radar));
 
     // Vector 1: Native CAN 0x0E1 Obstacle Rear Center
     // cansend vcan0 0E1#24403F04202600
     const uint8_t can_0e1[] = { 0x24, 0x40, 0x3F, 0x04, 0x20, 0x26, 0x00 };
-    psa_radar_process_can_0x0e1(&ctx, can_0e1, sizeof(can_0e1));
+    psa_radar_process_can_0x0e1(&radar, can_0e1, sizeof(can_0e1));
 
-    TEST_ASSERT_EQUAL_INT(1, s_radar_uart_tx_calls);
+    TEST_ASSERT_TRUE(radar.rear_active);
+    TEST_ASSERT_FALSE(radar.front_active);
+    TEST_ASSERT_TRUE(radar.display_active);
+
+    // Verify builder directly
+    uint8_t out[20];
+    size_t len = build_hiworld_radar(&radar, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(17, len);
 
     // Expected UART Output (Hiworld 0x41):
     // 5A A5 0C 41 00 01 01 01 00 01 01 01 01 00 3F 05 97
     const uint8_t expected[] = {
         0x5A, 0xA5, 0x0C, 0x41, 0x00, 0x01, 0x01, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x3F, 0x05, 0x97
     };
-    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), s_radar_uart_len[0]);
-
-    TEST_ASSERT_TRUE(ctx.state.rear_active);
-    TEST_ASSERT_FALSE(ctx.state.front_active);
-    TEST_ASSERT_TRUE(ctx.state.display_active);
-
-    // Verify builder directly
-    uint8_t out[20];
-    size_t len = build_hiworld_radar(&ctx.state, out, sizeof(out));
-    TEST_ASSERT_EQUAL_UINT32(17, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
 void test_peugeot_407_radar_hiworld_vector_2_quiescent_all_clear(void) {
-    psa_radar_ctx_t ctx;
-    psa_radar_init(&ctx, test_radar_uart_tx);
-    s_radar_uart_tx_calls = 0;
+    vehicle_radar_t radar;
+    memset(&radar, 0, sizeof(radar));
 
     // Vector 2: Quiescent / All Clear
     // cansend vcan0 0E1#24003FFCFCFC00
     const uint8_t can_0e1[] = { 0x24, 0x00, 0x3F, 0xFC, 0xFC, 0xFC, 0x00 };
-    psa_radar_process_can_0x0e1(&ctx, can_0e1, sizeof(can_0e1));
+    psa_radar_process_can_0x0e1(&radar, can_0e1, sizeof(can_0e1));
 
-    TEST_ASSERT_EQUAL_INT(1, s_radar_uart_tx_calls);
+    TEST_ASSERT_FALSE(radar.rear_active);
+    TEST_ASSERT_FALSE(radar.front_active);
+    TEST_ASSERT_FALSE(radar.display_active);
+
+    uint8_t out[20];
+    size_t len = build_hiworld_radar(&radar, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(17, len);
 
     // Expected UART Output (Hiworld 0x41):
     // 5A A5 0C 41 FF FF FF FF FF FF FF FF 01 00 3F 05 89
     const uint8_t expected[] = {
         0x5A, 0xA5, 0x0C, 0x41, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x3F, 0x05, 0x89
     };
-    TEST_ASSERT_EQUAL_UINT32(sizeof(expected), s_radar_uart_len[0]);
-
-    TEST_ASSERT_FALSE(ctx.state.rear_active);
-    TEST_ASSERT_FALSE(ctx.state.front_active);
-    TEST_ASSERT_FALSE(ctx.state.display_active);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
 void test_peugeot_407_radar_aee2010_0x260_and_0x270(void) {
-    psa_radar_ctx_t ctx;
-    psa_radar_init(&ctx, test_radar_uart_tx);
-    s_radar_uart_tx_calls = 0;
+    vehicle_radar_t radar;
+    memset(&radar, 0, sizeof(radar));
 
     // Test 0x260 rear radar: RL=0x01, RC=0x02, RR=0x03, byte 3: Active(0x80) | Fault(0x01)
     const uint8_t can_260[] = { 0x01, 0x02, 0x03, 0x81 };
-    psa_radar_process_can_0x260(&ctx, can_260, sizeof(can_260));
+    psa_radar_process_can_0x260(&radar, can_260, sizeof(can_260));
 
-    TEST_ASSERT_EQUAL_INT(1, s_radar_uart_tx_calls);
-    TEST_ASSERT_TRUE(ctx.state.rear_active);
-    TEST_ASSERT_TRUE(ctx.state.system_fault);
+    TEST_ASSERT_TRUE(radar.rear_active);
+    TEST_ASSERT_TRUE(radar.system_fault);
 
     // Test 0x270 front radar: FL=0x00, FC=0x01, FR=0x02
     const uint8_t can_270[] = { 0x00, 0x01, 0x02 };
-    psa_radar_process_can_0x270(&ctx, can_270, sizeof(can_270));
+    psa_radar_process_can_0x270(&radar, can_270, sizeof(can_270));
 
-    TEST_ASSERT_EQUAL_INT(2, s_radar_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT8(0x00, radar.front_left_outer);
+    TEST_ASSERT_EQUAL_UINT8(0x01, radar.front_left_center);
+    TEST_ASSERT_EQUAL_UINT8(0x02, radar.front_right_outer);
 }
 
 void test_peugeot_407_radar_zone_mapping_and_boundaries(void) {
@@ -552,23 +550,20 @@ void test_peugeot_407_radar_zone_mapping_and_boundaries(void) {
     // 7, 8 -> Inactive (0xFF)
 
     // Null safety & DLC boundaries
-    psa_radar_ctx_t ctx;
-    psa_radar_init(&ctx, test_radar_uart_tx);
-    s_radar_uart_tx_calls = 0;
+    vehicle_radar_t radar;
+    memset(&radar, 0, sizeof(radar));
 
     psa_radar_process_can_0x0e1(NULL, (const uint8_t[]){ 0x24 }, 1);
-    psa_radar_process_can_0x0e1(&ctx, NULL, 7);
-    psa_radar_process_can_0x0e1(&ctx, (const uint8_t[]){ 0x24, 0x00 }, 2); // dlc < 6
-    TEST_ASSERT_EQUAL_INT(0, s_radar_uart_tx_calls);
+    psa_radar_process_can_0x0e1(&radar, NULL, 7);
+    psa_radar_process_can_0x0e1(&radar, (const uint8_t[]){ 0x24, 0x00 }, 2); // dlc < 6
 
-    psa_radar_process_can_0x260(&ctx, (const uint8_t[]){ 0x01 }, 1); // dlc < 3
-    psa_radar_process_can_0x270(&ctx, (const uint8_t[]){ 0x01 }, 1); // dlc < 3
-    TEST_ASSERT_EQUAL_INT(0, s_radar_uart_tx_calls);
+    psa_radar_process_can_0x260(&radar, (const uint8_t[]){ 0x01 }, 1); // dlc < 3
+    psa_radar_process_can_0x270(&radar, (const uint8_t[]){ 0x01 }, 1); // dlc < 3
 
     uint8_t out[20];
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(NULL, out, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(&ctx.state, NULL, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(&ctx.state, out, 16)); // too small
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(&radar, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(&radar, out, 16)); // too small
 }
 
 /* --------------------------------------------------------------------------
@@ -654,211 +649,175 @@ void test_peugeot_407_reverse_state(void) {
  * Based on CANBOX_SPEC_HIWORLD_407_06_TRIP_COMPUTER_TELEMETRY.md
  * -------------------------------------------------------------------------- */
 void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void) {
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
-    s_trip_uart_tx_calls = 0;
+    vehicle_trip_t trip;
+    memset(&trip, 0, sizeof(trip));
 
     // Vector 1: Instant Fuel 6.8 L/100km (68 = 0x0044), Range 640 km (0x0280)
     // CAN ID 0x221 injection: cansend vcan0 221#00004402800000
     const uint8_t can_221[] = { 0x00, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 };
-    psa_trip_process_can_0x221(&ctx, can_221, sizeof(can_221));
+    psa_trip_process_can_0x221(&trip, can_221, sizeof(can_221));
 
-    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
-
-    // Expected UART Output: 5A A5 0A 13 00 44 02 80 00 00 00 00 00 00 E2
-    const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE2 };
-    TEST_ASSERT_EQUAL_UINT32(15, s_trip_uart_len[0]);
-
-    TEST_ASSERT_EQUAL_UINT16(68, ctx.state.instant_fuel_deci);
-    TEST_ASSERT_EQUAL_UINT16(640, ctx.state.range_km);
-    TEST_ASSERT_EQUAL_UINT16(0, ctx.state.dest_dist_km);
+    TEST_ASSERT_EQUAL_UINT16(68, trip.instant_fuel_deci);
+    TEST_ASSERT_EQUAL_UINT16(640, trip.range_km);
+    TEST_ASSERT_EQUAL_UINT16(0, trip.dest_dist_km);
 
     // Verify builder directly
+    // Expected UART Output: 5A A5 0A 13 00 44 02 80 00 00 00 00 00 00 E2
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE2 };
     uint8_t out[16];
-    size_t len = build_hiworld_trip_instant(&ctx.state, out, sizeof(out));
+    size_t len = build_hiworld_trip_instant(&trip, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
 void test_peugeot_407_trip_hiworld_vector_target_mileage_dump(void) {
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
-    s_trip_uart_tx_calls = 0;
+    vehicle_trip_t trip;
+    memset(&trip, 0, sizeof(trip));
 
     // CAN ID 0x221 injection from dump_2026-09-29_19-37-10.log:
     // Fuel: 7.1 (0x0047), Range: 619 km (0x026B), Target mileage: 204 km (raw 2040 = 0x07F8)
     const uint8_t can_221[] = { 0x00, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8 };
-    psa_trip_process_can_0x221(&ctx, can_221, sizeof(can_221));
+    psa_trip_process_can_0x221(&trip, can_221, sizeof(can_221));
 
-    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT16(71, trip.instant_fuel_deci);
+    TEST_ASSERT_EQUAL_UINT16(619, trip.range_km);
+    TEST_ASSERT_EQUAL_UINT16(2040, trip.dest_dist_km);
 
-    // Expected UART Output: 5A A5 0A 13 00 47 02 6B 07 F8 00 00 00 00 CF
     const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8, 0x00, 0x00, 0x00, 0x00, 0xCF };
-    TEST_ASSERT_EQUAL_UINT32(15, s_trip_uart_len[0]);
-
-    TEST_ASSERT_EQUAL_UINT16(71, ctx.state.instant_fuel_deci);
-    TEST_ASSERT_EQUAL_UINT16(619, ctx.state.range_km);
-    TEST_ASSERT_EQUAL_UINT16(2040, ctx.state.dest_dist_km);
-
     uint8_t out[16];
-    size_t len = build_hiworld_trip_instant(&ctx.state, out, sizeof(out));
+    size_t len = build_hiworld_trip_instant(&trip, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
 void test_peugeot_407_trip_hiworld_vector_2_trip1_historical(void) {
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
-    s_trip_uart_tx_calls = 0;
+    vehicle_trip_t trip;
+    memset(&trip, 0, sizeof(trip));
 
     // Vector 2: Trip 1 Historical (Distance 569 km, Fuel 7.3 L/100km, Mean Speed 37 km/h)
     // CAN ID 0x2A1 injection: cansend vcan0 2A1#25023900490025
     const uint8_t can_2a1[] = { 0x25, 0x02, 0x39, 0x00, 0x49, 0x00, 0x25 };
-    psa_trip_process_can_0x2a1(&ctx, can_2a1, sizeof(can_2a1));
+    psa_trip_process_can_0x2a1(&trip, can_2a1, sizeof(can_2a1));
 
-    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT16(569, trip.trip1_distance_km);
+    TEST_ASSERT_EQUAL_UINT16(73, trip.trip1_avg_fuel);
+    TEST_ASSERT_EQUAL_UINT8(37, trip.trip1_avg_speed);
 
     // Expected UART Output: 5A A5 06 14 00 49 00 25 02 39 C2
     const uint8_t expected[] = { 0x5A, 0xA5, 0x06, 0x14, 0x00, 0x49, 0x00, 0x25, 0x02, 0x39, 0xC2 };
-    TEST_ASSERT_EQUAL_UINT32(11, s_trip_uart_len[0]);
-
-    TEST_ASSERT_EQUAL_UINT16(569, ctx.state.trip1_distance_km);
-    TEST_ASSERT_EQUAL_UINT16(73, ctx.state.trip1_avg_fuel);
-    TEST_ASSERT_EQUAL_UINT8(37, ctx.state.trip1_avg_speed);
-
-    // Verify builder directly
     uint8_t out[16];
-    size_t len = build_hiworld_trip1(&ctx.state, out, sizeof(out));
+    size_t len = build_hiworld_trip1(&trip, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
 void test_peugeot_407_trip_hiworld_vector_3_trip2_historical(void) {
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
-    s_trip_uart_tx_calls = 0;
+    vehicle_trip_t trip;
+    memset(&trip, 0, sizeof(trip));
 
     // Vector 3: Trip 2 Historical (Distance 921 km, Fuel 7.9 L/100km, Mean Speed 35 km/h)
     // CAN ID 0x261 injection: cansend vcan0 261#230399004F0023
     const uint8_t can_261[] = { 0x23, 0x03, 0x99, 0x00, 0x4F, 0x00, 0x23 };
-    psa_trip_process_can_0x261(&ctx, can_261, sizeof(can_261));
+    psa_trip_process_can_0x261(&trip, can_261, sizeof(can_261));
 
-    TEST_ASSERT_EQUAL_INT(1, s_trip_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT16(921, trip.trip2_distance_km);
+    TEST_ASSERT_EQUAL_UINT16(79, trip.trip2_avg_fuel);
+    TEST_ASSERT_EQUAL_UINT8(35, trip.trip2_avg_speed);
 
     // Expected UART Output: 5A A5 06 15 00 4F 00 23 03 99 28
-    // Note: Spec manual sum typo stated 0x12A - 1 = 0x29, but actual sum is 0x129 - 1 = 0x28.
     const uint8_t expected[] = { 0x5A, 0xA5, 0x06, 0x15, 0x00, 0x4F, 0x00, 0x23, 0x03, 0x99, 0x28 };
-    TEST_ASSERT_EQUAL_UINT32(11, s_trip_uart_len[0]);
-
-    TEST_ASSERT_EQUAL_UINT16(921, ctx.state.trip2_distance_km);
-    TEST_ASSERT_EQUAL_UINT16(79, ctx.state.trip2_avg_fuel);
-    TEST_ASSERT_EQUAL_UINT8(35, ctx.state.trip2_avg_speed);
-
-    // Verify builder directly
     uint8_t out[16];
-    size_t len = build_hiworld_trip2(&ctx.state, out, sizeof(out));
+    size_t len = build_hiworld_trip2(&trip, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
 void test_peugeot_407_trip_hiworld_vector_4_fast_dynamics_0x0b6(void) {
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
-    s_trip_uart_tx_calls = 0;
+    vehicle_state_t state;
+    memset(&state, 0, sizeof(state));
 
     // Vector 4: Fast Dynamics RPM & Speed (800 RPM, 10 km/h)
     // CAN ID 0x0B6 injection: cansend vcan0 0B6#190003E8000000D0
     const uint8_t can_0b6[] = { 0x19, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x00, 0xD0 };
-    psa_trip_process_can_0x0b6(&ctx, can_0b6, sizeof(can_0b6));
+    psa_engine_process_can_0x0b6(&state, can_0b6, sizeof(can_0b6));
 
-    TEST_ASSERT_EQUAL_INT(0, s_trip_uart_tx_calls);
-    TEST_ASSERT_EQUAL_UINT16(800, ctx.state.rpm);
-    TEST_ASSERT_EQUAL_UINT16(10, ctx.state.speed_kmh);
+    TEST_ASSERT_EQUAL_UINT16(800, state.rpm);
+    TEST_ASSERT_EQUAL_UINT16(10, state.speed_kmh);
 
     // Test invalid / engine off (0xFFFF)
     const uint8_t can_0b6_off[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xD0 };
-    psa_trip_process_can_0x0b6(&ctx, can_0b6_off, sizeof(can_0b6_off));
-    TEST_ASSERT_EQUAL_UINT16(0, ctx.state.rpm);
-    TEST_ASSERT_EQUAL_UINT16(0, ctx.state.speed_kmh);
+    psa_engine_process_can_0x0b6(&state, can_0b6_off, sizeof(can_0b6_off));
+    TEST_ASSERT_EQUAL_UINT16(0, state.rpm);
+    TEST_ASSERT_EQUAL_UINT16(0, state.speed_kmh);
 }
 
 void test_peugeot_407_trip_hiworld_bsi_slow_data_0x0f6(void) {
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
-    s_trip_uart_tx_calls = 0;
+    vehicle_state_t state;
+    memset(&state, 0, sizeof(state));
 
-    // 0x0F6: Coolant Raw 130 (90 C), Ambient Raw 128 (24 C), Reverse Active (Bit 7 of byte 7)
+    // 0x0F6: Reverse Active (Bit 7 of byte 7), Ambient Raw 128 (24 C)
     const uint8_t can_0f6[] = { 0x88, 130, 0x00, 0x00, 0x00, 128, 128, 0x80 };
-    psa_trip_process_can_0x0f6(&ctx, can_0f6, sizeof(can_0f6));
+    psa_bsi_process_can_0x0f6(&state, can_0f6, sizeof(can_0f6));
 
-    TEST_ASSERT_EQUAL_INT8(90, ctx.state.coolant_c);
-    TEST_ASSERT_EQUAL_INT8(24, ctx.state.ambient_c);
-    TEST_ASSERT_TRUE(ctx.state.reverse_active);
+    TEST_ASSERT_EQUAL_UINT8(128, state.climate.outdoor_temp_raw);
+    TEST_ASSERT_TRUE(state.reverse_gear);
 
     // Forward gear, Ambient 0 C (Raw 80)
     const uint8_t can_0f6_fwd[] = { 0x88, 125, 0x00, 0x00, 0x00, 80, 80, 0x00 };
-    psa_trip_process_can_0x0f6(&ctx, can_0f6_fwd, sizeof(can_0f6_fwd));
-    TEST_ASSERT_EQUAL_INT8(85, ctx.state.coolant_c);
-    TEST_ASSERT_EQUAL_INT8(0, ctx.state.ambient_c);
-    TEST_ASSERT_FALSE(ctx.state.reverse_active);
+    psa_bsi_process_can_0x0f6(&state, can_0f6_fwd, sizeof(can_0f6_fwd));
+    TEST_ASSERT_EQUAL_UINT8(80, state.climate.outdoor_temp_raw);
+    TEST_ASSERT_FALSE(state.reverse_gear);
 
-    // Raw 0xFF should NOT overwrite existing ambient_c
+    // Raw 0xFF should NOT overwrite existing outdoor_temp_raw
     const uint8_t can_0f6_inv[] = { 0x88, 120, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00 };
-    psa_trip_process_can_0x0f6(&ctx, can_0f6_inv, sizeof(can_0f6_inv));
-    TEST_ASSERT_EQUAL_INT8(80, ctx.state.coolant_c);
-    TEST_ASSERT_EQUAL_INT8(0, ctx.state.ambient_c);
+    psa_bsi_process_can_0x0f6(&state, can_0f6_inv, sizeof(can_0f6_inv));
+    TEST_ASSERT_EQUAL_UINT8(80, state.climate.outdoor_temp_raw);
 
     // Sub-zero ambient temperature: Raw 40 -> (40 * 5 - 400)/10 = -20 C
     const uint8_t can_0f6_neg[] = { 0x88, 120, 0x00, 0x00, 0x00, 40, 40, 0x00 };
-    psa_trip_process_can_0x0f6(&ctx, can_0f6_neg, sizeof(can_0f6_neg));
-    TEST_ASSERT_EQUAL_INT8(-20, ctx.state.ambient_c);
+    psa_bsi_process_can_0x0f6(&state, can_0f6_neg, sizeof(can_0f6_neg));
+    TEST_ASSERT_EQUAL_UINT8(40, state.climate.outdoor_temp_raw);
 }
 
 void test_peugeot_407_trip_hiworld_speed_fallback(void) {
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
+    vehicle_trip_t trip;
+    memset(&trip, 0, sizeof(trip));
 
     // DLC = 5 without bytes 5..6 (speed in byte 0 is 45 km/h)
     const uint8_t can_2a1_short[] = { 45, 0x01, 0x00, 0x00, 0x30 };
-    psa_trip_process_can_0x2a1(&ctx, can_2a1_short, sizeof(can_2a1_short));
-    TEST_ASSERT_EQUAL_UINT8(45, ctx.state.trip1_avg_speed);
+    psa_trip_process_can_0x2a1(&trip, can_2a1_short, sizeof(can_2a1_short));
+    TEST_ASSERT_EQUAL_UINT8(45, trip.trip1_avg_speed);
 
     // DLC = 7 but bytes 5..6 are 0 (fallback to byte 0 which is 55 km/h)
     const uint8_t can_261_zero_speed[] = { 55, 0x01, 0x00, 0x00, 0x30, 0x00, 0x00 };
-    psa_trip_process_can_0x261(&ctx, can_261_zero_speed, sizeof(can_261_zero_speed));
-    TEST_ASSERT_EQUAL_UINT8(55, ctx.state.trip2_avg_speed);
+    psa_trip_process_can_0x261(&trip, can_261_zero_speed, sizeof(can_261_zero_speed));
+    TEST_ASSERT_EQUAL_UINT8(55, trip.trip2_avg_speed);
 }
 
 void test_peugeot_407_trip_hiworld_boundary_and_null_safety(void) {
     // NULL pointer calls must not crash
-    psa_trip_init(NULL, NULL);
-    psa_trip_send_instant(NULL);
-    psa_trip_send_trip1(NULL);
-    psa_trip_send_trip2(NULL);
-    psa_trip_process_can_0x0b6(NULL, NULL, 0);
+    psa_engine_process_can_0x0b6(NULL, NULL, 0);
     psa_trip_process_can_0x221(NULL, NULL, 0);
     psa_trip_process_can_0x2a1(NULL, NULL, 0);
     psa_trip_process_can_0x261(NULL, NULL, 0);
-    psa_trip_process_can_0x0f6(NULL, NULL, 0);
+    psa_bsi_process_can_0x0f6(NULL, NULL, 0);
 
     // Short DLC boundary checks
-    psa_trip_ctx_t ctx;
-    psa_trip_init(&ctx, test_trip_uart_tx);
-    s_trip_uart_tx_calls = 0;
+    vehicle_state_t state;
+    memset(&state, 0, sizeof(state));
+    vehicle_trip_t trip;
+    memset(&trip, 0, sizeof(trip));
 
     uint8_t dummy[8] = { 0 };
-    psa_trip_process_can_0x0b6(&ctx, dummy, 3);
-    psa_trip_process_can_0x221(&ctx, dummy, 6);
-    psa_trip_process_can_0x2a1(&ctx, dummy, 4);
-    psa_trip_process_can_0x261(&ctx, dummy, 4);
-    psa_trip_process_can_0x0f6(&ctx, dummy, 7);
-    TEST_ASSERT_EQUAL_INT(0, s_trip_uart_tx_calls);
-
-    // Send with NULL uart_tx must not crash
-    ctx.uart_tx = NULL;
-    psa_trip_send_instant(&ctx);
-    psa_trip_send_trip1(&ctx);
-    psa_trip_send_trip2(&ctx);
+    psa_engine_process_can_0x0b6(&state, dummy, 3);
+    psa_trip_process_can_0x221(&trip, dummy, 6);
+    psa_trip_process_can_0x2a1(&trip, dummy, 4);
+    psa_trip_process_can_0x261(&trip, dummy, 4);
+    psa_bsi_process_can_0x0f6(&state, dummy, 7);
 
     // Builder buffer size & NULL safety
     uint8_t out[16];
-    psa_trip_state_t st;
+    vehicle_trip_t st;
     memset(&st, 0, sizeof(st));
 
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip_instant(NULL, out, sizeof(out)));
@@ -1050,43 +1009,41 @@ void test_peugeot_407_doors_decode_extended_signals(void) {
 }
 
 void test_peugeot_407_psa_doors_ctx_pipeline(void) {
-    psa_doors_ctx_t ctx;
-    s_doors_uart_len = 0;
-    s_doors_uart_tx_calls = 0;
+    vehicle_doors_t doors;
+    bool handbrake = false;
+    memset(&doors, 0, sizeof(doors));
 
-    psa_doors_init(&ctx, test_doors_uart_tx);
-    TEST_ASSERT_FALSE(ctx.state.door_front_left);
-    TEST_ASSERT_EQUAL_INT(0, s_doors_uart_tx_calls);
+    TEST_ASSERT_FALSE(doors.door_driver);
+    TEST_ASSERT_FALSE(handbrake);
 
     // Process CAN 0x220: FL door open (0x80), handbrake active (0x01)
     const uint8_t can_open[] = { 0x80, 0x01 };
-    psa_doors_process_can_0x220(&ctx, can_open, sizeof(can_open));
+    psa_doors_process_can_0x220(&doors, &handbrake, can_open, sizeof(can_open));
 
-    TEST_ASSERT_TRUE(ctx.state.door_front_left);
-    TEST_ASSERT_TRUE(ctx.state.handbrake_pulled);
-    TEST_ASSERT_EQUAL_INT(1, s_doors_uart_tx_calls);
+    TEST_ASSERT_TRUE(doors.door_driver);
+    TEST_ASSERT_TRUE(handbrake);
 
     const uint8_t expected_open[] = {
         0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xA6
     };
-    TEST_ASSERT_EQUAL_UINT32(15, s_doors_uart_len);
+    uint8_t out[20];
+    size_t len = build_hiworld_doors_state(&doors, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_open, out, sizeof(expected_open));
 
     // Process CAN 0x220: All closed
     const uint8_t can_closed[] = { 0x00, 0x00 };
-    psa_doors_process_can_0x220(&ctx, can_closed, sizeof(can_closed));
+    psa_doors_process_can_0x220(&doors, &handbrake, can_closed, sizeof(can_closed));
 
-    TEST_ASSERT_FALSE(ctx.state.door_front_left);
-    TEST_ASSERT_FALSE(ctx.state.handbrake_pulled);
-    TEST_ASSERT_EQUAL_INT(2, s_doors_uart_tx_calls);
+    TEST_ASSERT_FALSE(doors.door_driver);
+    TEST_ASSERT_FALSE(handbrake);
 
     const uint8_t expected_closed[] = {
         0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x26
     };
-    TEST_ASSERT_EQUAL_UINT32(15, s_doors_uart_len);
-
-    // Test send_hiworld without uart_tx function (should not crash)
-    ctx.uart_tx = NULL;
-    psa_doors_send_hiworld(&ctx);
+    len = build_hiworld_doors_state(&doors, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(15, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_closed, out, sizeof(expected_closed));
 }
 
 void test_peugeot_407_hiworld_doors_boundary_checks(void) {
@@ -1103,14 +1060,14 @@ void test_peugeot_407_hiworld_doors_boundary_checks(void) {
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors(&doors, out, 14));
 
     // build_hiworld_doors_state boundary tests
-    psa_doors_state_t state;
-    memset(&state, 0, sizeof(state));
-    state.door_front_left = true;
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(&state, NULL, sizeof(out)));
+    vehicle_doors_t vdoors;
+    memset(&vdoors, 0, sizeof(vdoors));
+    vdoors.door_driver = true;
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(&vdoors, NULL, sizeof(out)));
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(NULL, out, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(&state, out, 14));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_doors_state(&vdoors, out, 14));
 
-    size_t len = build_hiworld_doors_state(&state, out, sizeof(out));
+    size_t len = build_hiworld_doors_state(&vdoors, out, sizeof(out));
     const uint8_t expected[] = {
         0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xA6
     };
@@ -1122,11 +1079,11 @@ void test_peugeot_407_hiworld_doors_boundary_checks(void) {
     psa_decode_doors_0x220(out, 2, NULL);
 
     // psa_doors_process_can_0x220 robustness
-    psa_doors_ctx_t ctx;
-    psa_doors_init(&ctx, test_doors_uart_tx);
-    psa_doors_process_can_0x220(NULL, out, 2);
-    psa_doors_process_can_0x220(&ctx, NULL, 2);
-    psa_doors_process_can_0x220(&ctx, out, 0);
+    bool handbrake = false;
+    psa_doors_process_can_0x220(NULL, &handbrake, out, 2);
+    psa_doors_process_can_0x220(&vdoors, NULL, out, 2);
+    psa_doors_process_can_0x220(&vdoors, &handbrake, NULL, 2);
+    psa_doors_process_can_0x220(&vdoors, &handbrake, out, 0);
 }
 
 /* --------------------------------------------------------------------------
@@ -2016,116 +1973,122 @@ void test_psa_extended_tpms_discrete_alarms(void) {
  * Based on CANBOX_SPEC_HIWORLD_407_03_TPMS_TIRE_PRESSURE.md
  * -------------------------------------------------------------------------- */
 void test_peugeot_407_tpms_hiworld_vector_1_nominal(void) {
-    psa_tpms_ctx_t ctx;
-    psa_tpms_init(&ctx, test_tpms_uart_tx);
-    s_tpms_uart_tx_calls = 0;
+    vehicle_tpms_t tpms;
+    psa_tpms_init(&tpms);
 
     // Vector 1: CAN 0x361 FL=2.4, FR=2.4, RR=2.2, RL=2.2 Bar (0018001800160016)
     const uint8_t can_361_v1[] = { 0x00, 0x18, 0x00, 0x18, 0x00, 0x16, 0x00, 0x16 };
-    psa_tpms_process_can_0x361(&ctx, can_361_v1, sizeof(can_361_v1));
+    psa_tpms_process_can_0x361(&tpms, can_361_v1, sizeof(can_361_v1));
 
-    TEST_ASSERT_EQUAL_INT(2, s_tpms_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[3]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[3]);
 
+    uint8_t out[16];
     // Numeric (Cmd 0x66): 5A A5 06 66 01 18 18 16 16 00 C8
     const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 0x18, 0x18, 0x16, 0x16, 0x00, 0xC8 };
-    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    size_t len_num = build_hiworld_tpms_numeric(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(11, len_num);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, out, sizeof(exp_numeric));
 
     // Discrete (Cmd 0x18): 5A A5 04 18 00 00 00 00 1B
     const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x00, 0x00, 0x00, 0x1B };
-    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[1]);
-
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+    size_t len_disc = build_hiworld_tpms_discrete(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(9, len_disc);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, out, sizeof(exp_discrete));
 }
 
 void test_peugeot_407_tpms_hiworld_vector_2_asymmetric_low(void) {
-    psa_tpms_ctx_t ctx;
-    psa_tpms_init(&ctx, test_tpms_uart_tx);
-    s_tpms_uart_tx_calls = 0;
+    vehicle_tpms_t tpms;
+    psa_tpms_init(&tpms);
 
     // Vector 2: FL=2.4, FR=2.3, RR=2.1, RL=1.2 (Underinflated 0x4000) -> 001800170015400C
     const uint8_t can_361_v2[] = { 0x00, 0x18, 0x00, 0x17, 0x00, 0x15, 0x40, 0x0C };
-    psa_tpms_process_can_0x361(&ctx, can_361_v2, sizeof(can_361_v2));
+    psa_tpms_process_can_0x361(&tpms, can_361_v2, sizeof(can_361_v2));
 
-    TEST_ASSERT_EQUAL_INT(2, s_tpms_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(23, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(12, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(21, tpms.pressure_bar_deci[3]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[1]);
+    TEST_ASSERT_EQUAL_UINT8(1, tpms.alarm_state[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[3]);
 
+    uint8_t out[16];
     // Numeric (Cmd 0x66): 5A A5 06 66 01 18 17 0C 15 00 BC
     const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 0x18, 0x17, 0x0C, 0x15, 0x00, 0xBC };
-    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    size_t len_num = build_hiworld_tpms_numeric(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(11, len_num);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, out, sizeof(exp_numeric));
 
     // Discrete (Cmd 0x18): 5A A5 04 18 00 00 01 00 1C (RL alarm = 0x01 LOW)
     const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x00, 0x01, 0x00, 0x1C };
-    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[1]);
-
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(23, ctx.state.fr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(12, ctx.state.rl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(21, ctx.state.rr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_state);
-    TEST_ASSERT_EQUAL_UINT8(1, ctx.state.rl_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+    size_t len_disc = build_hiworld_tpms_discrete(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(9, len_disc);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, out, sizeof(exp_discrete));
 }
 
 void test_peugeot_407_tpms_hiworld_vector_3_puncture(void) {
-    psa_tpms_ctx_t ctx;
-    psa_tpms_init(&ctx, test_tpms_uart_tx);
-    s_tpms_uart_tx_calls = 0;
+    vehicle_tpms_t tpms;
+    psa_tpms_init(&tpms);
 
     // Vector 3: FL=2.4, FR=0.4 (Puncture 0x8000), RR=2.4, RL=2.4 -> 0018800400180018
     const uint8_t can_361_v3[] = { 0x00, 0x18, 0x80, 0x04, 0x00, 0x18, 0x00, 0x18 };
-    psa_tpms_process_can_0x361(&ctx, can_361_v3, sizeof(can_361_v3));
+    psa_tpms_process_can_0x361(&tpms, can_361_v3, sizeof(can_361_v3));
 
-    TEST_ASSERT_EQUAL_INT(2, s_tpms_uart_tx_calls);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(4, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[3]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[0]);
+    TEST_ASSERT_EQUAL_UINT8(2, tpms.alarm_state[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[3]);
 
+    uint8_t out[16];
     // Numeric (Cmd 0x66): 5A A5 06 66 01 18 04 18 18 00 B8
     const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 0x18, 0x04, 0x18, 0x18, 0x00, 0xB8 };
-    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    size_t len_num = build_hiworld_tpms_numeric(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(11, len_num);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, out, sizeof(exp_numeric));
 
     // Discrete (Cmd 0x18): 5A A5 04 18 00 02 00 00 1D (FR alarm = 0x02 PUNCTURE)
     const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x02, 0x00, 0x00, 0x1D };
-    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[1]);
-
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(4, ctx.state.fr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.rl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.rr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
-    TEST_ASSERT_EQUAL_UINT8(2, ctx.state.fr_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
+    size_t len_disc = build_hiworld_tpms_discrete(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(9, len_disc);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, out, sizeof(exp_discrete));
 }
 
 void test_peugeot_407_tpms_hiworld_0x3a1_pressures(void) {
-    psa_tpms_ctx_t ctx;
-    psa_tpms_init(&ctx, test_tpms_uart_tx);
-    s_tpms_uart_tx_calls = 0;
+    vehicle_tpms_t tpms;
+    psa_tpms_init(&tpms);
 
     // CAN 0x3A1: 0.05 Bar resolution
     // FL: 48 (2.4 Bar), FR: 46 (2.3 Bar), RR: 42 (2.1 Bar), RL: 24 (1.2 Bar)
     const uint8_t can_3a1[] = { 48, 46, 42, 24 };
-    psa_tpms_process_can_0x3a1(&ctx, can_3a1, sizeof(can_3a1));
+    psa_tpms_process_can_0x3a1(&tpms, can_3a1, sizeof(can_3a1));
 
-    TEST_ASSERT_EQUAL_INT(1, s_tpms_uart_tx_calls);
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(23, ctx.state.fr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(21, ctx.state.rr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(12, ctx.state.rl_press_bar_deci);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(23, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(12, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(21, tpms.pressure_bar_deci[3]);
 
+    uint8_t out[16];
     const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 24, 23, 12, 21, 0x00, 0xBC };
-    TEST_ASSERT_EQUAL_UINT32(11, s_tpms_uart_len[0]);
+    size_t len = build_hiworld_tpms_numeric(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, out, sizeof(exp_numeric));
 }
 
 void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void) {
-    psa_tpms_ctx_t ctx;
-    psa_tpms_init(&ctx, test_tpms_uart_tx);
-    s_tpms_uart_tx_calls = 0;
+    vehicle_tpms_t tpms;
+    psa_tpms_init(&tpms);
 
     // CAN 0x1E1:
     // Byte 0 (FL): 0 (OK) -> (0 << 3) = 0x00
@@ -2133,59 +2096,61 @@ void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void) {
     // Byte 2 (RR): 2 (FLAT) -> (2 << 3) = 0x10
     // Byte 3 (RL): 4 (BATTERY_LOW -> >=3 => 3 FAULT) -> (4 << 3) = 0x20
     const uint8_t can_1e1[] = { 0x00, 0x08, 0x10, 0x20 };
-    psa_tpms_process_can_0x1e1(&ctx, can_1e1, sizeof(can_1e1));
+    psa_tpms_process_can_0x1e1(&tpms, can_1e1, sizeof(can_1e1));
 
-    TEST_ASSERT_EQUAL_INT(1, s_tpms_uart_tx_calls);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
-    TEST_ASSERT_EQUAL_UINT8(1, ctx.state.fr_state);
-    TEST_ASSERT_EQUAL_UINT8(2, ctx.state.rr_state);
-    TEST_ASSERT_EQUAL_UINT8(3, ctx.state.rl_state);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, tpms.alarm_state[1]);
+    TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[2]);
+    TEST_ASSERT_EQUAL_UINT8(2, tpms.alarm_state[3]);
 
     // Discrete packet: Cmd 0x18, Len 0x04, FL=0, FR=1, RL=3, RR=2
     // Checksum = (0x04 + 0x18 + 0 + 1 + 3 + 2 - 1) = 0x21
     const uint8_t exp_discrete[] = { 0x5A, 0xA5, 0x04, 0x18, 0x00, 0x01, 0x03, 0x02, 0x21 };
-    TEST_ASSERT_EQUAL_UINT32(9, s_tpms_uart_len[0]);
+    uint8_t out[16];
+    size_t len = build_hiworld_tpms_discrete(&tpms, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(9, len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, out, sizeof(exp_discrete));
 }
 
 void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void) {
-    psa_tpms_ctx_t ctx;
-    psa_tpms_init(&ctx, test_tpms_uart_tx);
+    vehicle_tpms_t tpms;
+    psa_tpms_init(&tpms);
 
     // Initial defaults check
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.fr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(22, ctx.state.rl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[3]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[3]);
 
     // Serializer boundary checks
     uint8_t out[16];
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(NULL, out, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(&ctx.state, NULL, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(&ctx.state, out, 10)); // < 11
-    TEST_ASSERT_EQUAL_UINT32(11, build_hiworld_tpms_numeric(&ctx.state, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(&tpms, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_numeric(&tpms, out, 10)); // < 11
+    TEST_ASSERT_EQUAL_UINT32(11, build_hiworld_tpms_numeric(&tpms, out, sizeof(out)));
 
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(NULL, out, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(&ctx.state, NULL, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(&ctx.state, out, 8)); // < 9
-    TEST_ASSERT_EQUAL_UINT32(9, build_hiworld_tpms_discrete(&ctx.state, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(&tpms, NULL, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_tpms_discrete(&tpms, out, 8)); // < 9
+    TEST_ASSERT_EQUAL_UINT32(9, build_hiworld_tpms_discrete(&tpms, out, sizeof(out)));
 
     // CAN process boundary checks
     uint8_t dummy_can[8] = { 0 };
     psa_tpms_process_can_0x361(NULL, dummy_can, 8);
-    psa_tpms_process_can_0x361(&ctx, NULL, 8);
-    psa_tpms_process_can_0x361(&ctx, dummy_can, 7); // dlc < 8
+    psa_tpms_process_can_0x361(&tpms, NULL, 8);
+    psa_tpms_process_can_0x361(&tpms, dummy_can, 7); // dlc < 8
 
     psa_tpms_process_can_0x3a1(NULL, dummy_can, 4);
-    psa_tpms_process_can_0x3a1(&ctx, NULL, 4);
-    psa_tpms_process_can_0x3a1(&ctx, dummy_can, 3); // dlc < 4
+    psa_tpms_process_can_0x3a1(&tpms, NULL, 4);
+    psa_tpms_process_can_0x3a1(&tpms, dummy_can, 3); // dlc < 4
 
     psa_tpms_process_can_0x1e1(NULL, dummy_can, 4);
-    psa_tpms_process_can_0x1e1(&ctx, NULL, 4);
-    psa_tpms_process_can_0x1e1(&ctx, dummy_can, 3); // dlc < 4
+    psa_tpms_process_can_0x1e1(&tpms, NULL, 4);
+    psa_tpms_process_can_0x1e1(&tpms, dummy_can, 3); // dlc < 4
 
     // Missing sensor (0x3FFF) / fault handling in 0x361
     const uint8_t can_missing[8] = { 0xFF, 0xFF, 0xC0, 0x18, 0x3F, 0xFF, 0x00, 0x18 };
@@ -2193,21 +2158,17 @@ void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void) {
     // FR: 0xC018 (state 3, raw 0x0018) -> state 3, press 0
     // RR: 0x3FFF (state 0, raw 0x3FFF) -> state 0, press 0 (missing raw)
     // RL: 0x0018 (state 0, raw 0x0018) -> state 0, press 24
-    psa_tpms_process_can_0x361(&ctx, can_missing, 8);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(3, ctx.state.fl_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.fr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(3, ctx.state.fr_state);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rr_state);
-    TEST_ASSERT_EQUAL_UINT8(24, ctx.state.rl_press_bar_deci);
-    TEST_ASSERT_EQUAL_UINT8(0, ctx.state.rl_state);
+    psa_tpms_process_can_0x361(&tpms, can_missing, 8);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[1]);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[3]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[3]);
 
-    // Send with NULL uart_tx should not crash
-    ctx.uart_tx = NULL;
-    psa_tpms_send_numeric(&ctx);
-    psa_tpms_send_discrete(&ctx);
-    psa_tpms_init(NULL, NULL);
+    psa_tpms_init(NULL);
 }
 
 /* --------------------------------------------------------------------------

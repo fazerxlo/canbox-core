@@ -186,33 +186,6 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
     psa_update_derived_power_state(state);
 }
 
-static void psa_decode_doors_0x220_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    psa_doors_body_t doors;
-    psa_decode_doors_0x220(frame->data, frame->dlc, &doors);
-    state->doors.door_driver     = doors.driver_door;
-    state->doors.door_passenger  = doors.pass_door;
-    state->doors.door_rear_left  = doors.rear_left_door;
-    state->doors.door_rear_right = doors.rear_right_door;
-    state->doors.trunk           = doors.trunk;
-    state->doors.hood            = doors.hood;
-    state->handbrake             = doors.handbrake;
-}
-
-static void psa_decode_engine_speed_0x0b6(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 8) return;
-
-    state->rpm = read_be16_local(&frame->data[0]) >> 3;
-    state->speed_kmh = read_be16_local(&frame->data[2]) >> 7;
-}
-
-static void psa_decode_hvac_0x1d0_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    psa_hvac_process_can_0x1d0(&state->climate, frame->data, frame->dlc);
-}
-
-static void psa_decode_hvac_0x1e3_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    psa_hvac_process_can_0x1e3(&state->climate, frame->data, frame->dlc);
-}
-
 static void psa_decode_cruise_0x1a8_profile(const can_frame_t *frame, vehicle_state_t *state) {
     (void)state;
     bool active = false;
@@ -225,152 +198,6 @@ static void psa_decode_alerts_0x168_profile(const can_frame_t *frame, vehicle_st
     (void)state;
     bool tpms_fault = false, tpms_under = false, tpms_punc = false, esp_fault = false;
     psa_decode_alerts_0x168(frame->data, frame->dlc, &tpms_fault, &tpms_under, &tpms_punc, &esp_fault);
-}
-
-static void psa_decode_tpms_0x361_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 8) return;
-
-    uint16_t fl_raw = read_be16_local(&frame->data[0]);
-    uint16_t fr_raw = read_be16_local(&frame->data[2]);
-    uint16_t rr_raw = read_be16_local(&frame->data[4]);
-    uint16_t rl_raw = read_be16_local(&frame->data[6]);
-
-    state->tpms.alarm_state[0] = (uint8_t)((fl_raw >> 14) & 0x03);
-    state->tpms.alarm_state[1] = (uint8_t)((fr_raw >> 14) & 0x03);
-    state->tpms.alarm_state[2] = (uint8_t)((rl_raw >> 14) & 0x03);
-    state->tpms.alarm_state[3] = (uint8_t)((rr_raw >> 14) & 0x03);
-
-    if (state->tpms.alarm_state[0] != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
-        state->tpms.pressure_bar_deci[0] = (uint8_t)(fl_raw & 0x3FFF);
-    } else {
-        state->tpms.pressure_bar_deci[0] = 0;
-    }
-    if (state->tpms.alarm_state[1] != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
-        state->tpms.pressure_bar_deci[1] = (uint8_t)(fr_raw & 0x3FFF);
-    } else {
-        state->tpms.pressure_bar_deci[1] = 0;
-    }
-    if (state->tpms.alarm_state[2] != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
-        state->tpms.pressure_bar_deci[2] = (uint8_t)(rl_raw & 0x3FFF);
-    } else {
-        state->tpms.pressure_bar_deci[2] = 0;
-    }
-    if (state->tpms.alarm_state[3] != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
-        state->tpms.pressure_bar_deci[3] = (uint8_t)(rr_raw & 0x3FFF);
-    } else {
-        state->tpms.pressure_bar_deci[3] = 0;
-    }
-
-    state->tpms.valid = true;
-}
-
-static void psa_decode_tpms_0x3a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 4) return;
-
-    state->tpms.pressure_bar_deci[0] = (uint8_t)((frame->data[0] * 5 + 5) / 10);
-    state->tpms.pressure_bar_deci[1] = (uint8_t)((frame->data[1] * 5 + 5) / 10);
-    state->tpms.pressure_bar_deci[2] = (uint8_t)((frame->data[3] * 5 + 5) / 10); /* RL */
-    state->tpms.pressure_bar_deci[3] = (uint8_t)((frame->data[2] * 5 + 5) / 10); /* RR */
-    state->tpms.valid = true;
-}
-
-static void psa_decode_tpms_0x1e1_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 4) return;
-
-    uint8_t fl_st = (uint8_t)((frame->data[0] >> 3) & 0x07);
-    uint8_t fr_st = (uint8_t)((frame->data[1] >> 3) & 0x07);
-    uint8_t rr_st = (uint8_t)((frame->data[2] >> 3) & 0x07);
-    uint8_t rl_st = (uint8_t)((frame->data[3] >> 3) & 0x07);
-
-    state->tpms.alarm_state[0] = (fl_st >= 3) ? 3 : fl_st;
-    state->tpms.alarm_state[1] = (fr_st >= 3) ? 3 : fr_st;
-    state->tpms.alarm_state[2] = (rl_st >= 3) ? 3 : rl_st;
-    state->tpms.alarm_state[3] = (rr_st >= 3) ? 3 : rr_st;
-    state->tpms.valid = true;
-}
-
-static void psa_decode_trip_0x221_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 1) return;
-
-    /* Stalk Tip Trip button on Byte 0 Bit 3 (0x08) */
-    s_active_state_for_stalk = state;
-    psa_decode_stalk_tip_0x221(frame->data, frame->dlc, stalk_key_cb);
-
-    if (frame->dlc < 7) return;
-
-    /* Byte 0 Bit 7: Fuel info hidden/invalid.
-     * Also guard against uninitialized/BSI status frames where all data is 0xFF.
-     */
-    if ((frame->data[0] & 0x80) != 0) return;
-    uint16_t fuel = read_be16_local(&frame->data[1]);
-    uint16_t range = read_be16_local(&frame->data[3]);
-    if (fuel == 0xFFFF && range == 0xFFFF) return;
-
-    state->trip.instant_fuel_deci = fuel;
-    state->trip.range_km = range;
-    state->trip.dest_dist_km = read_be16_local(&frame->data[5]);
-    state->trip.instant_valid = true;
-    state->trip.updated_page = 1;
-}
-
-static void psa_decode_trip1_0x2a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 5) return;
-
-    state->trip.trip1_distance_km = read_be16_local(&frame->data[1]);
-    state->trip.trip1_avg_fuel    = read_be16_local(&frame->data[3]);
-    state->trip.trip1_avg_speed   = (frame->dlc >= 7 && (frame->data[5] || frame->data[6])) ?
-                                     (uint8_t)read_be16_local(&frame->data[5]) : frame->data[0];
-    state->trip.trip1_valid = true;
-    state->trip.updated_page = 2;
-}
-
-static void psa_decode_trip2_0x261_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 5) return;
-
-    state->trip.trip2_distance_km = read_be16_local(&frame->data[1]);
-    state->trip.trip2_avg_fuel    = read_be16_local(&frame->data[3]);
-    state->trip.trip2_avg_speed   = (frame->dlc >= 7 && (frame->data[5] || frame->data[6])) ?
-                                     (uint8_t)read_be16_local(&frame->data[5]) : frame->data[0];
-    state->trip.trip2_valid = true;
-    state->trip.updated_page = 3;
-}
-
-static void psa_decode_radar_0x0e1_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 6) return;
-
-    state->radar.rear_active    = (frame->data[1] >> 6) & 1;
-    state->radar.front_active   = (frame->data[1] >> 4) & 1;
-    state->radar.display_active = (frame->data[5] & 0x02) ? true : false;
-
-    if (!state->radar.display_active && !state->radar.rear_active && !state->radar.front_active) {
-        state->radar.rear_left_outer    = 0xFF;
-        state->radar.rear_left_center   = 0xFF;
-        state->radar.rear_right_center  = 0xFF;
-        state->radar.rear_right_outer   = 0xFF;
-        state->radar.front_left_outer   = 0xFF;
-        state->radar.front_left_center  = 0xFF;
-        state->radar.front_right_center = 0xFF;
-        state->radar.front_right_outer  = 0xFF;
-    } else {
-        uint8_t rl = (frame->data[3] >> 5) & 0x07;
-        uint8_t rc = (frame->data[3] >> 2) & 0x07;
-        uint8_t rr = (frame->data[4] >> 5) & 0x07;
-        uint8_t fl = (frame->data[4] >> 2) & 0x07;
-        uint8_t fc = (frame->data[5] >> 5) & 0x07;
-        uint8_t fr = (frame->data[5] >> 2) & 0x07;
-
-        state->radar.rear_left_outer    = psa_radar_map_zone(rl);
-        state->radar.rear_left_center   = psa_radar_map_zone(rc);
-        state->radar.rear_right_center  = psa_radar_map_zone(rc);
-        state->radar.rear_right_outer   = psa_radar_map_zone(rr);
-
-        state->radar.front_left_outer   = psa_radar_map_zone(fl);
-        state->radar.front_left_center  = psa_radar_map_zone(fc);
-        state->radar.front_right_center = psa_radar_map_zone(fc);
-        state->radar.front_right_outer  = psa_radar_map_zone(fr);
-    }
-    state->radar.valid = true;
-    state->radar.updated = true;
 }
 
 static psa_journal_iso_tp_t s_journal_ctx;
@@ -408,7 +235,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_CDC_CMD_131,        psa_decode_cdc_cmd_0x131_profile },
     { PSA_CAN_ID_TEXTE_RADIO,        psa_rd4_decode_frame },
-    { PSA_CAN_ID_RADAR_0E1,          psa_decode_radar_0x0e1_profile },
+    { PSA_CAN_ID_RADAR_0E1,          psa_radar_decode_frame },
     { 0x0F6,                         psa_decode_bsi_slow_0x0f6 },
     { PSA_CAN_ID_STEERING_SAS_10B,   psa_decode_steering_angle_0x10b_profile },
     { PSA_CAN_ID_STALK_21F,          psa_decode_stalk_0x21f_profile },
@@ -421,20 +248,20 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },
     { PSA_CAN_ID_RD4_VOLUME,         psa_rd4_decode_frame },
     { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
-    { 0x0B6,                         psa_decode_engine_speed_0x0b6 },
-    { PSA_CAN_ID_CLIMATE_HVAC,       psa_decode_hvac_0x1d0_profile },
-    { 0x1E3,                         psa_decode_hvac_0x1e3_profile },
+    { 0x0B6,                         psa_engine_decode_frame },
+    { PSA_CAN_ID_CLIMATE_HVAC,       psa_hvac_decode_frame },
+    { 0x1E3,                         psa_hvac_decode_frame },
     { PSA_CAN_ID_RD4_AUDIO_SETTINGS, psa_rd4_decode_frame },
-    { PSA_CAN_ID_DOORS_BODY_220,     psa_decode_doors_0x220_profile },
-    { PSA_CAN_ID_TRIP_INSTANT,       psa_decode_trip_0x221_profile },
+    { PSA_CAN_ID_DOORS_BODY_220,     psa_doors_decode_frame },
+    { PSA_CAN_ID_TRIP_INSTANT,       psa_trip_decode_frame },
     { PSA_CAN_ID_ETAT_TUNER,         psa_rd4_decode_frame },
     { PSA_CAN_ID_INFO_TUNER,         psa_rd4_decode_frame },
-    { PSA_CAN_ID_TRIP2_ODB,          psa_decode_trip2_0x261_profile },
-    { PSA_CAN_ID_TRIP1_ODB,          psa_decode_trip1_0x2a1_profile },
+    { PSA_CAN_ID_TRIP2_ODB,          psa_trip_decode_frame },
+    { PSA_CAN_ID_TRIP1_ODB,          psa_trip_decode_frame },
     { PSA_CAN_ID_NOM_STATION,        psa_rd4_decode_frame },
-    { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_decode_tpms_0x1e1_profile },
-    { PSA_CAN_ID_TPMS_DIRECT_361,    psa_decode_tpms_0x361_profile },
-    { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_decode_tpms_0x3a1_profile },
+    { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_tpms_decode_frame },
+    { PSA_CAN_ID_TPMS_DIRECT_361,    psa_tpms_decode_frame },
+    { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_tpms_decode_frame },
     { PSA_CAN_ID_CD_TRAY_325,        psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_DISC_INFO_365,   psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_PLAY_3A5,        psa_rd4_decode_frame },
