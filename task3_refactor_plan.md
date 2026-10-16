@@ -43,13 +43,15 @@ Consolidate the remaining duplicated decoders so both unit tests and `s_psa_rule
 
 ---
 
-### Phase 2: Decouple Layer 2 (CAN Decoders) from Layer 5 (Protocol Wire Builders)
+### Phase 2: Decouple Layer 2 (CAN Decoders) from Layer 5 (Protocol Wire Builders) [COMPLETED]
 Enforce the 5-Layer Architecture rule in [AGENTS.md](file:///home/Fazer/git/canbox-core/AGENTS.md#L125-L130):
 
 1. **Extract Hiworld Wire Builders:**
-   - Move `build_hiworld_*` functions (`build_hiworld_radio_state`, `build_hiworld_radio_text`, `build_hiworld_radio_preset_*`, `build_hiworld_media_state`, `build_hiworld_audio_settings`, `build_hiworld_radar`, `build_hiworld_trip_*`, `build_hiworld_tpms_*`, `build_hiworld_alert_*`) out of [peugeot_407.c](file:///home/Fazer/git/canbox-core/src/profiles/peugeot_407.c) into [proto_hiworld_adapter.c](file:///home/Fazer/git/canbox-core/src/protocols/proto_hiworld_adapter.c) (or `src/protocols/hiworld_psa_builders.c`).
+   - Moved all 16 `build_hiworld_*` functions (`build_hiworld_radar`, `build_hiworld_trip_*`, `build_hiworld_doors_*`, `build_hiworld_audio_settings`, `build_hiworld_radio_*`, `build_hiworld_media_state`, `build_hiworld_tpms_*`, `build_hiworld_alert_*`) into [src/protocols/hiworld_psa_builders.c](file:///home/Fazer/git/canbox-core/src/protocols/hiworld_psa_builders.c) and [include/protocols/hiworld_psa_builders.h](file:///home/Fazer/git/canbox-core/include/protocols/hiworld_psa_builders.h).
 2. **Prune Unused Legacy Raise Builders in `peugeot_407.c`:**
-   - Move or isolate legacy `build_raise_*` helpers out of `peugeot_407.c` so `src/profiles/peugeot_407.c` contains **100% pure PSA CAN2004 decoding logic** (~600 lines instead of ~1,370 lines).
+   - Moved all 20 `build_raise_*` functions into [src/protocols/raise_psa_builders.c](file:///home/Fazer/git/canbox-core/src/protocols/raise_psa_builders.c) and [include/protocols/raise_psa_builders.h](file:///home/Fazer/git/canbox-core/include/protocols/raise_psa_builders.h).
+   - `src/profiles/peugeot_407.c` and `include/profiles/peugeot_407.h` are now 100% pure Layer 2 PSA CAN2004 decoding logic with zero serial protocol wire builders.
+   - Registered new builders in `src/CMakeLists.txt` for ESP32 target. All 110 unit tests, 39 integration tests, STM32, and ESP32 targets pass with zero warnings.
 
 ---
 
