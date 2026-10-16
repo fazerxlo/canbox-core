@@ -218,9 +218,9 @@ void psa_reverse_set_hardware_trigger(bool reverse_active);
 
 typedef vehicle_trip_t psa_trip_state_t;
 
-void psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
-void psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
-void psa_trip_process_can_0x261(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
+bool psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
+bool psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
+bool psa_trip_process_can_0x261(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
 void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 
 void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
@@ -286,8 +286,8 @@ void psa_decode_amplifier_0x1a0(const uint8_t *data, uint8_t dlc, jbl_amplifier_
 /* --------------------------------------------------------------------------
  * 1.7b RD4 Radio Volume & Audio Settings (DSP)
  * -------------------------------------------------------------------------- */
-void psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
-void psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
+bool psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
+bool psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
 
 /* --------------------------------------------------------------------------
  * 1.8 RD4 Radio & CD Changer Media Data
@@ -332,12 +332,12 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
 void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x2a5(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
-void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc);
-void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc);
-void psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
-void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
-void psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
-void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
+bool psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc);
+bool psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc);
+bool psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
+bool psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
+bool psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
+bool psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
 
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification

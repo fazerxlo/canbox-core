@@ -446,7 +446,6 @@ void psa_radar_process_can_0x0e1(vehicle_radar_t *radar, const uint8_t *data, ui
         radar->front_right_outer  = psa_radar_map_zone(fr);
     }
     radar->valid = true;
-    radar->updated = true;
 }
 
 void psa_radar_process_can_0x260(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc) {
@@ -462,7 +461,6 @@ void psa_radar_process_can_0x260(vehicle_radar_t *radar, const uint8_t *data, ui
         radar->system_fault = (data[3] & 0x01) ? true : false;
     }
     radar->valid = true;
-    radar->updated = true;
 }
 
 void psa_radar_process_can_0x270(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc) {
@@ -474,13 +472,13 @@ void psa_radar_process_can_0x270(vehicle_radar_t *radar, const uint8_t *data, ui
     radar->front_right_outer  = data[2];
 
     radar->valid = true;
-    radar->updated = true;
 }
 
 void psa_radar_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     if (frame->id == PSA_CAN_ID_RADAR_0E1) {
         psa_radar_process_can_0x0e1(&state->radar, frame->data, frame->dlc);
+        state->dirty.radar = true;
     }
 }
 
@@ -527,42 +525,42 @@ void psa_reverse_set_hardware_trigger(bool reverse_active) {
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, reverse_active);
 }
 
-void psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
-    if (!trip || !data || dlc < 7) return;
+bool psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
+    if (!trip || !data || dlc < 7) return false;
 
     /* Byte 0 Bit 7: Fuel info hidden/invalid.
      * Also guard against uninitialized/BSI status frames where all data is 0xFF.
      */
-    if ((data[0] & 0x80) != 0) return;
+    if ((data[0] & 0x80) != 0) return false;
     uint16_t fuel = read_be16(&data[1]);
     uint16_t range = read_be16(&data[3]);
-    if (fuel == 0xFFFF && range == 0xFFFF) return;
+    if (fuel == 0xFFFF && range == 0xFFFF) return false;
 
     trip->instant_fuel_deci = fuel;
     trip->range_km          = range;
     trip->dest_dist_km      = read_be16(&data[5]);
     trip->instant_valid     = true;
-    trip->updated_page      = 1;
+    return true;
 }
 
-void psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
-    if (!trip || !data || dlc < 5) return;
+bool psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
+    if (!trip || !data || dlc < 5) return false;
 
     trip->trip1_distance_km = read_be16(&data[1]);
     trip->trip1_avg_fuel    = read_be16(&data[3]);
     trip->trip1_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
     trip->trip1_valid       = true;
-    trip->updated_page      = 2;
+    return true;
 }
 
-void psa_trip_process_can_0x261(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
-    if (!trip || !data || dlc < 5) return;
+bool psa_trip_process_can_0x261(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
+    if (!trip || !data || dlc < 5) return false;
 
     trip->trip2_distance_km = read_be16(&data[1]);
     trip->trip2_avg_fuel    = read_be16(&data[3]);
     trip->trip2_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
     trip->trip2_valid       = true;
-    trip->updated_page      = 3;
+    return true;
 }
 
 void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc) {
@@ -609,13 +607,19 @@ void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     switch (frame->id) {
         case PSA_CAN_ID_TRIP_INSTANT: /* 0x221 */
             psa_stalk_process_tip_0x221(&state->wheel, frame->data, frame->dlc);
-            psa_trip_process_can_0x221(&state->trip, frame->data, frame->dlc);
+            if (psa_trip_process_can_0x221(&state->trip, frame->data, frame->dlc)) {
+                state->dirty.trip_page = 1;
+            }
             break;
         case PSA_CAN_ID_TRIP1_ODB: /* 0x2A1 */
-            psa_trip_process_can_0x2a1(&state->trip, frame->data, frame->dlc);
+            if (psa_trip_process_can_0x2a1(&state->trip, frame->data, frame->dlc)) {
+                state->dirty.trip_page = 2;
+            }
             break;
         case PSA_CAN_ID_TRIP2_ODB: /* 0x261 */
-            psa_trip_process_can_0x261(&state->trip, frame->data, frame->dlc);
+            if (psa_trip_process_can_0x261(&state->trip, frame->data, frame->dlc)) {
+                state->dirty.trip_page = 3;
+            }
             break;
         default:
             break;
@@ -736,9 +740,9 @@ static inline uint8_t rd4_clamp18(int val) {
     return (uint8_t)val;
 }
 
-void psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio) {
+bool psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio) {
     if (!data || !audio || dlc < 1) {
-        return;
+        return false;
     }
 
     uint8_t new_vol = data[0] & 0x1F;
@@ -775,14 +779,12 @@ void psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio
     audio->active_mode   = new_mode;
     audio->valid         = true;
 
-    if (changed) {
-        audio->updated = true;
-    }
+    return changed;
 }
 
-void psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio) {
+bool psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio) {
     if (!data || !audio || dlc < 7) {
-        return;
+        return false;
     }
 
     uint8_t new_bal   = rd4_clamp18(((int)(data[0] & 0x7F) - 63) + 9);
@@ -843,9 +845,7 @@ void psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehic
     audio->active_mode  = new_mode;
     audio->valid        = true;
 
-    if (mode_changed || values_changed) {
-        audio->updated = true;
-    }
+    return (mode_changed || values_changed);
 }
 
 /* --------------------------------------------------------------------------
@@ -899,7 +899,6 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
     if (!radio_powered) {
         radio->source_mode = 0xFF;
         radio->power_status = 0x00;
-        radio->updated = true;
         return;
     }
 
@@ -907,7 +906,6 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
         if (radio->power_status == 0) {
             radio->power_status = 0x01;
         }
-        radio->updated = true;
         return;
     }
 
@@ -940,7 +938,6 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
             radio->power_status = 0x00;
             break;
     }
-    radio->updated = true;
 }
 
 void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
@@ -1002,13 +999,11 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
             radio->station_name[8] = '\0';
             radio->radio_text[0] = '\0';
             radio->radio_text_len = 0;
-            radio->radio_text_updated = true;
         } else if (!(radio->indicators & 0x20) && radio->station_name[0] != ' ') {
             memset(radio->station_name, ' ', 8);
             radio->station_name[8] = '\0';
             radio->radio_text[0] = '\0';
             radio->radio_text_len = 0;
-            radio->radio_text_updated = true;
         }
     }
 
@@ -1017,7 +1012,6 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
         uint8_t slot_idx = radio->preset_slot - 1;
         if (radio->preset_freqs[slot_idx] != radio->freq_0_1mhz) {
             radio->preset_freqs[slot_idx] = radio->freq_0_1mhz;
-            radio->preset_updated = true;
         }
     }
 
@@ -1026,7 +1020,6 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
     if (radio->source_mode < 0x20) {
         radio->source_mode = radio->band;
     }
-    radio->updated = true;
 }
 
 void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
@@ -1034,12 +1027,10 @@ void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint
     if (data[0] & 0x20) {
         if (!(radio->indicators & 0x80)) {
             radio->indicators |= 0x80;
-            radio->updated = true;
         }
     } else {
         if (radio->indicators & 0x80) {
             radio->indicators &= ~0x80;
-            radio->updated = true;
         }
     }
 }
@@ -1063,16 +1054,15 @@ void psa_rd4_process_can_0x2a5(vehicle_radio_t *radio, const uint8_t *data, uint
         memcpy(radio->station_name, data, 8);
         radio->station_name[8] = '\0';
     }
-    radio->updated = true;
 }
 
-void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
-    if (!radio || !isotp || !data || dlc < 2) return;
+bool psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !isotp || !data || dlc < 2) return false;
 
     /* Check for list dismiss / close frame: 01 00 */
     if (dlc == 2 && data[0] == 0x01 && data[1] == 0x00) {
         isotp->active = false;
-        return;
+        return false;
     }
 
     uint8_t pci = data[0] & 0xF0;
@@ -1103,11 +1093,11 @@ void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
                     radio->preset_names[i][8] = '\0';
                 }
             }
-            radio->preset_updated = true;
-            radio->updated = true;
+            isotp->active = false;
+            return true;
         }
         isotp->active = false;
-        return;
+        return false;
     }
 
     /* First Frame (0x1N) */
@@ -1123,7 +1113,7 @@ void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
         isotp->received_length = chunk_len;
         isotp->next_sn         = 1;
         isotp->active          = true;
-        return;
+        return false;
     }
 
     /* Consecutive Frame (0x2N) */
@@ -1167,16 +1157,19 @@ void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
                             radio->preset_names[i][8] = '\0';
                         }
                     }
-                    radio->preset_updated = true;
-                    radio->updated = true;
+                    return true;
                 }
             }
+        } else {
+            /* Sequence error */
+            isotp->active = false;
         }
     }
+    return false;
 }
 
-void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
-    if (!radio || !isotp || !data || dlc < 2) return;
+bool psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
+    if (!radio || !isotp || !data || dlc < 2) return false;
 
     uint8_t pci = data[0] & 0xF0;
 
@@ -1194,11 +1187,12 @@ void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
             memcpy(radio->radio_text, payload, len);
             radio->radio_text[len] = '\0';
             radio->radio_text_len = len;
-            radio->radio_text_updated = true;
             radio->indicators |= 0x04; /* RDTEXT */
+            isotp->active = false;
+            return true;
         }
         isotp->active = false;
-        return;
+        return false;
     }
 
     /* First Frame (0x1N) */
@@ -1214,7 +1208,7 @@ void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
         isotp->received_length = chunk_len;
         isotp->next_sn         = 1;
         isotp->active          = true;
-        return;
+        return false;
     }
 
     /* Consecutive Frame (0x2N) */
@@ -1246,19 +1240,20 @@ void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
                 memcpy(radio->radio_text, payload, len);
                 radio->radio_text[len] = '\0';
                 radio->radio_text_len = (uint8_t)len;
-                radio->radio_text_updated = true;
                 radio->indicators |= 0x04; /* RDTEXT */
                 isotp->active = false;
+                return true;
             }
         } else {
             /* Sequence error */
             isotp->active = false;
         }
     }
+    return false;
 }
 
-void psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
-    if (!cdc || !data || dlc < 2) return;
+bool psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 2) return false;
 
     /* CAN 0x325: Internal CD Drive Mechanism & Disc Presence (DLC: 3)
      * Byte 0: Mechanism status (0x00 = Idle/Normal, 0x80 = Tray/Disc active)
@@ -1268,14 +1263,14 @@ void psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
     if (data[1] == 0x00) {
         cdc->play_status = 0x0C; /* Eject */
     }
-    cdc->updated = true;
+    return true;
 }
 
-void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
-    if (!cdc || !data || dlc < 1) return;
+bool psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 1) return false;
 
     /* Ignore uninitialized / empty drive sentinel frames (e.g. FF FF FF ...) */
-    if (data[0] == 0xFF) return;
+    if (data[0] == 0xFF) return false;
 
     /* CAN 0x365: Internal CD Disc Info (DLC: 5)
      * Byte 0: Total tracks on disc (1..99)
@@ -1290,14 +1285,14 @@ void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
     }
     cdc->active_disc = 0x00;
     cdc->discs_loaded_mask = 0x00;
-    cdc->updated = true;
+    return true;
 }
 
-void psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
-    if (!cdc || !data || dlc < 5) return;
+bool psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 5) return false;
 
     /* Ignore uninitialized / empty drive sentinel frames (e.g. FF FF FF FF 7F 00) */
-    if (data[0] == 0xFF || data[2] == 0xFF) return;
+    if (data[0] == 0xFF || data[2] == 0xFF) return false;
 
     /* CAN 0x3A5: Internal CD Track & Playback Telemetry (DLC: 6)
      * Byte 0: Current track number (1..99)
@@ -1332,11 +1327,11 @@ void psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
     /* Single in-dash CD drive: active disc and magazine loaded mask are 0x00 */
     cdc->active_disc = 0x00;
     cdc->discs_loaded_mask = 0x00;
-    cdc->updated = true;
+    return true;
 }
 
-void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
-    if (!cdc || !data || dlc < 7) return;
+bool psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc) {
+    if (!cdc || !data || dlc < 7) return false;
 
     cdc->active_disc       = data[1];
     cdc->track_num         = data[2];
@@ -1353,7 +1348,7 @@ void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
         cdc->play_status = 0x06; /* Stop (Hiworld wire code 0x06 = Stop) */
     }
     cdc->disc_format = 0x00;
-    cdc->updated = true;
+    return true;
 }
 
 void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
@@ -1362,39 +1357,72 @@ void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     switch (frame->id) {
         case PSA_CAN_ID_ETAT_AUTORADIO:
             psa_rd4_process_can_0x165(&state->media.radio, frame->data, frame->dlc);
+            state->dirty.radio = true;
             break;
         case PSA_CAN_ID_RD4_VOLUME:
-            psa_decode_rd4_volume_0x1a5(frame->data, frame->dlc, &state->audio);
+            if (psa_decode_rd4_volume_0x1a5(frame->data, frame->dlc, &state->audio)) {
+                state->dirty.audio = true;
+            }
             break;
         case PSA_CAN_ID_RD4_AUDIO_SETTINGS:
-            psa_decode_rd4_audio_settings_0x1e5(frame->data, frame->dlc, &state->audio);
+            if (psa_decode_rd4_audio_settings_0x1e5(frame->data, frame->dlc, &state->audio)) {
+                state->dirty.audio = true;
+            }
             break;
         case PSA_CAN_ID_STATION_LIST_125:
-            psa_rd4_process_can_0x125(&state->media.radio, &s_rd4_list_isotp_ctx, frame->data, frame->dlc);
+            if (psa_rd4_process_can_0x125(&state->media.radio, &s_rd4_list_isotp_ctx, frame->data, frame->dlc)) {
+                state->dirty.radio_preset = true;
+                state->dirty.radio = true;
+            }
             break;
-        case PSA_CAN_ID_ETAT_TUNER:
+        case PSA_CAN_ID_ETAT_TUNER: {
+            uint16_t prev_freqs[6];
+            memcpy(prev_freqs, state->media.radio.preset_freqs, sizeof(prev_freqs));
+            uint8_t prev_text_len = state->media.radio.radio_text_len;
+
             psa_rd4_process_can_0x225(&state->media.radio, frame->data, frame->dlc);
+            state->dirty.radio = true;
+
+            if (memcmp(prev_freqs, state->media.radio.preset_freqs, sizeof(prev_freqs)) != 0) {
+                state->dirty.radio_preset = true;
+            }
+            if (prev_text_len != state->media.radio.radio_text_len) {
+                state->dirty.radio_text = true;
+            }
             break;
+        }
         case PSA_CAN_ID_INFO_TUNER:
             psa_rd4_process_can_0x265(&state->media.radio, frame->data, frame->dlc);
+            state->dirty.radio = true;
             break;
         case PSA_CAN_ID_NOM_STATION:
             psa_rd4_process_can_0x2a5(&state->media.radio, frame->data, frame->dlc);
+            state->dirty.radio = true;
             break;
         case PSA_CAN_ID_TEXTE_RADIO:
-            psa_rd4_process_can_0x0a4(&state->media.radio, &s_rd4_isotp_ctx, frame->data, frame->dlc);
+            if (psa_rd4_process_can_0x0a4(&state->media.radio, &s_rd4_isotp_ctx, frame->data, frame->dlc)) {
+                state->dirty.radio_text = true;
+            }
             break;
         case PSA_CAN_ID_CD_TRAY_325:
-            psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc);
+            if (psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc)) {
+                state->dirty.cdc = true;
+            }
             break;
         case PSA_CAN_ID_CD_DISC_INFO_365:
-            psa_rd4_process_can_0x365(&state->media.cdc, frame->data, frame->dlc);
+            if (psa_rd4_process_can_0x365(&state->media.cdc, frame->data, frame->dlc)) {
+                state->dirty.cdc = true;
+            }
             break;
         case PSA_CAN_ID_CD_PLAY_3A5:
-            psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc);
+            if (psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc)) {
+                state->dirty.cdc = true;
+            }
             break;
         case PSA_CAN_ID_CD_CHANGER:
-            psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc);
+            if (psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc)) {
+                state->dirty.cdc = true;
+            }
             break;
         default:
             break;

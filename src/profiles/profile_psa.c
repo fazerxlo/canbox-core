@@ -205,7 +205,7 @@ static psa_journal_iso_tp_t s_journal_ctx;
 static void psa_decode_alert_message_0x1a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     psa_decode_alert_message_0x1a1(frame->data, frame->dlc, &state->alerts.realtime_alert);
-    state->alerts.realtime_updated = true;
+    state->dirty.alert_realtime = true;
 }
 
 static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, vehicle_state_t *state) {
@@ -215,7 +215,7 @@ static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, veh
     if (psa_process_journal_0x120(&s_journal_ctx, frame->data, frame->dlc, items, &count)) {
         memcpy(state->alerts.active_items, items, sizeof(items));
         state->alerts.active_count = count;
-        state->alerts.journal_updated = true;
+        state->dirty.alert_journal = true;
     }
 }
 

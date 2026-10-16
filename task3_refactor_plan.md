@@ -23,7 +23,7 @@ flowchart LR
     P2 --> P3["Phase 3: Decouple Router Dirty Flags<br>from Canonical State Structs"]
 ```
 
-### Phase 1: Unify Remaining PSA Subsystem Decoders into Canonical `vehicle_state_t`
+### Phase 1: Unify Remaining PSA Subsystem Decoders into Canonical `vehicle_state_t` [COMPLETED]
 Consolidate the remaining duplicated decoders so both unit tests and `s_psa_rules[]` in [profile_psa.c](file:///home/Fazer/git/canbox-core/src/profiles/profile_psa.c) call the exact same functions operating on `vehicle_state_t` sub-structs:
 
 1. **Radar (`0x0E1`):**
@@ -55,13 +55,17 @@ Enforce the 5-Layer Architecture rule in [AGENTS.md](file:///home/Fazer/git/canb
 
 ---
 
-### Phase 3: Separate Router Dirty Flags from Canonical Data Structs
-Make delta detection in [can_router.c](file:///home/Fazer/git/canbox-core/src/core/can_router.c) uniform and immune to flag-comparison bugs:
+### Phase 3: Separate Router Dirty Flags from Canonical Data Structs [COMPLETED]
+Make delta detection in [can_router.c] uniform and immune to flag-comparison bugs:
 
-1. **Clean Data Structs in [can_router.h](file:///home/Fazer/git/canbox-core/include/core/can_router.h):**
-   - Keep `vehicle_radio_t`, `vehicle_cdc_t`, `vehicle_audio_settings_t`, `vehicle_radar_t`, and `vehicle_alerts_t` as pure data structures (no transient `updated`, `preset_updated`, or `radio_text_updated` fields inside the `memcmp` target).
+1. **Clean Data Structs in [can_router.h]:**
+   - Removed transient dirty flags (`updated`, `preset_updated`, `radio_text_updated`, `realtime_updated`, `journal_updated`, `updated_page`) from `vehicle_radio_t`, `vehicle_cdc_t`, `vehicle_audio_settings_t`, `vehicle_radar_t`, `vehicle_alerts_t`, and `vehicle_trip_t`.
+   - All canonical vehicle telemetry structs are now pure data structs compared cleanly via `memcmp`.
 2. **Dedicated Dirty Bitmask / Struct in `vehicle_state_t`:**
-   - Group transient event flags into a single `vehicle_dirty_flags_t dirty;` field on `vehicle_state_t` (or compare sub-structs directly via `memcmp` in `can_router_process_can()`), eliminating manual `updated = false` resets before `memcmp`.
+   - Grouped transient event flags into `vehicle_dirty_flags_t dirty;` inside `vehicle_state_t`.
+   - Leaf decoders now return `bool` indicating whether valid telemetry changed or completed reassembly. Frame decoders (`psa_*_decode_frame`) set `state->dirty.*`.
+   - `can_router_process_can()` directly consumes `state->dirty.*` and performs pure `memcmp` comparisons without requiring manual `updated = false` pre-clearing.
+   - All tests (110 unit tests, 39 integration tests, STM32 build, ESP32 build) verified passing with zero warnings.
 
 ---
 

@@ -207,9 +207,9 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push trip computer updates on new valid trip frames
-    if (s_current_state.trip.updated_page != 0) {
-        uint8_t page = s_current_state.trip.updated_page;
-        s_current_state.trip.updated_page = 0;
+    if (s_current_state.dirty.trip_page != 0) {
+        uint8_t page = s_current_state.dirty.trip_page;
+        s_current_state.dirty.trip_page = 0;
         if (page == 1 && s_current_state.trip.instant_valid) {
             hu_protocol_send_trip_instant(&s_current_state.trip);
             s_last_sent_state.trip.instant_fuel_deci = s_current_state.trip.instant_fuel_deci;
@@ -251,8 +251,8 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push radar telemetry on updates
-    if (s_current_state.radar.updated) {
-        s_current_state.radar.updated = false;
+    if (s_current_state.dirty.radar) {
+        s_current_state.dirty.radar = false;
         if (memcmp(&s_current_state.radar, &s_last_sent_state.radar, sizeof(vehicle_radar_t)) != 0) {
             hu_protocol_send_radar(&s_current_state.radar);
             s_last_sent_state.radar = s_current_state.radar;
@@ -260,8 +260,8 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push single alert popup or clear
-    if (s_current_state.alerts.realtime_updated) {
-        s_current_state.alerts.realtime_updated = false;
+    if (s_current_state.dirty.alert_realtime) {
+        s_current_state.dirty.alert_realtime = false;
         if (s_current_state.alerts.realtime_alert.is_active) {
             if (!s_last_sent_state.alerts.realtime_alert.is_active ||
                 s_current_state.alerts.realtime_alert.can_alarm_id != s_last_sent_state.alerts.realtime_alert.can_alarm_id ||
@@ -283,8 +283,8 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Handle alert journal updates (edge-triggered single alerts & table synchronization)
-    if (s_current_state.alerts.journal_updated) {
-        s_current_state.alerts.journal_updated = false;
+    if (s_current_state.dirty.alert_journal) {
+        s_current_state.dirty.alert_journal = false;
 
         if (!s_initial_alerts_scanned) {
             /* Startup / first scan: transmit full 24-byte table once; no popup toasts */
@@ -345,15 +345,17 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push audio settings updates on change
-    if (s_current_state.audio.updated) {
-        s_current_state.audio.updated = false;
-        hu_protocol_send_audio_settings(&s_current_state.audio);
-        s_last_sent_state.audio = s_current_state.audio;
+    if (s_current_state.dirty.audio) {
+        s_current_state.dirty.audio = false;
+        if (memcmp(&s_current_state.audio, &s_last_sent_state.audio, sizeof(vehicle_audio_settings_t)) != 0) {
+            hu_protocol_send_audio_settings(&s_current_state.audio);
+            s_last_sent_state.audio = s_current_state.audio;
+        }
     }
 
     // Immediately push radio tuner & source updates on change
-    if (s_current_state.media.radio.updated) {
-        s_current_state.media.radio.updated = false;
+    if (s_current_state.dirty.radio) {
+        s_current_state.dirty.radio = false;
 
         bool radio_changed = false;
         if (s_current_state.media.radio.source_mode >= 0x20) {
@@ -388,10 +390,10 @@ void can_router_process_can(const can_frame_t *frame) {
             /* If transitioning to radio mode, also refresh presets and radio text */
             if (old_src >= 0x20 && new_src < 0x20) {
                 hu_protocol_send_radio_presets(&s_current_state.media.radio);
-                s_current_state.media.radio.preset_updated = false;
+                s_current_state.dirty.radio_preset = false;
                 if (s_current_state.media.radio.radio_text_len > 0) {
                     hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
-                    s_current_state.media.radio.radio_text_updated = false;
+                    s_current_state.dirty.radio_text = false;
                 }
             }
 
@@ -403,8 +405,8 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push radio preset list updates on change (only if currently in radio tuner mode)
-    if (s_current_state.media.radio.preset_updated) {
-        s_current_state.media.radio.preset_updated = false;
+    if (s_current_state.dirty.radio_preset) {
+        s_current_state.dirty.radio_preset = false;
         if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_presets(&s_current_state.media.radio);
         }
@@ -413,8 +415,8 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push dynamic RDS RadioText on change (only if currently in radio tuner mode)
-    if (s_current_state.media.radio.radio_text_updated) {
-        s_current_state.media.radio.radio_text_updated = false;
+    if (s_current_state.dirty.radio_text) {
+        s_current_state.dirty.radio_text = false;
         if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
         }
@@ -423,8 +425,8 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push CD / CD Changer (CDC) updates on change (only when in CD/CDC mode)
-    if (s_current_state.media.cdc.updated) {
-        s_current_state.media.cdc.updated = false;
+    if (s_current_state.dirty.cdc) {
+        s_current_state.dirty.cdc = false;
         uint8_t src = s_current_state.media.radio.source_mode;
         bool is_cd_source = (src == 0x30 || src == 0x31 ||
                              (!s_current_state.media.radio.present && s_current_state.media.cdc.active_disc != 0));

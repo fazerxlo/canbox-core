@@ -26,33 +26,23 @@ You are acting as an embedded systems software engineer specializing in automoti
 
 Before proposing code changes or completing a task, ensure the change compiles and passes tests on the native host:
 
-* **Run Single Test Suite During Iteration (Fast Feedback):**
+* **Fast Compact Test Runner (Recommended for iteration - Zero token bloat):**
+```bash
+./tools/test_fast.sh                        # Run native_test_runner with compact summary
+./tools/test_fast.sh -f test_peugeot_407    # Filtered test execution
+./tools/test_fast.sh -e integration_test    # Run integration suite
+```
+
+* **Full 4-Target Verification Gate (Single command before completing tasks):**
+```bash
+./tools/verify_all.sh
+```
+
+* **Direct PlatformIO Commands (Fallback):**
 ```bash
 ~/.platformio/penv/bin/pio test -e native_test_runner -f test_protocol_parser
 ~/.platformio/penv/bin/pio test -e integration_test -f test_integration
-```
-
-* **Run Full Native Test Runner (Unit Tests):**
-```bash
-~/.platformio/penv/bin/pio test -e native_test_runner
-# Or compact output filter to reduce token consumption:
-~/.platformio/penv/bin/pio test -e native_test_runner | grep -E "PASSED|FAILED|ERROR|Took|SUMMARY"
-```
-
-* **Run Full Integration Pipeline Tests:**
-```bash
-~/.platformio/penv/bin/pio test -e integration_test
-# Or compact output filter:
-~/.platformio/penv/bin/pio test -e integration_test | grep -E "PASSED|FAILED|ERROR|Took|SUMMARY"
-```
-
-* **Build STM32 Firmware Target (Silent to prevent context token inflation):**
-```bash
 ~/.platformio/penv/bin/pio run -s -e stm32_cbox
-```
-
-* **Build ESP32 Firmware Target (Silent to prevent context token inflation):**
-```bash
 ~/.platformio/penv/bin/pio run -s -e esp32_cbox
 ```
 
@@ -197,19 +187,20 @@ To complete tasks rapidly with minimal token and tool-call overhead:
 3. **Targeted Line-Number Discovery via Grep (No Speculative Reading):**
    - Use `grep -n` or `rg -n` first to locate exact symbol line ranges before calling `view_file` or `replace_file_content`, rather than executing multiple speculative `view_file` scrolling calls across large files.
 4. **Filtered Test Iteration (`-f`), Full Suite on Gate Only:**
-   - During code iteration, run only the targeted test binary with `-f` (e.g. `pio test -e native_test_runner -f test_protocol_parser` or `pio test -e integration_test -f test_integration`).
-   - Run the full 4-target verification suite (`native_test_runner`, `integration_test`, `stm32_cbox`, `esp32_cbox`) once at the end of the phase.
+   - During code iteration, run only the targeted test suite using `./tools/test_fast.sh [-f <filter>]` (e.g. `./tools/test_fast.sh -f test_peugeot_407`).
+   - Run the full 4-target verification suite via `./tools/verify_all.sh` once at the end of the phase.
 5. **Large-Window File Reads (No Micro-Slicing):**
    - `view_file` supports up to **800 lines per call**. Read 300–800 lines in a single call rather than chaining multiple 20–50 line reads across the same file.
 6. **Parallel Tool Call Batching:**
-   - Always batch independent `view_file`, search, or command calls in parallel within a single turn rather than issuing them sequentially one per turn.
+   - Always batch independent `view_file`, `replace_file_content`, or command calls in parallel within a single turn rather than issuing them sequentially one per turn. Emitting multiple tool calls in one turn avoids repeated full-context-window billing for intermediate turns.
 7. **Log-Fix Short-Circuit (`[APP_UART_TX]` Awareness):**
    - When the user provides an E2E dump log (`dump_*.log`) **and** explicitly states the required fix rule (e.g., *"When RD4 radio is off, do not send CD/Tuner frames"*), extract only the relevant `[CAN_RX]` test vectors from the log and proceed directly to code implementation.
    - Remember that `[APP_UART_TX]` in bench/vehicle logs is emitted by the *firmware binary flashed on the MCU at capture time* (which may be an older build), not necessarily the current local source code. Never spend tool calls hunting through local C files to explain historical `[APP_UART_TX]` anomalies if the current code path is already clear.
-8. **PSA Two-Layer Decoder Map (Skip Exploratory Grepping):**
-   - `src/profiles/profile_psa.c`: Contains `s_psa_rules[]` CAN ID routing table, routing all RD4 CAN IDs (`0x165`, `0x1A5`, `0x1E5`, `0x125`, `0x225`, `0x265`, `0x2A5`, `0x0A4`, `0x325`, `0x365`, `0x3A5`, `0x3A6`) directly to `psa_rd4_decode_frame()`.
-   - `src/profiles/peugeot_407.c`: Contains `psa_rd4_decode_frame()`, detailed subsystem decoders (`psa_rd4_process_can_*`, `psa_hvac_process_can_*`), and Hiworld wire builders (`build_hiworld_*`). CAN `0x165` is the sole authority over `state->media.radio` power (`power_status`), presence (`present`), sleep (`sleep`), and active source (`source_mode`).
-   - `src/core/can_router.c`: Handles delta detection (`*.updated`) in `can_router_process_can()` and the 60-second periodic resync in `can_router_periodic_100ms()`.
+8. **PSA Architecture & Decoder Map (Skip Exploratory Grepping):**
+   - `src/profiles/profile_psa.c`: Pure declarative CAN ID routing table (`s_psa_rules[]`) and power/ignition synthesis (`0x036`, `0x0F6`), dispatching frames to profile handlers.
+   - `src/profiles/peugeot_407.c`: Pure Layer 2 CAN2004 decoders (`psa_*_decode_frame()`, `psa_*_process_can_*`). Mutates canonical data sub-structs and flags `state->dirty.*`. CAN `0x165` is the sole authority over `state->media.radio` power (`power_status`), presence (`present`), sleep (`sleep`), and active source (`source_mode`).
+   - `src/protocols/hiworld_psa_builders.c` / `raise_psa_builders.c`: Pure Layer 5 protocol wire builders (`build_hiworld_*`, `build_raise_*`).
+   - `src/core/can_router.c`: Handles delta detection (`state->dirty.*` and `memcmp` over pure canonical data structs) in `can_router_process_can()` and the 60-second periodic resync in `can_router_periodic_100ms()`.
 9. **State-Machine-First Design (No Ad-Hoc Boolean Patching):**
    - For stateful subsystems (RD4 `source_mode`, HVAC flap/AQS modes, DSP menu activity), define a clean `(Current State, Event) -> Next State & Serial Action` transition rule upfront rather than adding extra boolean flags across layers.
    - Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) always cache their data into `state->media` without turning the radio ON or overwriting `source_mode == 0xFF` (`OFF`) or `>= 0x20` (`AUX`/`CD`/`CDC`).
@@ -219,10 +210,13 @@ To complete tasks rapidly with minimal token and tool-call overhead:
    - Whenever creating a new `.c` source file, immediately register it in `src/CMakeLists.txt` in the same turn to prevent `esp32_cbox` linking failures (`undefined reference`).
 11. **Type & Struct Pre-Verification (First-Pass Header Correctness):**
    - Before adding `#include` directives or referencing domain types (e.g. `hvac_state_t`, `canbox_tpms_state_t`), run `grep -rn "typedef struct <Name> include/"` to identify the authoritative header instead of guessing.
-12. **Mass Prune Optimization (Scripts vs Repetitive Tool Diffs):**
-   - When extracting code or removing large swathes of code (>30% of file lines or >200 lines across non-contiguous blocks), avoid sending multiple massive `replace_file_content` payloads containing repetitive `TargetContent`. Use targeted python/sed/awk one-liners or batch cleanups to conserve output tokens.
-13. **Compact Test Output Filtering:**
-   - When running full test suites (`native_test_runner`, `integration_test`), filter out repetitive per-case passing lines if only the aggregate pass/fail status is needed (e.g., pipe to `grep -E "PASSED|FAILED|ERROR|Took|SUMMARY"` or run filtered suites `-f <suite>`).
+12. **Mass Prune & Rename Optimization (Scripts vs Repetitive Tool Diffs):**
+   - When extracting code, deleting large blocks (>30% of file lines), or renaming/removing symbols across 3+ files, use a shell/python one-liner via `run_command` (e.g. `python3 -c ...` or `sed -i ...`) rather than chaining 5+ sequential `replace_file_content` tool calls. This saves thousands of output and input tokens.
+13. **Compact Test Output Filtering (`tools/test_fast.sh` & `tools/verify_all.sh`):**
+   - Use `./tools/test_fast.sh` for instant, compact test output during code iteration.
+   - Use `./tools/verify_all.sh` for the multi-target verification gate before completing tasks. It executes unit tests, integration tests, STM32 firmware build, and ESP32 firmware build silently and reports a concise ~5-line summary.
+14. **Milestone Context Compaction (`/compact`):**
+   - After completing major architectural milestones or multi-turn refactoring tasks, recommend or use `/compact` to summarize history and reclaim context tokens.
 
 
 

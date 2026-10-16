@@ -112,7 +112,6 @@ typedef struct {
     uint8_t  trip2_avg_speed;   /* km/h */
     uint16_t trip2_distance_km; /* km */
 
-    uint8_t  updated_page;      /* 0: none, 1: instant (0x13), 2: trip1 (0x14), 3: trip2 (0x15) */
     bool     instant_valid;
     bool     trip1_valid;
     bool     trip2_valid;
@@ -134,7 +133,6 @@ typedef struct {
     bool    display_active;
     bool    system_fault;
     bool    valid;
-    bool    updated;
 } vehicle_radar_t;
 
 typedef vehicle_radar_t radar_state_t;
@@ -156,8 +154,6 @@ typedef struct {
     vehicle_alert_item_t realtime_alert;
     vehicle_alert_item_t active_items[CANBOX_MAX_ACTIVE_ALERTS];
     uint8_t              active_count;     /* 0..10 */
-    bool                 realtime_updated; /* Single alert state changed */
-    bool                 journal_updated;  /* Summary list changed */
 } vehicle_alerts_t;
 
 typedef vehicle_alerts_t alerts_state_t;
@@ -174,7 +170,6 @@ typedef struct {
     bool    speed_volume;   /* true/false (ON/OFF only) */
     uint8_t active_mode;    /* 0..8 */
     bool    valid;
-    bool    updated;
 } vehicle_audio_settings_t;
 
 typedef vehicle_audio_settings_t audio_settings_state_t;
@@ -193,11 +188,8 @@ typedef struct {
     char     station_name[9];   /* 8 ASCII chars + null terminator */
     char     radio_text[PSA_RD4_MAX_RADIO_TEXT_LEN + 1];
     uint8_t  radio_text_len;
-    bool     radio_text_updated;
     uint16_t preset_freqs[6];   /* Preset 1..6 frequencies in 0.1 MHz (FM) or kHz (AM) */
     char     preset_names[6][9];/* Preset 1..6 station names (8 chars + null) */
-    bool     preset_updated;
-    bool     updated;
 } vehicle_radio_t;
 
 typedef struct {
@@ -210,7 +202,6 @@ typedef struct {
     uint8_t  elapsed_sec;       /* 0..59 */
     uint8_t  play_modes;        /* Bit 0: RND, Bit 1: SCAN, Bit 2: RPT */
     uint8_t  play_status;       /* 0=stop, 1=play, 2=pause */
-    bool     updated;
 } vehicle_cdc_t;
 
 typedef struct {
@@ -221,6 +212,18 @@ typedef struct {
 typedef vehicle_radio_t psa_rd4_radio_state_t;
 typedef vehicle_cdc_t   psa_rd4_cdc_state_t;
 typedef vehicle_media_t psa_rd4_media_state_t;
+
+typedef struct {
+    bool    radar;
+    bool    alert_realtime;
+    bool    alert_journal;
+    bool    audio;
+    bool    radio;
+    bool    radio_preset;
+    bool    radio_text;
+    bool    cdc;
+    uint8_t trip_page;          /* 0: none, 1: instant (0x13), 2: trip1 (0x14), 3: trip2 (0x15) */
+} vehicle_dirty_flags_t;
 
 typedef struct {
     vehicle_doors_t          doors;
@@ -242,6 +245,7 @@ typedef struct {
     bool                     handbrake;
     bool                     economy_mode;
     bool                     ignition_on;
+    vehicle_dirty_flags_t    dirty;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);
