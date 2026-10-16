@@ -15,9 +15,9 @@ You are acting as an embedded systems software engineer specializing in automoti
 * **Clarification Only on Blocking Concerns:** If (and only if) there is an explicit contradiction, ambiguity, or missing critical parameter that blocks writing working C code, ask the user a direct, concise question. Do NOT run deep exploratory search loops or second-guess the provided specs.
 * **Strict CAN2004 Proven Data Only (Zero Guesses / Zero Unverified Placeholders):** The primary target vehicle architecture is Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps). Never guess signals, never implement speculative placeholder decoders, and never import or mix CAN2010 / AEE2010 signal definitions (such as radar on `0x260`/`0x270` or unconfirmed SAS frames). If a CAN frame or signal mapping is not explicitly provided in the user's documented specs, mark it as pending in `doc/TODO_PROGRESS.md` and DO NOT write decoder code for it.
 * **Path Privacy in Documentation:** Never include absolute system paths (e.g. `/home/...` or `file:///home/...`) in documentation files (`doc/*.md` or markdown files). Use relative repository paths for internal files. For external files outside the workspace, only reference the filename or class name without local paths or links.
-* **Mandatory Progress Table Updates (`doc/TODO_PROGRESS.md`):** Whenever an agent implements, refactors, verifies, or modifies any feature, decoder, serializer, downlink handler, test, or protocol command, the agent **MUST** update `doc/TODO_PROGRESS.md` before concluding the task. Specifically:
-  - Update the feature row in Section 3 (Master Command Implementation Matrix) and Section 4 (Subsystem Deep-Dive) with current status (`[x]`, `[-]`, or `[ ]`), implemented C functions, CAN IDs, and test cases.
-  - Recalculate and update the High-Level Progress Overview counts and completion percentages in Section 2.
+* **Progress Table Updates (`doc/TODO_PROGRESS.md` — On Feature / Command Changes Only):** Update `doc/TODO_PROGRESS.md` when a feature status changes (`[ ]` -> `[-]` -> `[x]`), or when a new protocol command or CAN ID is added. Skip updating `doc/TODO_PROGRESS.md` for internal code refactors or bug fixes that do not change feature completion status. When updating:
+  - Update the feature row in Section 3 (Master Command Implementation Matrix) and recalculate Section 2 overview counts if status changed.
+  - Put detailed bitfield/protocol notes in the dedicated `doc/CANBOX_SPEC_HIWORLD_407_<TOPIC>.md` file rather than duplicating prose in `doc/TODO_PROGRESS.md`.
   - Ensure the tracker stays strictly Hiworld PSA Peugeot 407 specific (no Raise, Bagoo, VAG, or unverified CAN2010 definitions).
 
 ---
@@ -26,12 +26,18 @@ You are acting as an embedded systems software engineer specializing in automoti
 
 Before proposing code changes or completing a task, ensure the change compiles and passes tests on the native host:
 
-* **Run Native Test Runner (Unit Tests):**
+* **Run Single Test Suite During Iteration (Fast Feedback):**
+```bash
+~/.platformio/penv/bin/pio test -e native_test_runner -f test_protocol_parser
+~/.platformio/penv/bin/pio test -e integration_test -f test_integration
+```
+
+* **Run Full Native Test Runner (Unit Tests):**
 ```bash
 ~/.platformio/penv/bin/pio test -e native_test_runner
 ```
 
-* **Run Integration Pipeline Tests:**
+* **Run Full Integration Pipeline Tests:**
 ```bash
 ~/.platformio/penv/bin/pio test -e integration_test
 ```
@@ -138,9 +144,9 @@ Implement the Uplink path strictly traversing the 5 layers:
    ```
 3. Ensure zero compilation warnings (`-Wall -Wextra -Werror`) on desktop, STM32, and ESP32 targets.
 
-### Phase 5: Documentation & Specification Tracking (MANDATORY)
-1. **Always Update `doc/TODO_PROGRESS.md`:** Never conclude a task or feature implementation without updating `doc/TODO_PROGRESS.md`: mark completed features `[x]`, in-progress features `[-]`, update the counts and completion percentages in Section 2, and link implemented functions, CAN IDs, and test cases.
-2. Create or update the detailed topic specification document in `doc/CANBOX_SPEC_HIWORLD_407_<TOPIC>.md` documenting bitfields, wire frames, and APK mappings.
+### Phase 5: Documentation & Specification Tracking
+1. **Update `doc/CANBOX_SPEC_HIWORLD_407_<TOPIC>.md`:** Document new or modified bitfields, state machine transitions, wire frames, and APK mappings in the topic specification file.
+2. **Update `doc/TODO_PROGRESS.md` When Feature Status Changes:** If a feature transitions (`[ ]` -> `[-]` -> `[x]`) or a new command/CAN ID is added, update Section 2 and Section 3 in `doc/TODO_PROGRESS.md`. Skip for internal refactors or bug fixes.
 
 ### Phase 6: Downlink Progression
 Once the Uplink path is fully implemented, verified with tests, and documented:
@@ -171,4 +177,29 @@ When adding or editing a car profile:
 4. Update `vehicle_profile_id_t` in `include/core/vehicle_profile.h` and the registry table in `src/core/vehicle_profile_manager.c`.
 5. Add model index mappings in `raise_car_mapping.c` and `hiworld_car_mapping.c`.
 6. Keep profile decoders decoupled from protocol adapters—all inter-layer communication flows via the canonical state cache.
+
+---
+
+## 7. Token & Tool Call Efficiency (Fast-Path Execution Rules)
+
+To complete tasks rapidly with minimal token and tool-call overhead:
+
+1. **Large-Window File Reads (No Micro-Slicing):**
+   - `view_file` supports up to **800 lines per call**. Read 300–800 lines in a single call rather than chaining multiple 20–50 line reads across the same file.
+2. **Parallel Tool Call Batching:**
+   - Always batch independent `view_file`, search, or command calls in parallel within a single turn rather than issuing them sequentially one per turn.
+3. **Log-Fix Short-Circuit (`[APP_UART_TX]` Awareness):**
+   - When the user provides an E2E dump log (`dump_*.log`) **and** explicitly states the required fix rule (e.g., *"When RD4 radio is off, do not send CD/Tuner frames"*), extract only the relevant `[CAN_RX]` test vectors from the log and proceed directly to code implementation.
+   - Remember that `[APP_UART_TX]` in bench/vehicle logs is emitted by the *firmware binary flashed on the MCU at capture time* (which may be an older build), not necessarily the current local source code. Never spend tool calls hunting through local C files to explain historical `[APP_UART_TX]` anomalies if the current code path is already clear.
+4. **PSA Two-Layer Decoder Map (Skip Exploratory Grepping):**
+   - `src/profiles/profile_psa.c`: Contains `s_psa_rules[]` CAN ID routing table, routing all RD4 CAN IDs (`0x165`, `0x1A5`, `0x1E5`, `0x125`, `0x225`, `0x265`, `0x2A5`, `0x0A4`, `0x325`, `0x365`, `0x3A5`, `0x3A6`) directly to `psa_rd4_decode_frame()`.
+   - `src/profiles/peugeot_407.c`: Contains `psa_rd4_decode_frame()`, detailed subsystem decoders (`psa_rd4_process_can_*`, `psa_hvac_process_can_*`), and Hiworld wire builders (`build_hiworld_*`). CAN `0x165` is the sole authority over `state->media.radio` power (`power_status`), presence (`present`), sleep (`sleep`), and active source (`source_mode`).
+   - `src/core/can_router.c`: Handles delta detection (`*.updated`) in `can_router_process_can()` and the 60-second periodic resync in `can_router_periodic_100ms()`.
+5. **State-Machine-First Design (No Ad-Hoc Boolean Patching):**
+   - For stateful subsystems (RD4 `source_mode`, HVAC flap/AQS modes, DSP menu activity), define a clean `(Current State, Event) -> Next State & Serial Action` transition rule upfront rather than adding extra boolean flags across layers.
+   - Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) always cache their data into `state->media` without turning the radio ON or overwriting `source_mode == 0xFF` (`OFF`) or `>= 0x20` (`AUX`/`CD`/`CDC`).
+   - `can_router.c` dispatches `0x84`/`0x85`/`0x86`/`0x97` strictly based on `source_mode` (`< 0x20` Tuner, `0x20..0x21` AUX, `0x30..0x31` CD/CDC, `0xFF` one-shot OFF).
+6. **Filtered Test Iteration, Parallel Final Verification:**
+   - During code iteration, run only the targeted test binary with `-f` (e.g. `pio test -e integration_test -f test_integration`). Run the full 4-target verification suite (`native_test_runner`, `integration_test`, `stm32_cbox`, `esp32_cbox`) once at the end.
+
 

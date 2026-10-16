@@ -111,6 +111,14 @@ You can either use the convenient `--preset <name>` flag or specify exact `-c <C
   ./tools/diff_canbox_frames.py dump_*.log -c 39B 2A8 -p 71 72 76 79
   ```
 
+* **RD4 Radio, Tuner, Presets, RDS, CD & DSP Audio:**
+  *(Power/source on `0x165`, tuner on `0x225`/`0x265`/`0x2A5`/`0x0A4`/`0x125`, DSP on `0x1A5`/`0x1E5`, CD/CDC on `0x325`/`0x365`/`0x3A5`/`0x3A6`)*
+  ```bash
+  ./tools/diff_canbox_frames.py dump_*.log --preset radio
+  # Or explicit:
+  ./tools/diff_canbox_frames.py dump_*.log -c 165 225 265 2A5 0A4 125 1A5 1E5 325 365 3A5 3A6 -p 84 85 86 97 56
+  ```
+
 * **Full Summary Across All Commands (no raw dump scanning):**
   ```bash
   ./tools/diff_canbox_frames.py dump_*.log -s
