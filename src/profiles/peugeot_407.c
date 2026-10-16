@@ -1387,6 +1387,9 @@ size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len) {
     return 12;
 }
 
+static psa_isotp_rx_ctx_t s_rd4_isotp_ctx;
+static psa_isotp_rx_ctx_t s_rd4_list_isotp_ctx;
+
 void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp) {
     if (media) {
         memset(media, 0, sizeof(*media));
@@ -1397,10 +1400,16 @@ void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp) {
     if (isotp) {
         memset(isotp, 0, sizeof(*isotp));
     }
+    memset(&s_rd4_isotp_ctx, 0, sizeof(s_rd4_isotp_ctx));
+    memset(&s_rd4_list_isotp_ctx, 0, sizeof(s_rd4_list_isotp_ctx));
 }
 
 void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
-    if (!radio || !data || dlc < 3) return;
+    if (!radio || !data || dlc < 1) return;
+
+    radio->present = true;
+    /* Bits [7:6] == 0 indicates radio is in deep sleep / standby (e.g. 0x08) */
+    radio->sleep = ((data[0] & 0xC0) == 0);
 
     /* Bit 7 of byte 0: radio audio power on/off */
     bool radio_powered = (data[0] & 0x80) != 0;
@@ -1411,11 +1420,21 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
         return;
     }
 
+    if (dlc < 3) {
+        if (radio->power_status == 0) {
+            radio->power_status = 0x01;
+        }
+        radio->updated = true;
+        return;
+    }
+
     uint8_t src = (data[2] >> 4) & 0x0F;
     switch (src) {
         case 0x1: /* Tuner */
             radio->source_mode = radio->band;
-            radio->power_status = 0x01;
+            if (radio->power_status != 0x02) {
+                radio->power_status = 0x01;
+            }
             break;
         case 0x2: /* Internal CD */
             radio->source_mode = 0x30;
@@ -1453,11 +1472,13 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
     if (data[0] & 0x40) radio->indicators |= 0x10; /* SCAN */
     if (radio->radio_text_len > 0) radio->indicators |= 0x04; /* RDTEXT */
 
-    /* Seeking / Tuning status */
-    if (data[0] & 0x08) {
-        radio->power_status = 0x02; /* Seeking */
-    } else if (radio->power_status == 0x02) {
-        radio->power_status = 0x01; /* Restored to playing */
+    /* Seeking / Tuning status (only when radio is already powered ON) */
+    if (radio->power_status != 0) {
+        if (data[0] & 0x08) {
+            radio->power_status = 0x02; /* Seeking */
+        } else if (radio->power_status == 0x02) {
+            radio->power_status = 0x01; /* Restored to playing */
+        }
     }
 
     /* Preset memory: 0=manual, 1..6 */
@@ -1517,11 +1538,10 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
         }
     }
 
-    if (radio->source_mode < 0x20 || radio->source_mode == 0xFF) {
+    /* Only update active source_mode if currently in Tuner mode (< 0x20).
+     * Never overwrite OFF (0xFF) or external sources (AUX/CD/CDC >= 0x20). */
+    if (radio->source_mode < 0x20) {
         radio->source_mode = radio->band;
-        if (radio->power_status == 0) {
-            radio->power_status = 0x01;
-        }
     }
     radio->updated = true;
 }
@@ -1674,13 +1694,6 @@ void psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
 
 void psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp, const uint8_t *data, uint8_t dlc) {
     if (!radio || !isotp || !data || dlc < 2) return;
-
-    if (radio->source_mode == 0xFF) {
-        radio->source_mode = radio->band;
-        if (radio->power_status == 0) {
-            radio->power_status = 0x01;
-        }
-    }
 
     uint8_t pci = data[0] & 0xF0;
 
@@ -1858,6 +1871,51 @@ void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
     }
     cdc->disc_format = 0x00;
     cdc->updated = true;
+}
+
+void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+
+    switch (frame->id) {
+        case PSA_CAN_ID_ETAT_AUTORADIO:
+            psa_rd4_process_can_0x165(&state->media.radio, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_RD4_VOLUME:
+            psa_decode_rd4_volume_0x1a5(frame->data, frame->dlc, &state->audio);
+            break;
+        case PSA_CAN_ID_RD4_AUDIO_SETTINGS:
+            psa_decode_rd4_audio_settings_0x1e5(frame->data, frame->dlc, &state->audio);
+            break;
+        case PSA_CAN_ID_STATION_LIST_125:
+            psa_rd4_process_can_0x125(&state->media.radio, &s_rd4_list_isotp_ctx, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_ETAT_TUNER:
+            psa_rd4_process_can_0x225(&state->media.radio, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_INFO_TUNER:
+            psa_rd4_process_can_0x265(&state->media.radio, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_NOM_STATION:
+            psa_rd4_process_can_0x2a5(&state->media.radio, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_TEXTE_RADIO:
+            psa_rd4_process_can_0x0a4(&state->media.radio, &s_rd4_isotp_ctx, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_CD_TRAY_325:
+            psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_CD_DISC_INFO_365:
+            psa_rd4_process_can_0x365(&state->media.cdc, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_CD_PLAY_3A5:
+            psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc);
+            break;
+        case PSA_CAN_ID_CD_CHANGER:
+            psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc);
+            break;
+        default:
+            break;
+    }
 }
 
 size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out) {

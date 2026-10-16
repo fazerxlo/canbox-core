@@ -182,7 +182,9 @@ typedef vehicle_audio_settings_t audio_settings_state_t;
 #define PSA_RD4_MAX_RADIO_TEXT_LEN 64
 
 typedef struct {
-    uint8_t  source_mode;       /* Hiworld source code */
+    bool     present;           /* true once RD4 0x165 frame is detected on CAN bus */
+    bool     sleep;             /* true when RD4 is in deep sleep ((data[0] & 0xC0) == 0) */
+    uint8_t  source_mode;       /* Hiworld source code (0xFF = Off/Standby) */
     uint8_t  band;              /* 0x00=FM1, 0x01=FM2, 0x04=FMAST, 0x10=AM */
     uint16_t freq_0_1mhz;       /* Frequency in 0.1 MHz units (FM) or kHz (AM) */
     uint8_t  preset_slot;       /* 0=manual, 1..6 */
@@ -240,9 +242,6 @@ typedef struct {
     bool                     handbrake;
     bool                     economy_mode;
     bool                     ignition_on;
-    bool                     radio_on;
-    bool                     radio_present;
-    bool                     radio_sleep;
 } vehicle_state_t;
 
 typedef void (*can_msg_handler_t)(const can_frame_t *frame, vehicle_state_t *state);

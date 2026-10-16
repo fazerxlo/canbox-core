@@ -401,7 +401,20 @@ typedef struct {
     bool     active;
 } psa_isotp_rx_ctx_t;
 
+static inline bool psa_rd4_is_connected(const vehicle_radio_t *radio) {
+    return radio != NULL && radio->present;
+}
+
+static inline bool psa_rd4_is_powered(const vehicle_radio_t *radio) {
+    return radio != NULL && radio->power_status != 0;
+}
+
+static inline bool psa_rd4_is_off(const vehicle_radio_t *radio) {
+    return radio != NULL && radio->present && radio->power_status == 0;
+}
+
 void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp);
+void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc);

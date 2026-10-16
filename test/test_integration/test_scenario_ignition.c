@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "can_log_player.h"
 #include "core/can_router.h"
+#include "profiles/peugeot_407.h"
 #include "hal/hal_gpio.h"
 
 static const char *LOG_PATH = "test/test_integration/data/ignition_off_after_power_on.csv";
@@ -226,7 +227,7 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     // 7. Normal mode with RD4 radio turned OFF via 0x165 (0x48 transition, then 0x08 sleep)
     can_router_process_can(&frame_norm_off); // Return to normal mode
     can_router_process_can(&frame_radio_off); // 0x48: Audio turning off, screen goodbye
-    TEST_ASSERT_FALSE(state->radio_on);
+    TEST_ASSERT_FALSE(psa_rd4_is_powered(&state->media.radio));
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
@@ -237,8 +238,8 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
         .data = { 0x08, 0x80, 0x00, 0x00 }
     };
     can_router_process_can(&frame_radio_sleep);
-    TEST_ASSERT_TRUE(state->radio_sleep);
-    TEST_ASSERT_FALSE(state->radio_on);
+    TEST_ASSERT_TRUE(state->media.radio.sleep);
+    TEST_ASSERT_FALSE(psa_rd4_is_powered(&state->media.radio));
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Radio in sleep mode must keep ACC OFF");
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
@@ -254,8 +255,8 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
 
     // 9. When radio powers back ON (0xC8), ACC turns ON
     can_router_process_can(&frame_radio_on);
-    TEST_ASSERT_TRUE(state->radio_on);
-    TEST_ASSERT_FALSE(state->radio_sleep);
+    TEST_ASSERT_TRUE(psa_rd4_is_powered(&state->media.radio));
+    TEST_ASSERT_FALSE(state->media.radio.sleep);
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
     TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 }

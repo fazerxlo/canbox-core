@@ -1093,7 +1093,16 @@ void test_integration_hiworld_rd4_radiotext_pipeline(void) {
     uint8_t rx_buf[64];
     read_uart_output(rx_buf, sizeof(rx_buf));
 
-    // Inject ISO-TP multi-frame stream for "Queen - Bohemian Rhapsody" (29 bytes with 4-byte prefix)
+    // 1. Source Tuner ON via 0x165
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xCC, 0x54, 0x10, 0x02 }
+    };
+    can_router_process_can(&frame_165);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 2. Inject ISO-TP multi-frame stream for "Queen - Bohemian Rhapsody" (29 bytes with 4-byte prefix)
     const uint8_t can_ff[]  = { 0x10, 0x1D, 0x10, 0x00, 0x00, 0x00, 0x51, 0x75 };
     const uint8_t can_cf1[] = { 0x21, 0x65, 0x65, 0x6E, 0x20, 0x2D, 0x20, 0x42 };
     const uint8_t can_cf2[] = { 0x22, 0x6F, 0x68, 0x65, 0x6D, 0x69, 0x61, 0x6E };
@@ -1294,6 +1303,15 @@ void test_integration_hiworld_rd4_preset_list_pipeline(void) {
     uint8_t rx_buf[128];
     read_uart_output(rx_buf, sizeof(rx_buf));
 
+    // 0. Source Tuner ON via 0x165
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xCC, 0x54, 0x10, 0x02 }
+    };
+    can_router_process_can(&frame_165);
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
     // 1. Inject CAN 0x225 with Preset 1 active (87.5 MHz)
     can_frame_t frame_225_p1 = {
         .id = 0x225,
@@ -1466,6 +1484,38 @@ void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void) {
     uint8_t rx_buf[128];
     while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
 
+    /* 0. Boot sequence from dump_2026-10-15_18-37-15.log:
+     * Background 0x2A5 and 0x225 arrive BEFORE the first 0x165 OFF frame.
+     * They must be cached silently without emitting any UART frames. */
+    can_frame_t frame_2a5_boot = {
+        .id = 0x2A5,
+        .dlc = 8,
+        .data = { 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D, 0x20, 0x20 }
+    };
+    can_router_process_can(&frame_2a5_boot);
+    TEST_ASSERT_EQUAL_UINT32(0, read_uart_output(rx_buf, sizeof(rx_buf)));
+
+    /* First 0x165 arrives with RD4 OFF (0x48, 0xC8, 0x00, 0x00):
+     * Emits one-shot Cmd 0x84 with source_mode = 0xFF, power_status = 0x00 */
+    can_frame_t frame_off = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x48, 0xC8, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_off);
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_radio_off[] = {
+        0x5A, 0xA5, 0x0E, 0x84, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 0x90
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_radio_off), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_radio_off, rx_buf, sizeof(expected_radio_off));
+
+    /* Subsequent 0x165 OFF frames must NOT re-emit 0x84 */
+    can_router_process_can(&frame_off);
+    TEST_ASSERT_EQUAL_UINT32(0, read_uart_output(rx_buf, sizeof(rx_buf)));
+
     /* 1. Power ON RD4 radio in Tuner mode (CAN 0x165: 0xCC, 0x54, 0x10, 0x02) */
     can_frame_t frame_on = {
         .id = 0x165,
@@ -1482,7 +1532,7 @@ void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void) {
     can_router_process_can(&frame_225);
 
     /* Verify 0x84 received while radio is ON */
-    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     bool found_0x84 = false;
     for (size_t i = 0; i < rx_len; i++) {
         if (rx_buf[i] == 0x5A && (i + 3) < rx_len && rx_buf[i + 3] == 0x84) {
@@ -1492,27 +1542,15 @@ void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void) {
     }
     TEST_ASSERT_TRUE(found_0x84);
 
-    /* 2. RD4 Radio turned OFF (CAN 0x165: 0x48, 0xC8, 0x00, 0x00 from dump_2026-10-15_18-37-15.log) */
-    can_frame_t frame_off = {
-        .id = 0x165,
-        .dlc = 4,
-        .data = { 0x48, 0xC8, 0x00, 0x00 }
-    };
+    /* 2. RD4 Radio turned OFF (CAN 0x165: 0x48, 0xC8, 0x00, 0x00):
+     * Must emit one-shot 0x84 0xFF (Radio OFF) cleanly */
     can_router_process_can(&frame_off);
-
-    /* Radio OFF must NOT emit any 0x84, 0x85, 0x86, 0x97 frames to HU */
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    for (size_t i = 0; i < rx_len; i++) {
-        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
-            uint8_t cmd = rx_buf[i + 3];
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x84, cmd);
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x85, cmd);
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x86, cmd);
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x97, cmd);
-        }
-    }
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_radio_off), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_radio_off, rx_buf, sizeof(expected_radio_off));
 
-    /* 3. Inject background CAN tuner status (CAN 0x225 from dump log) */
+    /* 3. Inject background CAN tuner status (CAN 0x225 from dump log) while OFF:
+     * Cached in state, but ZERO UART output (no flip-flopping to 0x01 / 0x85!) */
     can_frame_t frame_225_bg = {
         .id = 0x225,
         .dlc = 5,
@@ -1520,15 +1558,10 @@ void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void) {
     };
     can_router_process_can(&frame_225_bg);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    for (size_t i = 0; i < rx_len; i++) {
-        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
-            uint8_t cmd = rx_buf[i + 3];
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x84, cmd);
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x85, cmd);
-        }
-    }
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 
-    /* 4. Inject background CAN CD track telemetry (CAN 0x3A5 from dump log) */
+    /* 4. Inject background CAN CD track telemetry (CAN 0x3A5 from dump log) while OFF:
+     * Cached in state, but ZERO UART output */
     can_frame_t frame_3a5_bg = {
         .id = 0x3A5,
         .dlc = 6,
@@ -1536,21 +1569,12 @@ void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void) {
     };
     can_router_process_can(&frame_3a5_bg);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    for (size_t i = 0; i < rx_len; i++) {
-        if (rx_buf[i] == 0x5A && (i + 3) < rx_len) {
-            uint8_t cmd = rx_buf[i + 3];
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x97, cmd);
-            TEST_ASSERT_NOT_EQUAL_HEX8(0x84, cmd);
-        }
-    }
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 
-    /* 5. Inject background CAN Station Name (0x2A5) */
-    can_frame_t frame_2a5_bg = {
-        .id = 0x2A5,
-        .dlc = 8,
-        .data = { 0x52, 0x4D, 0x46, 0x20, 0x46, 0x4D, 0x20, 0x20 }
-    };
-    can_router_process_can(&frame_2a5_bg);
+    /* 5. Inject background CAN Station Name (0x2A5) and another 0x165 OFF frame:
+     * ZERO UART output */
+    can_router_process_can(&frame_2a5_boot);
+    can_router_process_can(&frame_off);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 
@@ -1569,7 +1593,7 @@ void test_integration_hiworld_rd4_radio_off_suppresses_cd_tuner_frames(void) {
         }
     }
 
-    /* 7. Turn RD4 radio back ON: verification that telemetry resumes immediately */
+    /* 7. Turn RD4 radio back ON: telemetry resumes immediately with the cached 0x225 frequency! */
     can_router_process_can(&frame_on);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     found_0x84 = false;
