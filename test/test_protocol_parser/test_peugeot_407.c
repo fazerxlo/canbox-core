@@ -4,6 +4,8 @@
 #include "core/vehicle_profile.h"
 #include "protocols/hu_protocol.h"
 #include "protocols/hu_protocol_driver.h"
+#include "protocols/hiworld_psa_builders.h"
+#include "protocols/raise_psa_builders.h"
 #include "hal/hal_gpio.h"
 #include <string.h>
 #include <stdio.h>

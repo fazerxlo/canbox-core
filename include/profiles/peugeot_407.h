@@ -103,7 +103,6 @@ void psa_decode_stalk_0x21f_ex(psa_stalk_state_t *st, const uint8_t *data, uint8
 void psa_decode_stalk_0x21f(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
 void psa_decode_stalk_tip_0x221_ex(psa_stalk_state_t *st, const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
 void psa_decode_stalk_tip_0x221(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key);
-size_t build_raise_stalk_key(uint8_t key_id, uint8_t state, uint8_t *out_buf, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.1b RD4 Center Console & Fascia Buttons (0x3E5 only)
@@ -168,7 +167,6 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
 void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
 void psa_hvac_process_can_0x12d(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc);
 void psa_hvac_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
-size_t build_raise_hvac_packet(const hvac_state_t *st, uint8_t *out_buf, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.3 Ultrasonic Parking Sensors (Front & Rear AAS)
@@ -182,11 +180,6 @@ size_t build_raise_hvac_packet(const hvac_state_t *st, uint8_t *out_buf, size_t 
 
 void psa_decode_aas_rear_0x260(const uint8_t *data, uint8_t dlc, uint8_t *rl, uint8_t *rc, uint8_t *rr);
 void psa_decode_aas_front_0x270(const uint8_t *data, uint8_t dlc, uint8_t *fl, uint8_t *fc, uint8_t *fr);
-size_t build_raise_rear_radar(uint8_t rl, uint8_t rc, uint8_t rr,
-                              uint8_t fl, uint8_t fc, uint8_t fr,
-                              uint8_t *out_buf, size_t max_len);
-size_t build_raise_front_radar(uint8_t fl, uint8_t fc, uint8_t fr,
-                               uint8_t *out_buf, size_t max_len);
 
 #ifndef HIWORLD_CMD_RADAR_STATE
 #define HIWORLD_CMD_RADAR_STATE  0x41
@@ -199,7 +192,6 @@ void psa_radar_process_can_0x0e1(vehicle_radar_t *radar, const uint8_t *data, ui
 void psa_radar_process_can_0x260(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc);
 void psa_radar_process_can_0x270(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc);
 void psa_radar_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
-size_t build_hiworld_radar(const vehicle_radar_t *radar, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.4 Trip Computer & Engine Telemetry
@@ -212,14 +204,6 @@ void psa_decode_trip1_0x1a5(const uint8_t *data, uint8_t dlc,
 void psa_decode_trip2_0x2a5(const uint8_t *data, uint8_t dlc,
                             uint16_t *dist, uint16_t *avg_fuel, uint16_t *avg_speed);
 
-size_t build_raise_instant_fuel(uint16_t instant_fuel_dkl, uint16_t dte_range_km,
-                                uint16_t dest_dist_km, uint8_t *out, size_t max_len);
-size_t build_raise_trip1(uint16_t avg_fuel_dkl, uint16_t avg_spd_kmh,
-                         uint16_t dist_dkm, uint8_t *out);
-size_t build_raise_trip2(uint16_t avg_fuel_dkl, uint16_t avg_spd_kmh,
-                         uint16_t dist_dkm, uint8_t *out);
-size_t build_raise_outside_temp(uint8_t temp_raw, uint8_t *out, size_t max_len);
-size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_len);
 void psa_decode_reverse_0x036(const uint8_t *data, uint8_t dlc, bool *reverse_active);
 void psa_decode_reverse_0x0f6(const uint8_t *data, uint8_t dlc, bool *reverse_active);
 void psa_reverse_set_hardware_trigger(bool reverse_active);
@@ -233,10 +217,6 @@ void psa_reverse_set_hardware_trigger(bool reverse_active);
 #define HIWORLD_CMD_ECU_P2  0x15
 
 typedef vehicle_trip_t psa_trip_state_t;
-
-size_t build_hiworld_trip_instant(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
-size_t build_hiworld_trip1(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
-size_t build_hiworld_trip2(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
 
 void psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
 void psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc);
@@ -281,15 +261,11 @@ void psa_doors_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 
 void psa_decode_doors_0x220(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors);
 void psa_decode_doors_0x221(const uint8_t *data, uint8_t dlc, psa_doors_body_t *doors);
-size_t build_raise_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len);
-size_t build_hiworld_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len);
-size_t build_hiworld_doors_state(const vehicle_doors_t *state, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.6 Steering Wheel Angle & Dynamic Trajectory
  * -------------------------------------------------------------------------- */
 void psa_decode_steering_angle_0x0e6(const uint8_t *data, uint8_t dlc, int16_t *angle_deci_deg);
-size_t build_raise_steering_angle(int16_t angle_deci_deg, uint8_t *out);
 
 /* --------------------------------------------------------------------------
  * 1.7 OEM JBL Sound Amplifier (DSP)
@@ -306,14 +282,12 @@ typedef struct {
 } jbl_amplifier_state_t;
 
 void psa_decode_amplifier_0x1a0(const uint8_t *data, uint8_t dlc, jbl_amplifier_state_t *amp);
-size_t build_raise_amplifier(const jbl_amplifier_state_t *st, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.7b RD4 Radio Volume & Audio Settings (DSP)
  * -------------------------------------------------------------------------- */
 void psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
 void psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehicle_audio_settings_t *audio);
-size_t build_hiworld_audio_settings(const vehicle_audio_settings_t *audio, uint8_t *out, size_t max_len);
 
 /* --------------------------------------------------------------------------
  * 1.8 RD4 Radio & CD Changer Media Data
@@ -328,10 +302,8 @@ typedef struct {
 } cd_changer_state_t;
 
 void psa_decode_cd_changer_0x3a6(const uint8_t *data, uint8_t dlc, cd_changer_state_t *cdc);
-size_t build_raise_cd_changer(const cd_changer_state_t *st, uint8_t *out, size_t max_len);
 
 void psa_decode_rds_name_0x396(const uint8_t *data, uint8_t dlc, char out_name[9]);
-size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len);
 
 /* Static ISO-TP Multi-frame Reassembler */
 typedef struct {
@@ -367,12 +339,6 @@ void psa_rd4_process_can_0x365(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
 void psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
 void psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t dlc);
 
-size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out);
-size_t build_hiworld_radio_text(const char *text, uint8_t text_len, uint8_t *out_buf, size_t max_out);
-size_t build_hiworld_radio_preset_freqs(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out);
-size_t build_hiworld_radio_preset_names(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out);
-size_t build_hiworld_media_state(const vehicle_cdc_t *cdc, uint8_t *out_buf, size_t max_out);
-
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */
@@ -387,28 +353,19 @@ void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
 void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc);
 void psa_tpms_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 
-size_t build_hiworld_tpms_numeric(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len);
-size_t build_hiworld_tpms_discrete(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len);
-
 typedef struct {
     uint16_t pressure_dbar[4]; /* FL, FR, RL, RR in 0.1 Bar */
     int16_t  temperature_c[4]; /* FL, FR, RL, RR in deg C (-40..+215) */
     uint8_t  alarm_code[4];    /* 0=OK, 1=Low, 2=Puncture, 3=Lost, 4=LowBat */
 } canbox_tpms_state_t;
 
-size_t build_raise_tpms_numeric(const canbox_tpms_state_t *tpms, uint8_t *out);
-size_t build_raise_tpms_temp_alarms(const canbox_tpms_state_t *tpms, uint8_t *out);
-size_t build_raise_tpms_discrete(const uint8_t alarms[4], uint8_t *out);
-
 /* --------------------------------------------------------------------------
  * 2.2 Stop & Start (S&S) Telemetry & Timer
  * -------------------------------------------------------------------------- */
-size_t build_raise_start_stop(bool is_active, uint32_t stop_time_sec, uint8_t *out);
 
 /* --------------------------------------------------------------------------
  * 2.3 Cruise Control & Speed Memory Presets
  * -------------------------------------------------------------------------- */
-size_t build_raise_cruise_memory(bool active, uint8_t target_spd, const uint8_t presets[5], uint8_t *out);
 void psa_decode_cruise_0x1a8(const uint8_t *data, uint8_t dlc, bool *active, uint8_t *set_speed_kmh, uint32_t *partial_odo_m);
 
 /* --------------------------------------------------------------------------
@@ -423,7 +380,6 @@ typedef struct {
     uint8_t aeb_risk_level;       /* 0=None, 1=Risk, 2=Braking */
 } canbox_adas_state_t;
 
-size_t build_raise_adas(const canbox_adas_state_t *adas, uint8_t *out);
 void psa_decode_alerts_0x168(const uint8_t *data, uint8_t dlc,
                              bool *tpms_fault, bool *tpms_underinflation,
                              bool *tpms_puncture, bool *esp_fault);
@@ -492,8 +448,6 @@ uint8_t psa_can_alarm_id_get_severity(uint16_t can_alarm_id);
 void psa_decode_alert_message_0x1a1(const uint8_t *data, uint8_t dlc, vehicle_alert_item_t *alert);
 bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, uint8_t dlc,
                                vehicle_alert_item_t *out_items, uint8_t *out_count);
-size_t build_hiworld_alert_single(const vehicle_alert_item_t *alert, uint8_t *out, size_t max_len);
-size_t build_hiworld_alerts_summary(const vehicle_alert_item_t *items, uint8_t count, uint8_t *out, size_t max_len);
 
 #ifdef __cplusplus
 }

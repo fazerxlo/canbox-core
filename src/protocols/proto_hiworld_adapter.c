@@ -3,6 +3,7 @@
 #include "protocols/hiworld_connection.h"
 #include "protocols/hiworld_car_mapping.h"
 #include "proto_hiworld.h"
+#include "protocols/hiworld_psa_builders.h"
 #include "core/can_router.h"
 #include "profiles/peugeot_407.h"
 #include "profiles/psa_virtual_cdc.h"

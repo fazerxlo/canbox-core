@@ -63,8 +63,24 @@ Make delta detection in [can_router.c](file:///home/Fazer/git/canbox-core/src/co
 
 ---
 
-## Verification Gate (Per Phase)
-After each phase:
-1. `~/.platformio/penv/bin/pio test -e native_test_runner` (All unit tests pass)
-2. `~/.platformio/penv/bin/pio test -e integration_test` (All integration tests pass)
-3. `~/.platformio/penv/bin/pio run -e stm32_cbox` & `esp32_cbox` (Zero warnings under `-Wall -Wextra -Werror`)
+
+### Additional Constraints & Token-Saving Rules for Execution
+1. **Batch Unit Test Migrations in Phase 1 (Zero Broken Builds):**
+   - Before deleting `psa_radar_ctx_t`, `psa_trip_ctx_t`, `psa_tpms_ctx_t`, or `psa_doors_ctx_t`, run `rg -n "psa_.*_(ctx|state)_t" test/ include/ src/` and migrate all unit test callsites in the same step before invoking `pio test`.
+2. **Prevent a Layer 5 Monolith & Update Build Scripts in Phase 2:**
+   - Place extracted `build_hiworld_*` functions into `src/protocols/hiworld_psa_builders.c` and declarations into `include/protocols/hiworld_psa_builders.h` (remove `build_hiworld_*` and `build_raise_*` prototypes from `include/profiles/peugeot_407.h`).
+   - Verify `CMakeLists.txt` and `Makefile.nuc131` include any newly created `.c` files.
+3. **C99 `memcmp` Padding Safety in Phase 3:**
+   - Ensure all decoders mutate `vehicle_state_t` sub-structs in-place or `memset` stack structs to zero before struct assignment so uninitialized C99 alignment padding never triggers false `memcmp` deltas.
+4. **Update `AGENTS.md` Fast-Path Map (Post-Phase 3):**
+   - Update `AGENTS.md` Section 7.8 to reflect that `peugeot_407.c` holds pure Layer 2 decoders, `hiworld_psa_builders.c` holds Layer 5 wire builders, and `can_router.h` uses decoupled dirty flags.
+
+## Verification Gate (Single Silent Tool Call Per Phase)
+Run all checks in a single silent command per phase to avoid compiler log token bloat:
+```bash
+~/.platformio/penv/bin/pio test -s -e native_test_runner && \
+~/.platformio/penv/bin/pio test -s -e integration_test && \
+~/.platformio/penv/bin/pio run -s -e stm32_cbox && \
+~/.platformio/penv/bin/pio run -s -e esp32_cbox
+```
+

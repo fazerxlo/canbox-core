@@ -68,20 +68,6 @@ void psa_stalk_process_can(const uint8_t *data, uint8_t dlc, psa_stalk_key_callb
     psa_stalk_process_can_ex(&g_stalk_state, data, dlc, send_key);
 }
 
-size_t build_raise_stalk_key(uint8_t key_id, uint8_t state, uint8_t *out_buf, size_t max_len) {
-    if (!out_buf || max_len < 6) {
-        return 0;
-    }
-
-    out_buf[0] = 0x2E;
-    out_buf[1] = 0x02;
-    out_buf[2] = 0x02;
-    out_buf[3] = key_id;
-    out_buf[4] = state;
-    out_buf[5] = (uint8_t)((out_buf[1] + out_buf[2] + out_buf[3] + out_buf[4]) ^ 0xFF);
-    return 6;
-}
-
 void psa_decode_stalk_0x21f_ex(psa_stalk_state_t *st, const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key) {
     if (!st || !data || !send_key || dlc < 1) {
         return;
@@ -292,56 +278,6 @@ void psa_decode_hvac_0x1d0(const uint8_t *data, uint8_t dlc, hvac_state_t *st) {
     }
 }
 
-size_t build_raise_hvac_packet(const hvac_state_t *st, uint8_t *out_buf, size_t max_len) {
-    if (!st || !out_buf || max_len < 11) {
-        return 0;
-    }
-
-    out_buf[0] = 0x2E;
-    out_buf[1] = 0x21;
-    out_buf[2] = 0x07; /* Length */
-
-    uint8_t d0 = 0;
-    if (st->power)         d0 |= 0x80;
-    if (st->ac_compressor) d0 |= 0x40;
-    if (st->recirculation) d0 |= 0x20;
-    if (st->aqs_auto)      d0 |= 0x10;
-    if (st->auto_mode)     d0 |= 0x08;
-    if (st->dual_mode)     d0 |= 0x04;
-    if (st->rear_defrost)  d0 |= 0x01;
-    out_buf[3] = d0;
-
-    uint8_t d1 = (uint8_t)(st->fan_speed & 0x0F);
-    if (st->driver_wind_up)   d1 |= 0x80;
-    if (st->driver_wind_face) d1 |= 0x40;
-    if (st->driver_wind_down) d1 |= 0x20;
-    out_buf[4] = d1;
-
-    out_buf[5] = st->driver_temp_raw;
-    out_buf[6] = st->pass_temp_raw;
-
-    uint8_t d4 = 0;
-    if (st->front_max_defrost) d4 |= 0x80;
-    if (st->ac_max)            d4 |= 0x08;
-    out_buf[7] = d4;
-
-    out_buf[8] = 0x00; /* Rear Power / Flags */
-
-    uint8_t d6 = 0;
-    if (st->pass_wind_up)   d6 |= 0x80;
-    if (st->pass_wind_face) d6 |= 0x40;
-    if (st->pass_wind_down) d6 |= 0x20;
-    out_buf[9] = d6;
-
-    /* Checksum: (Sum ^ 0xFF) & 0xFF */
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 9; i++) {
-        sum += out_buf[i];
-    }
-    out_buf[10] = (uint8_t)(sum ^ 0xFF);
-    return 11;
-}
-
 static const uint8_t peugeot_temp_map[23] = {
     0xFE, 28, 30, 32, 34, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50, 52, 54, 56, 0xFF
 };
@@ -470,82 +406,6 @@ void psa_decode_aas_front_0x270(const uint8_t *data, uint8_t dlc, uint8_t *fl, u
     if (fr) *fr = data[2];
 }
 
-size_t build_raise_rear_radar(uint8_t rl, uint8_t rc, uint8_t rr,
-                              uint8_t fl, uint8_t fc, uint8_t fr,
-                              uint8_t *out_buf, size_t max_len) {
-    if (!out_buf || max_len < 11) return 0;
-    out_buf[0] = 0x2E;
-    out_buf[1] = 0x32;
-    out_buf[2] = 0x07; /* Length */
-    out_buf[3] = 0x00; /* Flag */
-    out_buf[4] = rl;
-    out_buf[5] = rc;
-    out_buf[6] = rr;
-    out_buf[7] = fl;
-    out_buf[8] = fc;
-    out_buf[9] = fr;
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 9; i++) {
-        sum += out_buf[i];
-    }
-    out_buf[10] = (uint8_t)(sum ^ 0xFF);
-    return 11;
-}
-
-size_t build_raise_front_radar(uint8_t fl, uint8_t fc, uint8_t fr,
-                               uint8_t *out_buf, size_t max_len) {
-    if (!out_buf || max_len < 8) return 0;
-    out_buf[0] = 0x2E;
-    out_buf[1] = 0x30;
-    out_buf[2] = 0x04; /* Length */
-    out_buf[3] = 0x00; /* Flag */
-    out_buf[4] = fl;
-    out_buf[5] = fc;
-    out_buf[6] = fr;
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 6; i++) {
-        sum += out_buf[i];
-    }
-    out_buf[7] = (uint8_t)(sum ^ 0xFF);
-    return 8;
-}
-
-size_t build_hiworld_radar(const vehicle_radar_t *radar, uint8_t *out, size_t max_len) {
-    if (!radar || !out || max_len < 17) {
-        return 0;
-    }
-
-    out[0] = HIWORLD_SOF1;             /* 0x5A */
-    out[1] = HIWORLD_SOF2;             /* 0xA5 */
-    out[2] = 0x0C;                     /* Length: 12 Payload bytes */
-    out[3] = HIWORLD_CMD_RADAR_STATE;  /* Cmd: 0x41 */
-
-    out[4] = radar->rear_left_outer;
-    out[5] = radar->rear_left_center;
-    out[6] = radar->rear_right_center;
-    out[7] = radar->rear_right_outer;
-
-    out[8]  = radar->front_left_outer;
-    out[9]  = radar->front_left_center;
-    out[10] = radar->front_right_center;
-    out[11] = radar->front_right_outer;
-
-    out[12] = 0x01;                    /* Radar active / enabled flag */
-    out[13] = 0x00;                    /* Reserved */
-    out[14] = 0x3F;                    /* 6-sensor configuration mask */
-    out[15] = 0x05;                    /* Distance scale / max zone steps */
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 15; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[16] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 17;
-}
-
 uint8_t psa_radar_map_zone(uint8_t raw3bit) {
     if (raw3bit >= 7) return PSA_RADAR_DIST_INACTIVE;
     return raw3bit;
@@ -653,89 +513,6 @@ void psa_decode_trip2_0x2a5(const uint8_t *data, uint8_t dlc,
     if (dlc >= 5 && avg_speed) *avg_speed = (uint16_t)data[4];
 }
 
-size_t build_raise_instant_fuel(uint16_t instant_fuel_dkl, uint16_t dte_range_km,
-                                uint16_t dest_dist_km, uint8_t *out, size_t max_len) {
-    if (!out || max_len < 10) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x33;
-    out[2] = 0x06;
-    out[3] = (uint8_t)(instant_fuel_dkl >> 8);
-    out[4] = (uint8_t)(instant_fuel_dkl & 0xFF);
-    out[5] = (uint8_t)(dte_range_km >> 8);
-    out[6] = (uint8_t)(dte_range_km & 0xFF);
-    out[7] = (uint8_t)(dest_dist_km >> 8);
-    out[8] = (uint8_t)(dest_dist_km & 0xFF);
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 8; i++) {
-        sum += out[i];
-    }
-    out[9] = (uint8_t)(sum ^ 0xFF);
-    return 10;
-}
-
-size_t build_raise_trip1(uint16_t avg_fuel_dkl, uint16_t avg_spd_kmh,
-                         uint16_t dist_dkm, uint8_t *out) {
-    if (!out) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x34;
-    out[2] = 0x06;
-    out[3] = (uint8_t)(avg_fuel_dkl >> 8);
-    out[4] = (uint8_t)(avg_fuel_dkl & 0xFF);
-    out[5] = (uint8_t)(avg_spd_kmh >> 8);
-    out[6] = (uint8_t)(avg_spd_kmh & 0xFF);
-    out[7] = (uint8_t)(dist_dkm >> 8);
-    out[8] = (uint8_t)(dist_dkm & 0xFF);
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 8; i++) {
-        sum += out[i];
-    }
-    out[9] = (uint8_t)(sum ^ 0xFF);
-    return 10;
-}
-
-size_t build_raise_trip2(uint16_t avg_fuel_dkl, uint16_t avg_spd_kmh,
-                         uint16_t dist_dkm, uint8_t *out) {
-    if (!out) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x35;
-    out[2] = 0x06;
-    out[3] = (uint8_t)(avg_fuel_dkl >> 8);
-    out[4] = (uint8_t)(avg_fuel_dkl & 0xFF);
-    out[5] = (uint8_t)(avg_spd_kmh >> 8);
-    out[6] = (uint8_t)(avg_spd_kmh & 0xFF);
-    out[7] = (uint8_t)(dist_dkm >> 8);
-    out[8] = (uint8_t)(dist_dkm & 0xFF);
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 8; i++) {
-        sum += out[i];
-    }
-    out[9] = (uint8_t)(sum ^ 0xFF);
-    return 10;
-}
-
-size_t build_raise_outside_temp(uint8_t temp_raw, uint8_t *out, size_t max_len) {
-    if (!out || max_len < 5) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x36;
-    out[2] = 0x01;
-    out[3] = temp_raw;
-    out[4] = (uint8_t)((out[1] + out[2] + out[3]) ^ 0xFF);
-    return 5;
-}
-
-size_t build_raise_reverse_state(bool reverse_active, uint8_t *out, size_t max_len) {
-    if (!out || max_len < 5) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x40;
-    out[2] = 0x01;
-    out[3] = reverse_active ? 0x80 : 0x00;
-    out[4] = (uint8_t)((out[1] + out[2] + out[3]) ^ 0xFF);
-    return 5;
-}
-
 void psa_decode_reverse_0x036(const uint8_t *data, uint8_t dlc, bool *reverse_active) {
     if (!data || !reverse_active || dlc < 2) return;
     *reverse_active = (data[1] & 0x80) != 0;
@@ -748,79 +525,6 @@ void psa_decode_reverse_0x0f6(const uint8_t *data, uint8_t dlc, bool *reverse_ac
 
 void psa_reverse_set_hardware_trigger(bool reverse_active) {
     hal_gpio_write(GPIO_PIN_REVERSE_OUT, reverse_active);
-}
-
-size_t build_hiworld_trip_instant(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
-    if (!trip || !out || max_len < 15) {
-        return 0;
-    }
-    out[0] = HIWORLD_SOF1;
-    out[1] = HIWORLD_SOF2;
-    out[2] = 0x0A;               /* Length: 10 Payload bytes */
-    out[3] = HIWORLD_CMD_ECU_P0; /* Cmd 0x13 */
-    out[4] = (uint8_t)(trip->instant_fuel_deci >> 8);
-    out[5] = (uint8_t)(trip->instant_fuel_deci & 0xFF);
-    out[6] = (uint8_t)(trip->range_km >> 8);
-    out[7] = (uint8_t)(trip->range_km & 0xFF);
-    out[8] = (uint8_t)(trip->dest_dist_km >> 8);
-    out[9] = (uint8_t)(trip->dest_dist_km & 0xFF);
-    out[10] = 0x00;
-    out[11] = 0x00;
-    out[12] = 0x00;
-    out[13] = 0x00;
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 13; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[14] = (uint8_t)((sum - 1) & 0xFF);
-    return 15;
-}
-
-size_t build_hiworld_trip1(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
-    if (!trip || !out || max_len < 11) {
-        return 0;
-    }
-    out[0] = HIWORLD_SOF1;
-    out[1] = HIWORLD_SOF2;
-    out[2] = 0x06;               /* Length: 6 Payload bytes */
-    out[3] = HIWORLD_CMD_ECU_P1; /* Cmd 0x14 */
-    out[4] = (uint8_t)(trip->trip1_avg_fuel >> 8);
-    out[5] = (uint8_t)(trip->trip1_avg_fuel & 0xFF);
-    out[6] = 0x00;               /* Reserved */
-    out[7] = trip->trip1_avg_speed;
-    out[8] = (uint8_t)(trip->trip1_distance_km >> 8);
-    out[9] = (uint8_t)(trip->trip1_distance_km & 0xFF);
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[10] = (uint8_t)((sum - 1) & 0xFF);
-    return 11;
-}
-
-size_t build_hiworld_trip2(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
-    if (!trip || !out || max_len < 11) {
-        return 0;
-    }
-    out[0] = HIWORLD_SOF1;
-    out[1] = HIWORLD_SOF2;
-    out[2] = 0x06;               /* Length: 6 Payload bytes */
-    out[3] = HIWORLD_CMD_ECU_P2; /* Cmd 0x15 */
-    out[4] = (uint8_t)(trip->trip2_avg_fuel >> 8);
-    out[5] = (uint8_t)(trip->trip2_avg_fuel & 0xFF);
-    out[6] = 0x00;               /* Reserved */
-    out[7] = trip->trip2_avg_speed;
-    out[8] = (uint8_t)(trip->trip2_distance_km >> 8);
-    out[9] = (uint8_t)(trip->trip2_distance_km & 0xFF);
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[10] = (uint8_t)((sum - 1) & 0xFF);
-    return 11;
 }
 
 void psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
@@ -975,113 +679,6 @@ void psa_decode_doors_0x221(const uint8_t *data, uint8_t dlc, psa_doors_body_t *
     psa_decode_doors_0x220(data, dlc, doors);
 }
 
-size_t build_raise_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len) {
-    if (!doors || !out || max_len < 12) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x38;
-    out[2] = 0x08; /* Length */
-
-    uint8_t d0 = 0;
-    if (doors->driver_door)     d0 |= 0x80;
-    if (doors->pass_door)       d0 |= 0x40;
-    if (doors->rear_left_door)  d0 |= 0x20;
-    if (doors->rear_right_door) d0 |= 0x10;
-    if (doors->trunk)           d0 |= 0x08;
-    if (doors->hood)            d0 |= 0x04;
-    out[3] = d0;
-
-    out[4] = doors->handbrake ? 0x01 : 0x00;
-    out[5] = 0x00;
-    out[6] = 0x00;
-    out[7] = 0x00;
-    out[8] = 0x00;
-    out[9] = 0x00;
-    out[10] = 0x00;
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 10; i++) {
-        sum += out[i];
-    }
-    out[11] = (uint8_t)(sum ^ 0xFF);
-    return 12;
-}
-
-size_t build_hiworld_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len) {
-    if (!doors || !out || max_len < 15) {
-        return 0;
-    }
-
-    out[0] = HIWORLD_SOF1;        /* 0x5A */
-    out[1] = HIWORLD_SOF2;        /* 0xA5 */
-    out[2] = 0x0A;                /* Length: 10 Payload bytes */
-    out[3] = HIWORLD_CMD_DOOR;    /* Cmd: 0x12 */
-    out[4] = 0x00;                /* Byte 0 */
-    out[5] = 0x04;                /* Byte 1 */
-
-    uint8_t b2 = 0x04;          /* Base active flag */
-    if (doors->driver_door)     b2 |= 0x80;
-    if (doors->pass_door)       b2 |= 0x40;
-    if (doors->rear_left_door)  b2 |= 0x20;
-    if (doors->rear_right_door) b2 |= 0x10;
-    if (doors->trunk)           b2 |= 0x08;
-    if (doors->hood)            b2 |= 0x04;
-    out[6] = b2;
-
-    out[7]  = 0x00;
-    out[8]  = 0x00;
-    out[9]  = 0x00;
-    out[10] = 0x00;
-    out[11] = 0x00;
-    out[12] = 0x00;
-    out[13] = 0x03;               /* Byte 9: Sub-type */
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 13; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[14] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 15;
-}
-
-size_t build_hiworld_doors_state(const vehicle_doors_t *doors, uint8_t *out, size_t max_len) {
-    if (!doors || !out || max_len < 15) {
-        return 0;
-    }
-
-    out[0] = HIWORLD_SOF1;        /* 0x5A */
-    out[1] = HIWORLD_SOF2;        /* 0xA5 */
-    out[2] = 0x0A;                /* Length: 10 Payload bytes */
-    out[3] = HIWORLD_CMD_DOOR;    /* Cmd: 0x12 */
-    out[4] = 0x00;                /* Byte 0 */
-    out[5] = 0x04;                /* Byte 1 */
-
-    uint8_t b2 = 0x04;          /* Base active flag */
-    if (doors->door_driver)     b2 |= 0x80;
-    if (doors->door_passenger)  b2 |= 0x40;
-    if (doors->door_rear_left)  b2 |= 0x20;
-    if (doors->door_rear_right) b2 |= 0x10;
-    if (doors->trunk)           b2 |= 0x08;
-    if (doors->hood)            b2 |= 0x04;
-    out[6] = b2;
-
-    out[7]  = 0x00;
-    out[8]  = 0x00;
-    out[9]  = 0x00;
-    out[10] = 0x00;
-    out[11] = 0x00;
-    out[12] = 0x00;
-    out[13] = 0x03;               /* Byte 9: Sub-type */
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 13; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[14] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 15;
-}
-
 void psa_doors_process_can_0x220(vehicle_doors_t *doors, bool *handbrake, const uint8_t *data, uint8_t dlc) {
     if (!doors || !data || dlc < 1) return;
 
@@ -1113,17 +710,6 @@ void psa_decode_steering_angle_0x0e6(const uint8_t *data, uint8_t dlc, int16_t *
     *angle_deci_deg = (int16_t)read_be16(&data[0]);
 }
 
-size_t build_raise_steering_angle(int16_t angle_deci_deg, uint8_t *out) {
-    if (!out) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x29;
-    out[2] = 0x02;
-    out[3] = (uint8_t)(angle_deci_deg & 0xFF);        /* Little Endian */
-    out[4] = (uint8_t)((angle_deci_deg >> 8) & 0xFF);
-    out[5] = (uint8_t)((out[1] + out[2] + out[3] + out[4]) ^ 0xFF);
-    return 6;
-}
-
 /* --------------------------------------------------------------------------
  * 1.7 OEM JBL Sound Amplifier (DSP)
  * -------------------------------------------------------------------------- */
@@ -1139,28 +725,6 @@ void psa_decode_amplifier_0x1a0(const uint8_t *data, uint8_t dlc, jbl_amplifier_
     amp->loudness       = (data[6] & 0x10) != 0;
     amp->speed_vol_comp = data[6] & 0x0F;
     amp->master_volume  = data[7] & 0x1F;
-}
-
-size_t build_raise_amplifier(const jbl_amplifier_state_t *st, uint8_t *out, size_t max_len) {
-    if (!st || !out || max_len < 12) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x56;
-    out[2] = 0x08;
-    out[3] = 0x00; /* Fixed padding */
-    out[4] = (uint8_t)(st->bass & 0x0F);
-    out[5] = (uint8_t)(st->treble & 0x0F);
-    out[6] = (uint8_t)(st->balance & 0x0F);
-    out[7] = (uint8_t)(st->fader & 0x0F);
-    out[8] = (uint8_t)(st->eq_preset & 0x07);
-    out[9] = (uint8_t)((st->loudness ? 0x10 : 0x00) | (st->speed_vol_comp & 0x0F));
-    out[10] = (uint8_t)(st->master_volume & 0x1F);
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 10; i++) {
-        sum += out[i];
-    }
-    out[11] = (uint8_t)(sum ^ 0xFF);
-    return 12;
 }
 
 /* --------------------------------------------------------------------------
@@ -1284,34 +848,6 @@ void psa_decode_rd4_audio_settings_0x1e5(const uint8_t *data, uint8_t dlc, vehic
     }
 }
 
-size_t build_hiworld_audio_settings(const vehicle_audio_settings_t *audio, uint8_t *out, size_t max_len) {
-    if (!audio || !out || max_len < 13) {
-        return 0;
-    }
-
-    out[0] = 0x5A;
-    out[1] = 0xA5;
-    out[2] = 0x08; /* Length */
-    out[3] = 0x56; /* Opcode Cmd 0x56 */
-
-    out[4] = (uint8_t)((audio->is_muted ? 0x80 : 0x00) | (audio->active_mode & 0x0F));
-    out[5] = audio->bass;
-    out[6] = audio->treble;
-    out[7] = audio->balance;
-    out[8] = audio->fader;
-    out[9] = audio->eq_preset;
-    out[10] = (uint8_t)((audio->loudness ? 0x10 : 0x00) | (audio->speed_volume ? 0x01 : 0x00));
-    out[11] = audio->master_volume;
-
-    uint16_t sum = (uint16_t)(out[2] + out[3]);
-    for (size_t i = 4; i < 12; i++) {
-        sum = (uint16_t)(sum + out[i]);
-    }
-    out[12] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 13;
-}
-
 /* --------------------------------------------------------------------------
  * 1.8 RD4 Radio & CD Changer Media Data
  * -------------------------------------------------------------------------- */
@@ -1327,51 +863,11 @@ void psa_decode_cd_changer_0x3a6(const uint8_t *data, uint8_t dlc, cd_changer_st
     cdc->play_flags   = data[6];
 }
 
-size_t build_raise_cd_changer(const cd_changer_state_t *st, uint8_t *out, size_t max_len) {
-    if (!st || !out || max_len < 11) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x54;
-    out[2] = 0x07;
-    out[3] = 0x02; /* CD Player Mode */
-    out[4] = st->disc_slot;
-    out[5] = st->track_num;
-    out[6] = st->total_tracks;
-    out[7] = st->elapsed_min;
-    out[8] = st->elapsed_sec;
-    out[9] = st->play_flags;
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 9; i++) {
-        sum += out[i];
-    }
-    out[10] = (uint8_t)(sum ^ 0xFF);
-    return 11;
-}
-
 void psa_decode_rds_name_0x396(const uint8_t *data, uint8_t dlc, char out_name[9]) {
     if (!data || !out_name) return;
     size_t len = (dlc > 8) ? 8 : (size_t)dlc;
     memcpy(out_name, data, len);
     out_name[len] = '\0';
-}
-
-size_t build_raise_rds_name(const char *name, uint8_t *out, size_t max_len) {
-    if (!out || max_len < 12) return 0;
-    out[0] = 0x2E;
-    out[1] = 0x55;
-    out[2] = 0x08;
-
-    size_t nlen = (name != NULL) ? strlen(name) : 0;
-    for (size_t i = 0; i < 8; i++) {
-        out[3 + i] = (i < nlen && name[i] != '\0') ? (uint8_t)name[i] : (uint8_t)' ';
-    }
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 10; i++) {
-        sum += out[i];
-    }
-    out[11] = (uint8_t)(sum ^ 0xFF);
-    return 12;
 }
 
 static psa_isotp_rx_ctx_t s_rd4_isotp_ctx;
@@ -1905,159 +1401,6 @@ void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     }
 }
 
-size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out) {
-    if (!radio || !out_buf || max_out < 19) return 0;
-
-    uint8_t len = 14;
-    out_buf[0] = 0x5A;
-    out_buf[1] = 0xA5;
-    out_buf[2] = len;
-    out_buf[3] = 0x84; /* HIWORLD_CMD_CAR_RADIO_STATE */
-
-    /* If in external source, send source code; otherwise send radio band */
-    if (radio->source_mode >= 0x20) {
-        out_buf[4] = radio->source_mode;
-    } else {
-        out_buf[4] = radio->band;
-    }
-
-    if (radio->source_mode < 0x20 && radio->power_status != 0) {
-        out_buf[5] = (uint8_t)(radio->freq_0_1mhz & 0xFF);
-        out_buf[6] = (uint8_t)((radio->freq_0_1mhz >> 8) & 0xFF);
-        out_buf[7] = radio->preset_slot;
-        out_buf[8] = radio->indicators;
-    } else {
-        out_buf[5] = 0x00;
-        out_buf[6] = 0x00;
-        out_buf[7] = 0x00;
-        out_buf[8] = 0x00;
-    }
-
-    out_buf[9] = radio->power_status;
-
-    /* 8-Byte ASCII Station Name (space padded, blank for external sources) */
-    for (size_t i = 0; i < 8; i++) {
-        out_buf[10 + i] = (radio->source_mode < 0x20 && radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
-    }
-
-    /* Checksum: ((LEN + CMD + sum(DATA)) - 1) & 0xFF */
-    uint16_t sum = len + 0x84;
-    for (size_t i = 4; i < (size_t)(4 + len); i++) {
-        sum += out_buf[i];
-    }
-    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 5 + len;
-}
-
-size_t build_hiworld_radio_text(const char *text, uint8_t text_len, uint8_t *out_buf, size_t max_out) {
-    if (!text || text_len == 0 || !out_buf) return 0;
-
-    uint8_t len = text_len;
-    if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
-    if (max_out < (size_t)(5 + len)) return 0;
-
-    out_buf[0] = 0x5A;
-    out_buf[1] = 0xA5;
-    out_buf[2] = len;
-    out_buf[3] = 0x86; /* HIWORLD_CMD_RADIO_TEXT */
-
-    memcpy(&out_buf[4], text, len);
-
-    uint16_t sum = len + 0x86;
-    for (size_t i = 0; i < len; i++) {
-        sum += (uint8_t)text[i];
-    }
-    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 5 + len;
-}
-
-size_t build_hiworld_media_state(const vehicle_cdc_t *cdc, uint8_t *out_buf, size_t max_out) {
-    if (!cdc || !out_buf || max_out < 16) return 0;
-
-    uint8_t len = 0x0B; /* 11 payload bytes */
-    out_buf[0] = 0x5A;
-    out_buf[1] = 0xA5;
-    out_buf[2] = len;
-    out_buf[3] = 0x97; /* HIWORLD_CMD_CAR_MEDIA_STATE */
-
-    out_buf[4]  = cdc->active_disc & 0x0F;
-    out_buf[5]  = cdc->discs_loaded_mask & 0x3F;
-    out_buf[6]  = cdc->disc_format & 0x3F;
-    /* Track Number uint16_le (Data[3..4] in spec, out_buf[7..8]) */
-    out_buf[7]  = (uint8_t)(cdc->track_num & 0xFF);
-    out_buf[8]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
-    out_buf[9]  = cdc->elapsed_min;
-    out_buf[10] = cdc->elapsed_sec;
-    out_buf[11] = cdc->play_modes;
-    out_buf[12] = cdc->play_status;
-    /* Total Tracks uint16_le (Data[9..10] in spec, out_buf[13..14]) */
-    out_buf[13] = (uint8_t)(cdc->total_tracks & 0xFF);
-    out_buf[14] = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
-
-    uint16_t sum = len + 0x97;
-    for (size_t i = 4; i <= 14; i++) {
-        sum += out_buf[i];
-    }
-    out_buf[15] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 16;
-}
-
-size_t build_hiworld_radio_preset_freqs(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out) {
-    if (!radio || !out_buf || max_out < 18) return 0;
-
-    uint8_t len = 13; /* 1 byte band + 6 * 2 bytes freq uint16_be */
-    out_buf[0] = 0x5A;
-    out_buf[1] = 0xA5;
-    out_buf[2] = len;
-    out_buf[3] = 0x85; /* HIWORLD_CMD_CAR_RADIO_PRESET_FREQ */
-
-    out_buf[4] = radio->band;
-
-    for (size_t i = 0; i < 6; i++) {
-        uint16_t freq = radio->preset_freqs[i];
-        out_buf[5 + (i * 2)]     = (uint8_t)((freq >> 8) & 0xFF);
-        out_buf[5 + (i * 2) + 1] = (uint8_t)(freq & 0xFF);
-    }
-
-    uint16_t sum = len + 0x85;
-    for (size_t i = 4; i < (size_t)(4 + len); i++) {
-        sum += out_buf[i];
-    }
-    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 5 + len;
-}
-
-size_t build_hiworld_radio_preset_names(const vehicle_radio_t *radio, uint8_t *out_buf, size_t max_out) {
-    if (!radio || !out_buf || max_out < 54) return 0;
-
-    uint8_t len = 49; /* 1 byte band + 6 * 8 bytes names */
-    out_buf[0] = 0x5A;
-    out_buf[1] = 0xA5;
-    out_buf[2] = len;
-    out_buf[3] = 0x85; /* HIWORLD_CMD_CAR_RADIO_PRESET_FREQ */
-
-    out_buf[4] = radio->band;
-
-    for (size_t i = 0; i < 6; i++) {
-        for (size_t j = 0; j < 8; j++) {
-            char c = radio->preset_names[i][j];
-            out_buf[5 + (i * 8) + j] = (c != '\0') ? (uint8_t)c : (uint8_t)' ';
-        }
-    }
-
-    uint16_t sum = len + 0x85;
-    for (size_t i = 4; i < (size_t)(4 + len); i++) {
-        sum += out_buf[i];
-    }
-    out_buf[4 + len] = (uint8_t)((sum - 1) & 0xFF);
-
-    return 5 + len;
-}
-
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */
@@ -2068,50 +1411,6 @@ void psa_tpms_init(vehicle_tpms_t *tpms) {
     tpms->pressure_bar_deci[1] = 24;
     tpms->pressure_bar_deci[2] = 22; /* 2.2 Bar default */
     tpms->pressure_bar_deci[3] = 22;
-}
-
-size_t build_hiworld_tpms_numeric(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len) {
-    if (!tpms || !out || max_len < 11) {
-        return 0;
-    }
-    out[0] = HIWORLD_SOF1;
-    out[1] = HIWORLD_SOF2;
-    out[2] = 0x06;                     /* Length: 6 Payload bytes */
-    out[3] = HIWORLD_CMD_TPMS_NUMERIC; /* Cmd 0x66 */
-    out[4] = 0x01;                     /* Mode: Live */
-    out[5] = tpms->pressure_bar_deci[0];
-    out[6] = tpms->pressure_bar_deci[1];
-    out[7] = tpms->pressure_bar_deci[2];
-    out[8] = tpms->pressure_bar_deci[3];
-    out[9] = 0x00;                     /* Unit: Bar */
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[10] = (uint8_t)((sum - 1) & 0xFF);
-    return 11;
-}
-
-size_t build_hiworld_tpms_discrete(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len) {
-    if (!tpms || !out || max_len < 9) {
-        return 0;
-    }
-    out[0] = HIWORLD_SOF1;
-    out[1] = HIWORLD_SOF2;
-    out[2] = 0x04;                      /* Length: 4 Payload bytes */
-    out[3] = HIWORLD_CMD_TPMS_DISCRETE; /* Cmd 0x18 */
-    out[4] = tpms->alarm_state[0];
-    out[5] = tpms->alarm_state[1];
-    out[6] = tpms->alarm_state[2];
-    out[7] = tpms->alarm_state[3];
-
-    uint8_t sum = 0;
-    for (size_t i = 2; i <= 7; i++) {
-        sum = (uint8_t)(sum + out[i]);
-    }
-    out[8] = (uint8_t)((sum - 1) & 0xFF);
-    return 9;
 }
 
 void psa_tpms_process_can_0x361(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
@@ -2197,120 +1496,13 @@ void psa_tpms_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     }
 }
 
-size_t build_raise_tpms_numeric(const canbox_tpms_state_t *tpms, uint8_t *out) {
-    if (!tpms || !out) {
-        return 0;
-    }
-    out[0] = 0x2E;
-    out[1] = 0x66;
-    out[2] = 0x06;
-    out[3] = 0x01; /* Real-time mode */
-    out[4] = (uint8_t)tpms->pressure_dbar[0];
-    out[5] = (uint8_t)tpms->pressure_dbar[1];
-    out[6] = (uint8_t)tpms->pressure_dbar[2];
-    out[7] = (uint8_t)tpms->pressure_dbar[3];
-    out[8] = 0x00; /* Unit: Bar * 0.1 */
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 8; i++) {
-        sum += out[i];
-    }
-    out[9] = (uint8_t)(sum ^ 0xFF);
-    return 10;
-}
-
-size_t build_raise_tpms_temp_alarms(const canbox_tpms_state_t *tpms, uint8_t *out) {
-    if (!tpms || !out) {
-        return 0;
-    }
-    out[0] = 0x2E;
-    out[1] = 0x68;
-    out[2] = 0x08;
-    for (int i = 0; i < 4; i++) {
-        int16_t t = tpms->temperature_c[i] + 40;
-        out[3 + i] = (t < 0) ? 0 : ((t > 255) ? 255 : (uint8_t)t);
-    }
-    for (int i = 0; i < 4; i++) {
-        out[7 + i] = tpms->alarm_code[i];
-    }
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 10; i++) {
-        sum += out[i];
-    }
-    out[11] = (uint8_t)(sum ^ 0xFF);
-    return 12;
-}
-
-size_t build_raise_tpms_discrete(const uint8_t alarms[4], uint8_t *out) {
-    if (!alarms || !out) {
-        return 0;
-    }
-    out[0] = 0x2E;
-    out[1] = 0x18;
-    out[2] = 0x04;
-    out[3] = alarms[0];
-    out[4] = alarms[1];
-    out[5] = alarms[2];
-    out[6] = alarms[3];
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 6; i++) {
-        sum += out[i];
-    }
-    out[7] = (uint8_t)(sum ^ 0xFF);
-    return 8;
-}
-
 /* --------------------------------------------------------------------------
  * 2.2 Stop & Start (S&S) Telemetry & Timer
  * -------------------------------------------------------------------------- */
-size_t build_raise_start_stop(bool is_active, uint32_t stop_time_sec, uint8_t *out) {
-    if (!out) {
-        return 0;
-    }
-    out[0] = 0x2E;
-    out[1] = 0x71;
-    out[2] = 0x05;
-    out[3] = is_active ? 0x01 : 0x00;
-    out[4] = (uint8_t)((stop_time_sec >> 24) & 0xFF);
-    out[5] = (uint8_t)((stop_time_sec >> 16) & 0xFF);
-    out[6] = (uint8_t)((stop_time_sec >> 8) & 0xFF);
-    out[7] = (uint8_t)(stop_time_sec & 0xFF);
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 7; i++) {
-        sum += out[i];
-    }
-    out[8] = (uint8_t)(sum ^ 0xFF);
-    return 9;
-}
 
 /* --------------------------------------------------------------------------
  * 2.3 Cruise Control & Speed Memory Presets
  * -------------------------------------------------------------------------- */
-size_t build_raise_cruise_memory(bool active, uint8_t target_spd, const uint8_t presets[5], uint8_t *out) {
-    if (!out) {
-        return 0;
-    }
-    out[0] = 0x2E;
-    out[1] = 0x72;
-    out[2] = 0x07;
-    out[3] = active ? 0x01 : 0x00;
-    out[4] = target_spd;
-    if (presets) {
-        memcpy(&out[5], presets, 5);
-    } else {
-        memset(&out[5], 0, 5);
-    }
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 9; i++) {
-        sum += out[i];
-    }
-    out[10] = (uint8_t)(sum ^ 0xFF);
-    return 11;
-}
-
 void psa_decode_cruise_0x1a8(const uint8_t *data, uint8_t dlc, bool *active, uint8_t *set_speed_kmh, uint32_t *partial_odo_m) {
     if (!data || dlc < 3) {
         return;
@@ -2336,28 +1528,6 @@ void psa_decode_cruise_0x1a8(const uint8_t *data, uint8_t dlc, bool *active, uin
 /* --------------------------------------------------------------------------
  * 2.4 Driver Assistance & ADAS Features
  * -------------------------------------------------------------------------- */
-size_t build_raise_adas(const canbox_adas_state_t *adas, uint8_t *out) {
-    if (!adas || !out) {
-        return 0;
-    }
-    out[0] = 0x2E;
-    out[1] = 0x70;
-    out[2] = 0x06;
-    out[3] = adas->blind_spot_warning ? 0x80 : 0x00;
-    out[4] = adas->fatigue_coffee_cup ? 0x80 : 0x00;
-    out[5] = adas->lane_departure_state;
-    out[6] = adas->speed_limit_tsr;
-    out[7] = adas->esp_active ? 0x01 : 0x00;
-    out[8] = adas->aeb_risk_level;
-
-    uint8_t sum = 0;
-    for (size_t i = 1; i <= 8; i++) {
-        sum += out[i];
-    }
-    out[9] = (uint8_t)(sum ^ 0xFF);
-    return 10;
-}
-
 void psa_decode_alerts_0x168(const uint8_t *data, uint8_t dlc,
                              bool *tpms_fault, bool *tpms_underinflation,
                              bool *tpms_puncture, bool *esp_fault) {
@@ -2725,61 +1895,5 @@ bool psa_process_journal_0x120(psa_journal_iso_tp_t *ctx, const uint8_t *data, u
     }
 
     return false;
-}
-
-size_t build_hiworld_alert_single(const vehicle_alert_item_t *alert, uint8_t *out, size_t max_len) {
-    if (!alert || !out || max_len < 10) {
-        return 0;
-    }
-    out[0] = 0x5A;
-    out[1] = 0xA5;
-    out[2] = 0x05; /* Len = 5 */
-    out[3] = 0xEA; /* Custom Ext Cmd */
-    out[4] = (uint8_t)(alert->can_alarm_id >> 8);
-    out[5] = (uint8_t)(alert->can_alarm_id & 0xFF);
-    out[6] = alert->is_active ? (uint8_t)(0xC0 | ((alert->severity & 0x03) << 4) | (alert->chime_id & 0x0F)) : 0x00;
-    out[7] = alert->door_mask;
-    out[8] = alert->param_detail;
-    
-    uint16_t sum = out[2] + out[3] + out[4] + out[5] + out[6] + out[7] + out[8];
-    out[9] = (uint8_t)((sum - 1) & 0xFF);
-    return 10;
-}
-
-size_t build_hiworld_alerts_summary(const vehicle_alert_item_t *items, uint8_t count, uint8_t *out, size_t max_len) {
-    if (!out || max_len < 70) {
-        return 0;
-    }
-    if (count > CANBOX_MAX_ACTIVE_ALERTS) {
-        count = CANBOX_MAX_ACTIVE_ALERTS;
-    }
-    
-    uint8_t payload_len = 4 + (count * 5);
-    memset(out, 0, payload_len + 5);
-    out[0] = 0x5A;
-    out[1] = 0xA5;
-    out[2] = payload_len;
-    out[3] = 0xEA;
-    out[4] = 0;
-    out[5] = 0;
-    out[6] = 0;
-    out[7] = count;
-    
-    for (uint8_t i = 0; i < count; i++) {
-        uint8_t offset = 8 + (i * 5);
-        out[offset] = (uint8_t)(items[i].can_alarm_id >> 8);
-        out[offset + 1] = (uint8_t)(items[i].can_alarm_id & 0xFF);
-        out[offset + 2] = (uint8_t)(0xC0 | ((items[i].severity & 0x03) << 4) | (items[i].chime_id & 0x0F));
-        out[offset + 3] = items[i].door_mask;
-        out[offset + 4] = items[i].param_detail;
-    }
-    
-    uint16_t sum = out[2] + out[3];
-    for(uint8_t i = 0; i < payload_len; i++) {
-        sum += out[4 + i];
-    }
-    out[4 + payload_len] = (uint8_t)((sum - 1) & 0xFF);
-    
-    return payload_len + 5;
 }
 
