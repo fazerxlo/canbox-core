@@ -35,11 +35,15 @@ Before proposing code changes or completing a task, ensure the change compiles a
 * **Run Full Native Test Runner (Unit Tests):**
 ```bash
 ~/.platformio/penv/bin/pio test -e native_test_runner
+# Or compact output filter to reduce token consumption:
+~/.platformio/penv/bin/pio test -e native_test_runner | grep -E "PASSED|FAILED|ERROR|Took|SUMMARY"
 ```
 
 * **Run Full Integration Pipeline Tests:**
 ```bash
 ~/.platformio/penv/bin/pio test -e integration_test
+# Or compact output filter:
+~/.platformio/penv/bin/pio test -e integration_test | grep -E "PASSED|FAILED|ERROR|Took|SUMMARY"
 ```
 
 * **Build STM32 Firmware Target (Silent to prevent context token inflation):**
@@ -210,5 +214,15 @@ To complete tasks rapidly with minimal token and tool-call overhead:
    - For stateful subsystems (RD4 `source_mode`, HVAC flap/AQS modes, DSP menu activity), define a clean `(Current State, Event) -> Next State & Serial Action` transition rule upfront rather than adding extra boolean flags across layers.
    - Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) always cache their data into `state->media` without turning the radio ON or overwriting `source_mode == 0xFF` (`OFF`) or `>= 0x20` (`AUX`/`CD`/`CDC`).
    - `can_router.c` dispatches `0x84`/`0x85`/`0x86`/`0x97` strictly based on `source_mode` (`< 0x20` Tuner, `0x20..0x21` AUX, `0x30..0x31` CD/CDC, `0xFF` one-shot OFF).
+10. **ESP-IDF Source Registration (`src/CMakeLists.txt` Awareness):**
+   - ESP32 uses ESP-IDF CMake (`src/CMakeLists.txt`), which explicitly enumerates all C source files under `src/`.
+   - Whenever creating a new `.c` source file, immediately register it in `src/CMakeLists.txt` in the same turn to prevent `esp32_cbox` linking failures (`undefined reference`).
+11. **Type & Struct Pre-Verification (First-Pass Header Correctness):**
+   - Before adding `#include` directives or referencing domain types (e.g. `hvac_state_t`, `canbox_tpms_state_t`), run `grep -rn "typedef struct <Name> include/"` to identify the authoritative header instead of guessing.
+12. **Mass Prune Optimization (Scripts vs Repetitive Tool Diffs):**
+   - When extracting code or removing large swathes of code (>30% of file lines or >200 lines across non-contiguous blocks), avoid sending multiple massive `replace_file_content` payloads containing repetitive `TargetContent`. Use targeted python/sed/awk one-liners or batch cleanups to conserve output tokens.
+13. **Compact Test Output Filtering:**
+   - When running full test suites (`native_test_runner`, `integration_test`), filter out repetitive per-case passing lines if only the aggregate pass/fail status is needed (e.g., pipe to `grep -E "PASSED|FAILED|ERROR|Took|SUMMARY"` or run filtered suites `-f <suite>`).
+
 
 

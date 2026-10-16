@@ -4,7 +4,6 @@ set(srcs
     "core/can_router.c"
     "core/ring_buffer.c"
     "core/vehicle_profile.c"
-    "core/canbox_version.c"
     "profiles/profile_psa.c"
     "profiles/peugeot_407.c"
     "profiles/psa_virtual_cdc.c"
