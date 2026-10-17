@@ -1169,14 +1169,14 @@ void test_integration_hiworld_rd4_cd_in_dash_pipeline(void) {
     };
     can_router_process_can(&frame_165);
 
-    // Emits Cmd 0x84 (Audio Source = 0x30 CD)
+    // Emits Cmd 0x84 (Audio Source = 0x20 CD)
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_TRUE(rx_len >= 19);
     TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
     TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
     TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
-    TEST_ASSERT_EQUAL_HEX8(0x30, rx_buf[4]); /* CD Source */
+    TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[4]); /* CD Source */
 
     // 2. CD Disc Info (CAN 0x365: Total Tracks = 18 = 0x12)
     can_frame_t frame_365 = {
@@ -1212,6 +1212,10 @@ void test_integration_hiworld_rd4_cd_in_dash_pipeline(void) {
         .data = { 0xC8, 0xC0, 0x10, 0x00 }
     };
     can_router_process_can(&frame_radio);
+
+    /* Allow 800ms physical button debounce to settle */
+    hal_delay_ms(850);
+    can_router_periodic_100ms();
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     /* Buffer contains Cmd 0x97 (16 bytes) followed by Cmd 0x84 (19 bytes) = 35 bytes */
@@ -1380,7 +1384,7 @@ void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
     uint8_t rx_buf[128];
     read_uart_output(rx_buf, sizeof(rx_buf));
 
-    /* 1. Inject CAN 0x165 selecting AUX Input 1 (src = 0x4 -> source_mode 0x20) */
+    /* 1. Inject CAN 0x165 selecting AUX Input 1 (src = 0x4 -> source_mode 0x40) */
     can_frame_t frame_aux = {
         .id = 0x165,
         .dlc = 4,
@@ -1389,13 +1393,13 @@ void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
     can_router_process_can(&frame_aux);
 
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    /* Must output Cmd 0x84 (CarRadioState) indicating AUX 1 (0x20) */
+    /* Must output Cmd 0x84 (CarRadioState) indicating AUX 1 (0x40) */
     TEST_ASSERT_EQUAL_UINT32(19, rx_len);
     TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
     TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[2]);
     TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[3]);
-    TEST_ASSERT_EQUAL_HEX8(0x20, rx_buf[4]); /* Source = AUX 1 (0x20) */
+    TEST_ASSERT_EQUAL_HEX8(0x40, rx_buf[4]); /* Source = AUX 1 (0x40) */
     TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[5]); /* Frequency LSB = 0 */
     TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[6]); /* Frequency MSB = 0 */
     TEST_ASSERT_EQUAL_HEX8(0x00, rx_buf[7]); /* Preset slot = 0 */
@@ -1463,6 +1467,10 @@ void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
         .data = { 0xC8, 0xC0, 0x10, 0x00 }
     };
     can_router_process_can(&frame_radio);
+
+    /* Allow 800ms physical button debounce to settle */
+    hal_delay_ms(850);
+    can_router_periodic_100ms();
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     /* Transition to radio MUST output Cmd 0x84 (Radio State) followed by Cmd 0x85 (Preset list) */
@@ -1703,3 +1711,295 @@ void test_integration_hiworld_virtual_cdc_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
     TEST_ASSERT_EQUAL_HEX32(0x162, frame_sent.id);
 }
+
+void test_integration_hiworld_rd4_audio_routing_spec(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+    psa_virtual_cdc_init();
+
+    /* Wake bus */
+    can_frame_t frame_ign = {
+        .id = 0x036,
+        .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_ign);
+
+    /* Drain initial UART output */
+    uint8_t rx_buf[128];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* --------------------------------------------------------------------------
+     * 1. Downlink: Switch RD4 to CDC (5A A5 02 AD 02 01 B1)
+     * -------------------------------------------------------------------------- */
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_cdc_active[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x02, 0x01, 0xB1 };
+    for (size_t i = 0; i < sizeof(pkt_cdc_active); i++) {
+        can_router_process_uart_byte(pkt_cdc_active[i]);
+    }
+
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_active());
+    can_frame_t frame_sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+
+    /* Verify UART responses: Universal ACK (0xFF, 0xAD) and Cmd 0x84 (CDC 0x31) */
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_ack_ad = false;
+    bool found_84_cdc = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 4) < rx_len) {
+            if (rx_buf[i + 3] == 0xFF && rx_buf[i + 4] == 0xAD) {
+                found_ack_ad = true;
+            }
+            if (rx_buf[i + 3] == 0x84 && rx_buf[i + 4] == 0x31) {
+                found_84_cdc = true;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(found_ack_ad);
+    TEST_ASSERT_TRUE(found_84_cdc);
+
+    /* --------------------------------------------------------------------------
+     * 2. Downlink: CDC Standby (5A A5 02 AD 02 00 B0)
+     * -------------------------------------------------------------------------- */
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_cdc_standby[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x02, 0x00, 0xB0 };
+    for (size_t i = 0; i < sizeof(pkt_cdc_standby); i++) {
+        can_router_process_uart_byte(pkt_cdc_standby[i]);
+    }
+
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+    /* CDC Standby must NOT inject stalk pulse */
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+
+    /* --------------------------------------------------------------------------
+     * 3. Downlink: Switch RD4 to Tuner (5A A5 02 AD 03 01 B3)
+     * -------------------------------------------------------------------------- */
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_switch_tuner[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x03, 0x01, 0xB3 };
+    for (size_t i = 0; i < sizeof(pkt_switch_tuner); i++) {
+        can_router_process_uart_byte(pkt_switch_tuner[i]);
+    }
+
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+
+    /* --------------------------------------------------------------------------
+     * 4. Downlink: Switch RD4 to CD (5A A5 02 AD 03 02 B4)
+     * -------------------------------------------------------------------------- */
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_switch_cd[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x03, 0x02, 0xB4 };
+    for (size_t i = 0; i < sizeof(pkt_switch_cd); i++) {
+        can_router_process_uart_byte(pkt_switch_cd[i]);
+    }
+
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+
+    /* Confirm CD settled via CAN 0x165 */
+    can_frame_t frame_cd = {
+        .id = 0x165,
+        .dlc = 8,
+        .data = { 0x80, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_cd);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+
+    /* --------------------------------------------------------------------------
+     * 5. Downlink: Switch to Tuner & Query Radio State / Station List (5A A5 01 0F 0F)
+     * -------------------------------------------------------------------------- */
+    /* HU sends Switch to Tuner, then immediately queries 0x0F */
+    for (size_t i = 0; i < sizeof(pkt_switch_tuner); i++) {
+        can_router_process_uart_byte(pkt_switch_tuner[i]);
+    }
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_query_0f[] = { 0x5A, 0xA5, 0x01, 0x0F, 0x0F };
+    for (size_t i = 0; i < sizeof(pkt_query_0f); i++) {
+        can_router_process_uart_byte(pkt_query_0f[i]);
+    }
+
+    /* While switching in progress, rotary scroll must be deferred */
+    const psa_source_arbiter_t *arb = psa_virtual_cdc_get_arbiter();
+    TEST_ASSERT_TRUE(arb->pending_station_list_trigger);
+
+    /* Confirm Tuner arrival via CAN 0x165 -> triggers deferred rotary scroll */
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 8,
+        .data = { 0x80, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00 } /* 0x10 = Tuner */
+    };
+    can_router_process_can(&frame_165);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_FALSE(arb->pending_station_list_trigger);
+
+    /* Verify CAN 0x21F station list trigger was transmitted upon settling */
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+
+    /* Verify UART responses: Universal ACK (0xFF, 0x0F) and Cmd 0x84 */
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_ack_0f = false;
+    bool found_84_radio = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 4) < rx_len) {
+            if (rx_buf[i + 3] == 0xFF && rx_buf[i + 4] == 0x0F) {
+                found_ack_0f = true;
+            }
+            if (rx_buf[i + 3] == 0x84) {
+                found_84_radio = true;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(found_ack_0f);
+    TEST_ASSERT_TRUE(found_84_radio);
+}
+
+void test_integration_hiworld_source_switch_suppression(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+    psa_virtual_cdc_init();
+
+    /* Set radio initially to Tuner via CAN 0x165 */
+    can_frame_t frame_165 = {
+        .id = 0x165,
+        .dlc = 8,
+        .data = { 0x80, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_165);
+
+    uint8_t rx_buf[128];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* Downlink: Switch RD4 to CD (5A A5 02 AD 03 02 B4) */
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_switch_cd[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x03, 0x02, 0xB4 };
+    for (size_t i = 0; i < sizeof(pkt_switch_cd); i++) {
+        can_router_process_uart_byte(pkt_switch_cd[i]);
+    }
+
+    /* 1. Verify Stalk 0x21F pulse was injected */
+    can_frame_t frame_pulse;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_source_filtered());
+
+    /* 2. Before RD4 acknowledges, 0x84 must NOT be sent to HU */
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_84_premature = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len && rx_buf[i + 3] == 0x84) {
+            found_84_premature = true;
+        }
+    }
+    TEST_ASSERT_FALSE(found_84_premature);
+
+    /* 3. RD4 acknowledges by sending CAN 0x165 (0x20 in high nibble = CD) */
+    can_frame_t frame_cd = {
+        .id = 0x165,
+        .dlc = 8,
+        .data = { 0x80, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_cd);
+
+    /* 4. Target reached! Verify final confirmed state pushed to HU: Cmd 0x84 */
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_84 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 3) < rx_len && rx_buf[i + 3] == 0x84) {
+            found_84 = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_84);
+}
+
+void test_integration_hiworld_multi_hop_source_switch(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+    psa_virtual_cdc_init();
+
+    /* 1. Initialize RD4 on CDC (0x30 in CAN 0x165) */
+    can_frame_t frame_cdc = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x80, 0x00, 0x30, 0x00 }
+    };
+    can_router_process_can(&frame_cdc);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, psa_virtual_cdc_get_reported_source());
+
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    /* 2. HU requests CD: 5A A5 02 AD 03 02 B3 */
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_switch_cd[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x03, 0x02, 0xB3 };
+    for (size_t i = 0; i < sizeof(pkt_switch_cd); i++) {
+        can_router_process_uart_byte(pkt_switch_cd[i]);
+    }
+
+    /* Pulse 1: Injected immediately */
+    can_frame_t frame_pulse;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+
+    /* 3. RD4 reacts to Pulse 1: transitions from CDC to AUX 1 (0x40) */
+    hal_can_native_clear_sent_frame();
+    can_frame_t frame_aux = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x80, 0x00, 0x40, 0x00 }
+    };
+    can_router_process_can(&frame_aux);
+
+    /* Pulse 2: Injected after AUX 1 received */
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+
+    /* 4. RD4 reacts to Pulse 2: transitions from AUX 1 to Tuner (0x10) */
+    hal_can_native_clear_sent_frame();
+    can_frame_t frame_tuner = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x80, 0x00, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_tuner);
+
+    /* Pulse 3: Injected after Tuner received */
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+
+    /* 5. RD4 reacts to Pulse 3: transitions from Tuner to CD (0x20) */
+    hal_can_native_clear_sent_frame();
+    can_frame_t frame_cd = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0x80, 0x00, 0x20, 0x00 }
+    };
+    can_router_process_can(&frame_cd);
+
+    /* 6. Target reached! No Pulse 4 must be emitted */
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CD, psa_virtual_cdc_get_reported_source());
+
+    /* Verify final confirmed state pushed to HU: Cmd 0x84 with 0x20 (CD) */
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_84_cd = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 4) < rx_len && rx_buf[i + 3] == 0x84) {
+            if (rx_buf[i + 4] == 0x20) {
+                found_84_cd = true;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(found_84_cd);
+}
+

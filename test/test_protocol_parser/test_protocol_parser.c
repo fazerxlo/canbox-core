@@ -122,6 +122,13 @@ void test_peugeot_407_aux_mode_suppression(void);
 void test_peugeot_407_virtual_cdc_initial_state(void);
 void test_peugeot_407_virtual_cdc_downlink_controls(void);
 void test_peugeot_407_virtual_cdc_periodic_transmission(void);
+void test_peugeot_407_rd4_audio_source_switching(void);
+void test_peugeot_407_rd4_station_list_trigger(void);
+void test_peugeot_407_rd4_source_switch_lockout_and_suppression(void);
+void test_peugeot_407_rd4_physical_button_debounce(void);
+void test_peugeot_407_rd4_cd_switch_intermediate_aux1_stepping(void);
+void test_peugeot_407_rd4_no_premature_pulse_when_new_cmd_arrives(void);
+void test_peugeot_407_rd4_confirm_timeout_350ms(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -265,6 +272,13 @@ int main(void) {
     RUN_TEST(test_peugeot_407_virtual_cdc_initial_state);
     RUN_TEST(test_peugeot_407_virtual_cdc_downlink_controls);
     RUN_TEST(test_peugeot_407_virtual_cdc_periodic_transmission);
+    RUN_TEST(test_peugeot_407_rd4_audio_source_switching);
+    RUN_TEST(test_peugeot_407_rd4_station_list_trigger);
+    RUN_TEST(test_peugeot_407_rd4_source_switch_lockout_and_suppression);
+    RUN_TEST(test_peugeot_407_rd4_physical_button_debounce);
+    RUN_TEST(test_peugeot_407_rd4_cd_switch_intermediate_aux1_stepping);
+    RUN_TEST(test_peugeot_407_rd4_no_premature_pulse_when_new_cmd_arrives);
+    RUN_TEST(test_peugeot_407_rd4_confirm_timeout_350ms);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

@@ -375,29 +375,35 @@ void can_router_process_can(const can_frame_t *frame) {
         }
 
         if (radio_changed) {
-            uint8_t old_src = s_last_sent_state.media.radio.source_mode;
-            uint8_t new_src = s_current_state.media.radio.source_mode;
+            if (psa_virtual_cdc_is_source_filtered()) {
+                /* Suppress intermediate 0x84 broadcast while RD4 source switch or debounce is in progress */
+            } else {
+                uint8_t old_src = s_last_sent_state.media.radio.source_mode;
+                uint8_t new_src = s_current_state.media.radio.source_mode;
 
-            /* If transitioning away from CD (0x30) or CDC (0x31), notify HU that CD playback has stopped */
-            if ((old_src == 0x30 || old_src == 0x31) && (new_src != 0x30 && new_src != 0x31)) {
-                s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
-                hu_protocol_send_media_state(&s_current_state.media.cdc);
-                s_last_sent_state.media.cdc = s_current_state.media.cdc;
-            }
-
-            hu_protocol_send_radio_state(&s_current_state.media.radio);
-
-            /* If transitioning to radio mode, also refresh presets and radio text */
-            if (old_src >= 0x20 && new_src < 0x20) {
-                hu_protocol_send_radio_presets(&s_current_state.media.radio);
-                s_current_state.dirty.radio_preset = false;
-                if (s_current_state.media.radio.radio_text_len > 0) {
-                    hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
-                    s_current_state.dirty.radio_text = false;
+                /* If transitioning away from CD (0x20/0x30) or CDC (0x31), notify HU that CD playback has stopped */
+                bool old_is_cd = (old_src == 0x20 || old_src == 0x30 || old_src == 0x31);
+                bool new_is_cd = (new_src == 0x20 || new_src == 0x30 || new_src == 0x31);
+                if (old_is_cd && !new_is_cd) {
+                    s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
+                    hu_protocol_send_media_state(&s_current_state.media.cdc);
+                    s_last_sent_state.media.cdc = s_current_state.media.cdc;
                 }
-            }
 
-            s_last_sent_state.media.radio = s_current_state.media.radio;
+                hu_protocol_send_radio_state(&s_current_state.media.radio);
+
+                /* If transitioning to radio mode, also refresh presets and radio text */
+                if (old_src >= 0x20 && new_src < 0x20) {
+                    hu_protocol_send_radio_presets(&s_current_state.media.radio);
+                    s_current_state.dirty.radio_preset = false;
+                    if (s_current_state.media.radio.radio_text_len > 0) {
+                        hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+                        s_current_state.dirty.radio_text = false;
+                    }
+                }
+
+                s_last_sent_state.media.radio = s_current_state.media.radio;
+            }
         } else if (s_current_state.media.radio.source_mode >= 0x20) {
             /* Keep cached radio state aligned without sending serial frames */
             s_last_sent_state.media.radio = s_current_state.media.radio;
@@ -407,7 +413,8 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push radio preset list updates on change (only if currently in radio tuner mode)
     if (s_current_state.dirty.radio_preset) {
         s_current_state.dirty.radio_preset = false;
-        if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
+        if (!psa_virtual_cdc_is_source_filtered() &&
+            s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_presets(&s_current_state.media.radio);
         }
         memcpy(s_last_sent_state.media.radio.preset_freqs, s_current_state.media.radio.preset_freqs, sizeof(s_last_sent_state.media.radio.preset_freqs));
@@ -417,7 +424,8 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push dynamic RDS RadioText on change (only if currently in radio tuner mode)
     if (s_current_state.dirty.radio_text) {
         s_current_state.dirty.radio_text = false;
-        if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
+        if (!psa_virtual_cdc_is_source_filtered() &&
+            s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
         }
         s_last_sent_state.media.radio.radio_text_len = s_current_state.media.radio.radio_text_len;
@@ -428,12 +436,57 @@ void can_router_process_can(const can_frame_t *frame) {
     if (s_current_state.dirty.cdc) {
         s_current_state.dirty.cdc = false;
         uint8_t src = s_current_state.media.radio.source_mode;
-        bool is_cd_source = (src == 0x30 || src == 0x31 ||
+        bool is_cd_source = (src == 0x20 || src == 0x30 || src == 0x31 ||
                              (!s_current_state.media.radio.present && s_current_state.media.cdc.active_disc != 0));
         if (is_cd_source && memcmp(&s_current_state.media.cdc, &s_last_sent_state.media.cdc, sizeof(vehicle_cdc_t)) != 0) {
-            hu_protocol_send_media_state(&s_current_state.media.cdc);
-            s_last_sent_state.media.cdc = s_current_state.media.cdc;
+            if (psa_virtual_cdc_is_source_filtered()) {
+                /* Suppress intermediate 0x97 broadcast while RD4 source switch or debounce is in progress */
+            } else {
+                hu_protocol_send_media_state(&s_current_state.media.cdc);
+                s_last_sent_state.media.cdc = s_current_state.media.cdc;
+            }
         }
+    }
+}
+
+void can_router_push_radio_and_media_state(void) {
+    if (!s_current_state.media.radio.present && psa_virtual_cdc_is_active()) {
+        vehicle_radio_t cdc_radio;
+        memset(&cdc_radio, 0, sizeof(cdc_radio));
+        cdc_radio.source_mode = 0x31;
+        cdc_radio.power_status = 0x01;
+        hu_protocol_send_radio_state(&cdc_radio);
+        hu_protocol_send_media_state(&s_current_state.media.cdc);
+        return;
+    }
+
+    uint8_t old_src = s_last_sent_state.media.radio.source_mode;
+    uint8_t new_src = s_current_state.media.radio.source_mode;
+
+    /* If transitioning away from CD (0x20/0x30) or CDC (0x31), notify HU that CD playback has stopped */
+    bool old_is_cd = (old_src == 0x20 || old_src == 0x30 || old_src == 0x31);
+    bool new_is_cd = (new_src == 0x20 || new_src == 0x30 || new_src == 0x31);
+    if (old_is_cd && !new_is_cd) {
+        s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
+        hu_protocol_send_media_state(&s_current_state.media.cdc);
+        s_last_sent_state.media.cdc = s_current_state.media.cdc;
+    }
+
+    hu_protocol_send_radio_state(&s_current_state.media.radio);
+    s_last_sent_state.media.radio = s_current_state.media.radio;
+
+    if (s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
+        hu_protocol_send_radio_presets(&s_current_state.media.radio);
+        s_current_state.dirty.radio_preset = false;
+        if (s_current_state.media.radio.radio_text_len > 0) {
+            hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
+            s_current_state.dirty.radio_text = false;
+        }
+    } else if (s_current_state.media.radio.source_mode == 0x20 ||
+               s_current_state.media.radio.source_mode == 0x30 ||
+               s_current_state.media.radio.source_mode == 0x31) {
+        hu_protocol_send_media_state(&s_current_state.media.cdc);
+        s_last_sent_state.media.cdc = s_current_state.media.cdc;
     }
 }
 
@@ -550,14 +603,16 @@ void can_router_periodic_100ms(void) {
     // Periodic slow resync for Radio & Media states (60 seconds / 600 ticks)
     if (++s_media_resync_timer >= 600) {
         s_media_resync_timer = 0;
-        if (s_current_state.media.radio.power_status != 0) {
+        if (!psa_virtual_cdc_is_source_filtered() && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_state(&s_current_state.media.radio);
             if (s_current_state.media.radio.source_mode < 0x20) {
                 hu_protocol_send_radio_presets(&s_current_state.media.radio);
                 if (s_current_state.media.radio.radio_text_len > 0) {
                     hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
                 }
-            } else if (s_current_state.media.radio.source_mode == 0x30 || s_current_state.media.radio.source_mode == 0x31) {
+            } else if (s_current_state.media.radio.source_mode == 0x20 ||
+                       s_current_state.media.radio.source_mode == 0x30 ||
+                       s_current_state.media.radio.source_mode == 0x31) {
                 hu_protocol_send_media_state(&s_current_state.media.cdc);
             }
         }

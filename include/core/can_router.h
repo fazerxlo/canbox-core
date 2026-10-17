@@ -176,7 +176,7 @@ typedef vehicle_audio_settings_t audio_settings_state_t;
 
 #define PSA_RD4_MAX_RADIO_TEXT_LEN 64
 
-typedef struct {
+typedef struct vehicle_radio {
     bool     present;           /* true once RD4 0x165 frame is detected on CAN bus */
     bool     sleep;             /* true when RD4 is in deep sleep ((data[0] & 0xC0) == 0) */
     uint8_t  source_mode;       /* Hiworld source code (0xFF = Off/Standby) */
@@ -266,6 +266,7 @@ bool can_router_reset_trip(uint8_t trip_index);
 bool can_router_query_alert_journal(void);
 bool can_router_is_bus_sleeping(void);
 void can_router_notify_wake(void);
+void can_router_push_radio_and_media_state(void);
 
 #ifdef __cplusplus
 }

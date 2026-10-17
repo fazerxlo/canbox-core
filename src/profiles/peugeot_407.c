@@ -1,4 +1,5 @@
 #include "profiles/peugeot_407.h"
+#include "profiles/psa_virtual_cdc.h"
 #include "hal/hal_gpio.h"
 #include <string.h>
 
@@ -110,6 +111,7 @@ void psa_decode_stalk_0x21f_ex(psa_stalk_state_t *st, const uint8_t *data, uint8
     /* Rotary Encoder (molette) counter on Byte 1 */
     if (dlc >= 2) {
         uint8_t b1 = data[1];
+        psa_virtual_cdc_update_stalk_rotary(b1);
         if (st->rotary_init) {
             int8_t delta = (int8_t)(b1 - st->prev_rotary);
             if (delta > 0) {
@@ -899,6 +901,7 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
     if (!radio_powered) {
         radio->source_mode = 0xFF;
         radio->power_status = 0x00;
+        psa_virtual_cdc_process_can_0x165(radio->source_mode, radio->power_status);
         return;
     }
 
@@ -909,8 +912,8 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
         return;
     }
 
-    uint8_t src = (data[2] >> 4) & 0x0F;
-    switch (src) {
+    uint8_t rd4_src_nibble = (data[2] >> 4) & 0x0F;
+    switch (rd4_src_nibble) {
         case 0x1: /* Tuner */
             radio->source_mode = radio->band;
             if (radio->power_status != 0x02) {
@@ -918,19 +921,19 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
             }
             break;
         case 0x2: /* Internal CD */
-            radio->source_mode = 0x30;
-            radio->power_status = 0x01;
-            break;
-        case 0x3: /* CDC */
-            radio->source_mode = 0x31;
-            radio->power_status = 0x01;
-            break;
-        case 0x4: /* AUX 1 */
             radio->source_mode = 0x20;
             radio->power_status = 0x01;
             break;
-        case 0x5: /* AUX 2 */
-            radio->source_mode = 0x21;
+        case 0x3: /* Virtual CDC */
+            radio->source_mode = 0x31;
+            radio->power_status = 0x01;
+            break;
+        case 0x4: /* AUX 1 (Input 1) */
+            radio->source_mode = 0x40;
+            radio->power_status = 0x01;
+            break;
+        case 0x5: /* AUX 2 (Input 2) */
+            radio->source_mode = 0x41;
             radio->power_status = 0x01;
             break;
         default:
@@ -938,6 +941,8 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
             radio->power_status = 0x00;
             break;
     }
+
+    psa_virtual_cdc_process_can_0x165(radio->source_mode, radio->power_status);
 }
 
 void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {

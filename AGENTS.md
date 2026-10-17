@@ -42,11 +42,18 @@ To complete tasks rapidly with minimal token and tool-call overhead:
    - Before adding `#include` directives or referencing domain types (e.g. `hvac_state_t`, `canbox_tpms_state_t`), run `grep -rn "typedef struct <Name> include/"` to identify the authoritative header instead of guessing.
 12. **Mass Prune & Rename Optimization (Scripts vs Repetitive Tool Diffs):**
    - When extracting code, deleting large blocks (>30% of file lines), or renaming/removing symbols across 3+ files, use a shell/python one-liner via `run_command` (e.g. `python3 -c ...` or `sed -i ...`) rather than chaining 5+ sequential `replace_file_content` tool calls. This saves thousands of output and input tokens.
-13. **Compact Test Output Filtering (`tools/test_fast.sh` & `tools/verify_all.sh`):**
+13. **Compact Test Output & Single Verification Gate (`tools/test_fast.sh` & `tools/verify_all.sh`):**
    - Use `./tools/test_fast.sh` for instant, compact test output during code iteration.
-   - Use `./tools/verify_all.sh` for the multi-target verification gate before completing tasks. It executes unit tests, integration tests, STM32 firmware build, and ESP32 firmware build silently and reports a concise ~5-line summary.
+   - Run the multi-target `./tools/verify_all.sh` gate **strictly once** before completing tasks.
+   - **Never re-run `verify_all.sh` after documentation edits:** Markdown changes (`doc/*.md`) cannot break C builds; do not waste token-heavy build cycles re-verifying docs.
 14. **Milestone Context Compaction (`/compact`):**
    - After completing major architectural milestones or multi-turn refactoring tasks, recommend or use `/compact` to summarize history and reclaim context tokens.
+15. **Spec-Implementation Fast Path (Zero Re-Exploration & Aggressive Tool Batching):**
+   - When asked to implement a specific `doc/*_SPEC.md` specification:
+     - **Direct Blueprint Ingestion:** The spec is authoritative and already defines target CAN IDs, byte positions, UART framing, and affected files. Strictly forbid exploratory grep searches (`grep -rn "0x..."`) for items documented in the spec.
+     - **Parallel Batch Reads:** In Turn 1, read all relevant headers, implementations, and test files in parallel (using `view_file` up to 800 lines) instead of chaining sequential reads.
+     - **Parallel Batch Edits:** Batch code changes across all layers in a single turn.
+     - **Unified Test & Doc Updates:** Write test implementations, runner registrations, and specification updates in a single wrap-up turn to minimize context re-billing.
 
 ---
 

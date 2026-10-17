@@ -26,15 +26,55 @@ typedef struct {
     uint32_t timer_ticks_100ms;  /* 100ms ticks counter for round-robin scheduler */
 } psa_virtual_cdc_t;
 
+typedef enum {
+    SRC_SYNC_IDLE = 0,          /* In sync, normal operation */
+    SRC_SYNC_SEEKING,           /* Actively pulsing 0x21F to reach HU target */
+    SRC_SYNC_WAIT_CONFIRM,      /* Pulse sent, waiting up to 350ms for 0x165 update */
+    SRC_SYNC_PHYSICAL_DEBOUNCE  /* User pressed physical SRC button, waiting to settle */
+} psa_src_sync_state_t;
+
+typedef struct {
+    psa_src_sync_state_t sync_state;
+    uint8_t actual_rd4_source;      /* Ground-truth from CAN 0x165 (1=Tuner, 2=CD, 3=CDC, 4=AUX) */
+    uint8_t reported_hu_source;     /* Last stable source sent to HU via Cmd 0x84 */
+    uint8_t target_source;          /* Target requested by HU Cmd 0xAD (0 if none) */
+    uint8_t last_pulse_source;      /* Source when last pulse was injected */
+    uint8_t retry_count;            /* Max 5 pulses per request */
+    uint32_t state_timer_ms;        /* Timestamp / tick counter for debounce & timeouts */
+    bool     pending_station_list_trigger; /* Deferred 0x0F rotary scroll trigger waiting for Tuner */
+} psa_source_arbiter_t;
+
+#define PSA_RD4_SRC_TUNER 0x01
+#define PSA_RD4_SRC_CD    0x02
+#define PSA_RD4_SRC_CDC   0x03
+#define PSA_RD4_SRC_AUX   0x04
+
+#define STALK_PRESS_DURATION_MS     60   /* Hold 0x21F#020000 for 60 ms */
+#define STALK_WAIT_CONFIRM_MAX_MS  350   /* Wait up to 350 ms for CAN 0x165 source nibble to change */
+#define STALK_POST_CHANGE_SETTLE_MS 80   /* Wait 80 ms AFTER 0x165 changes before next press */
+
 void psa_virtual_cdc_init(void);
 void psa_virtual_cdc_set_enabled(bool enabled);
 void psa_virtual_cdc_set_state(bool active);
 void psa_virtual_cdc_handle_hu_cmd(uint8_t subcmd, uint8_t param);
+void psa_virtual_cdc_switch_source(uint8_t target_source);
+void psa_virtual_cdc_trigger_station_list(void);
+void psa_virtual_cdc_update_stalk_rotary(uint8_t rotary_cnt);
+uint8_t psa_virtual_cdc_get_stalk_rotary(void);
 void psa_virtual_cdc_process_can_0x131(const uint8_t *data, uint8_t dlc);
+void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status);
 void psa_virtual_cdc_tick_100ms(void);
 bool psa_virtual_cdc_is_active(void);
 bool psa_virtual_cdc_is_presence_enabled(void);
 const psa_virtual_cdc_t *psa_virtual_cdc_get_context(void);
+const psa_source_arbiter_t *psa_virtual_cdc_get_arbiter(void);
+struct vehicle_radio;
+bool psa_virtual_cdc_is_switching_in_progress(void);
+bool psa_virtual_cdc_is_source_filtered(void);
+uint8_t psa_virtual_cdc_get_target_source(void);
+uint8_t psa_virtual_cdc_get_reported_source(void);
+bool psa_virtual_cdc_is_target_source_reached(const struct vehicle_radio *radio);
+uint8_t psa_source_mode_to_arbiter(uint8_t source_mode);
 
 #ifdef __cplusplus
 }

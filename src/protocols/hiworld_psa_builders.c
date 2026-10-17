@@ -225,7 +225,11 @@ size_t build_hiworld_radio_state(const vehicle_radio_t *radio, uint8_t *out_buf,
 
     /* If in external source, send source code; otherwise send radio band */
     if (radio->source_mode >= 0x20) {
-        out_buf[4] = radio->source_mode;
+        if (radio->source_mode == 0x30) {
+            out_buf[4] = 0x20; /* Internal CD */
+        } else {
+            out_buf[4] = radio->source_mode;
+        }
     } else {
         out_buf[4] = radio->band;
     }

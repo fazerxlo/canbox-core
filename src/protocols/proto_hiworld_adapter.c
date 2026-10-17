@@ -84,6 +84,7 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if (packet->cmd == 0x0F) {
         /* Head Unit resume query forwardType(0x0F): immediate retransmit of radio state */
         hu_protocol_send_radio_state(NULL);
+        psa_virtual_cdc_trigger_station_list();
     } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
         /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */
         hu_protocol_send_media_state(NULL);
@@ -578,7 +579,15 @@ static void hiworld_send_radio_state(const vehicle_radio_t *radio) {
         s_cached_radio_state = *radio;
         s_cached_radio_valid = true;
     } else {
-        if (!s_cached_radio_valid) return;
+        if (!s_cached_radio_valid) {
+            const vehicle_state_t *st = can_router_get_state();
+            if (st != NULL) {
+                s_cached_radio_state = st->media.radio;
+            } else {
+                memset(&s_cached_radio_state, 0, sizeof(s_cached_radio_state));
+            }
+            s_cached_radio_valid = true;
+        }
         radio = &s_cached_radio_state;
     }
 
@@ -586,7 +595,11 @@ static void hiworld_send_radio_state(const vehicle_radio_t *radio) {
     memset(payload, 0, sizeof(payload));
 
     if (radio->source_mode >= 0x20) {
-        payload[0] = radio->source_mode;
+        if (radio->source_mode == 0x30) {
+            payload[0] = 0x20; /* Internal CD */
+        } else {
+            payload[0] = radio->source_mode;
+        }
     } else {
         payload[0] = radio->band;
     }

@@ -324,6 +324,16 @@ class SerialFrameReassembler:
                     del self.buf[0]
                     continue
                 total_len = plen + 5
+                cmd = self.buf[3]
+                # 0-payload query frames where len=1 counts CMD (e.g. 5A A5 01 0F 0F)
+                if plen == 1 and len(self.buf) >= 5:
+                    csum = (self.buf[2] + self.buf[3]) & 0xFF
+                    cs_cand = self.buf[4]
+                    if (cs_cand == ((csum - 1) & 0xFF) or cs_cand == csum) and (
+                        cmd in (0x0F, 0x11, 0x12, 0xFF) or len(self.buf) == 5 or (len(self.buf) > 5 and self.buf[5] == 0x5A)
+                    ):
+                        total_len = 5
+
                 if len(self.buf) < total_len:
                     break
                 frame = bytes(self.buf[:total_len])
@@ -421,15 +431,19 @@ class UartProxy(threading.Thread):
                         for f in frames:
                             self.logger.log("APP_UART_RX", f"{f.hex()}")
                         os.write(self.master_fd, data)
-                        # Forward Head Unit downlink data (including handshake) to original canbox
+                        # Forward Head Unit downlink data (including handshake) to original canbox,
+                        # but strictly filter out 0xAD (Virtual CDC / Audio source control) to prevent
+                        # dual-transmission of 0x21F pulses on the shared vehicle CAN bus!
                         if self.orig_ser and self.orig_ser.is_open:
-                            try:
-                                self.orig_ser.write(data)
-                                self.stats["ORIG_TX_BYTES"] = self.stats.get("ORIG_TX_BYTES", 0) + len(data)
-                                for f in frames:
+                            for f in frames:
+                                if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] == 0xAD:
+                                    continue
+                                try:
+                                    self.orig_ser.write(f)
+                                    self.stats["ORIG_TX_BYTES"] = self.stats.get("ORIG_TX_BYTES", 0) + len(f)
                                     self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
-                            except Exception as e:
-                                self.logger.log("ORIG_CANBOX", f"TX error: {e}")
+                                except Exception as e:
+                                    self.logger.log("ORIG_CANBOX", f"TX error: {e}")
 
                 # Flush stale incomplete fragments on idle
                 for f in self.tx_reassembler.flush_stale(0.2):
@@ -437,7 +451,13 @@ class UartProxy(threading.Thread):
                 for f in self.rx_reassembler.flush_stale(0.2):
                     self.logger.log("APP_UART_RX", f"{f.hex()}")
                     if self.orig_ser and self.orig_ser.is_open:
-                        self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
+                        if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] == 0xAD:
+                            continue
+                        try:
+                            self.orig_ser.write(f)
+                            self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
+                        except Exception:
+                            pass
             except Exception:
                 pass
 

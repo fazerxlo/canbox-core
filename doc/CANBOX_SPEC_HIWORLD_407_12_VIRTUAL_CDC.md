@@ -194,7 +194,8 @@ $$\text{Checksum} = \left( \left( \text{LEN} + \text{CMD} + \sum \text{Payload} 
 | SubCmd | Parameter Range | Description | Wire Frame Example | `canbox-core` Action |
 |:---:|:---:|:---|:---|:---|
 | **`0x01`** | `0x00` / `0x01` | **Enable / Disable CDC Emulation** | `5A A5 03 AD 01 01 B1` (Enable)<br>`5A A5 03 AD 01 00 B0` (Disable) | Sets `enabled` flag. When disabled, all CAN periodic transmissions cease immediately. Enabled by default. |
-| **`0x02`** | `0x00` / `0x01` | **Audio Play / Standby** | `5A A5 03 AD 02 01 B2` (Play)<br>`5A A5 03 AD 02 00 B1` (Standby) | `0x01`: Sets playback active, pulses stalk `0x21F` to switch RD4 source.<br>`0x00`: Standby mode (`status_icon = 2`), keeps presence heartbeat alive. |
+| **`0x02`** | `0x00` / `0x01` | **Audio Play / Standby** | `5A A5 02 AD 02 01 B1` (Play)<br>`5A A5 02 AD 02 00 B0` (Standby) | `0x01`: Sets playback active, pulses stalk `0x21F` (SRC) to switch RD4 source.<br>`0x00`: Standby mode (`status_icon = 2`), keeps presence heartbeat alive. |
+| **`0x03`** | `0x01` / `0x02` | **Switch RD4 Source** | `5A A5 02 AD 03 01 B3` (Tuner)<br>`5A A5 02 AD 03 02 B4` (CD) | `0x01`: Switches RD4 to FM/AM Tuner via `0x21F` stalk pulses.<br>`0x02`: Switches RD4 to Internal CD via `0x21F` stalk pulses. |
 | **`0x0E`** | `0x01 .. 0x06` | **Select Disc Slot** | `5A A5 03 AD 0E 01 BE` (Disc 1) | Updates `active_disc` reported in `0x162` and `0x0E2`. |
 | **`0x0F`** | `0x00 .. 0x3B` | **Set Elapsed Seconds** | `5A A5 03 AD 0F 14 D2` (20 sec) | Updates `elapsed_sec` reported in `0x1E2`. |
 | **`0x10`** | `0x01 .. 0x63` | **Set Track Number** | `5A A5 03 AD 10 05 C4` (Track 5) | Updates `track_num` reported in `0x1E2`. |
@@ -203,17 +204,24 @@ $$\text{Checksum} = \left( \left( \text{LEN} + \text{CMD} + \sum \text{Payload} 
 
 ## 5. Automatic Source Switching & Virtual COM2000 Stalk Injection
 
-When Android starts playback (YouTube, Spotify, incoming Bluetooth call), the Head Unit issues `Cmd 0xAD SubCmd 0x02 Param 0x01`.
+When Android starts playback (YouTube, Spotify, incoming Bluetooth call) or switches audio sources, the Head Unit issues `Cmd 0xAD`:
+- `Cmd 0xAD SubCmd 0x02 Param 0x01`: Switch to CDC.
+- `Cmd 0xAD SubCmd 0x02 Param 0x00`: CDC Standby.
+- `Cmd 0xAD SubCmd 0x03 Param 0x01`: Switch to Tuner.
+- `Cmd 0xAD SubCmd 0x03 Param 0x02`: Switch to Internal CD.
+- `Cmd 0x0F`: Tuner query + station list trigger (Scroll UP / DOWN pulse on `0x21F`).
 
-To switch the RD4 from its current source (e.g. FM Tuner) to CDC without requiring the driver to reach for the dashboard:
-1. `canbox-core` checks the cached radio state: `state->media.radio.source_mode`.
-2. If the current source is not CDC (`source_mode != 0x31`):
-   - Injects a momentary `SOURCE` key press on the virtual COM2000 stalk:
-     - Transmit `CAN 0x21F` (DLC 3: `[ 0x04, 0x00, 0x00 ]`).
-     - Wait 60 ms (`hal_delay_ms(60)`).
-     - Transmit `CAN 0x21F` (DLC 3: `[ 0x00, 0x00, 0x00 ]`).
-3. The RD4 detects the valid CDC heartbeat on the bus and immediately switches its active input to **Quadlock Part B**.
-4. `canbox-core` emits Hiworld `Cmd 0x84` (`0x31` = CDC) to notify the Head Unit that the CDC audio path is active.
+### 5.1 Virtual Stalk Injection Primitive (`CAN 0x21F`)
+To switch the RD4 source without requiring driver dashboard interaction:
+1. `canbox-core` checks `state->media.radio.source_mode` and `power_status`.
+2. If the current source is not the target source:
+   - Injects momentary `SOURCE` key pulses on virtual COM2000 stalk:
+     - **Press Frame:** `CAN 0x21F` (DLC 3: `[ 0x02, <cnt>, 0x00 ]`).
+     - **Hold Duration:** 60 ms.
+     - **Release Frame:** `CAN 0x21F` (DLC 3: `[ 0x00, <cnt>, 0x00 ]`).
+     - **Debounce Interval:** 120 ms between pulses.
+   - Repeats until `CAN 0x165` confirms target source reached (up to 5 retries).
+3. When CDC is active, `canbox-core` emits Hiworld `Cmd 0x84` (`0x31` = CDC) to notify the Head Unit.
 
 ---
 
@@ -236,8 +244,19 @@ void psa_virtual_cdc_set_state(bool active);
 /* Processes downlink command from Head Unit (Cmd 0xAD) */
 void psa_virtual_cdc_handle_hu_cmd(uint8_t subcmd, uint8_t param);
 
-/* Ingests OEM CAN 0x131 radio feedback */
+/* Switches RD4 source to target (1: Tuner, 2: Internal CD, 3: Virtual CDC) */
+void psa_virtual_cdc_switch_source(uint8_t target_source);
+
+/* Emits Scroll UP + DOWN pulse on 0x21F to trigger RD4 station list */
+void psa_virtual_cdc_trigger_station_list(void);
+
+/* Updates / gets rolling COM2000 stalk thumbwheel counter */
+void psa_virtual_cdc_update_stalk_rotary(uint8_t rotary_cnt);
+uint8_t psa_virtual_cdc_get_stalk_rotary(void);
+
+/* Ingests OEM CAN feedback */
 void psa_virtual_cdc_process_can_0x131(const uint8_t *data, uint8_t dlc);
+void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status);
 
 /* 100ms periodic scheduler: broadcasts 0x162, 0x1A2, 0x1E2, 0x1A0, 0x531, 0x0E2 */
 void psa_virtual_cdc_tick_100ms(void);
