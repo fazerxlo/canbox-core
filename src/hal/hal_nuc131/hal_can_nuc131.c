@@ -64,14 +64,6 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     NVIC_SetPriority(CAN0_IRQn, 0);
     NVIC_EnableIRQ(CAN0_IRQn);
 
-    // Set CAN controller to Listen-Only / Silent Mode:
-    // Enables TEST bit in CON and SILENT bit in TEST register.
-    // In Silent Mode, the CAN core is strictly listen-only: it receives all bus
-    // traffic normally but NEVER transmits dominant bits (no ACK bits, no error frames),
-    // guaranteeing zero electrical disturbance to the vehicle's Comfort CAN bus.
-    CAN0->CON |= CAN_CON_TEST_Msk;
-    CAN0->TEST |= CAN_TEST_SILENT_Msk;
-
     return HAL_STATUS_OK;
 }
 
