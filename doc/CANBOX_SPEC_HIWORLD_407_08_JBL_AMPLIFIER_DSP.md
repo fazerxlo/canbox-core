@@ -13,29 +13,6 @@
 
 High-trim Peugeot 407 vehicles feature a digital JBL 10-speaker sound system powered by an external CAN-connected multi-channel audio amplifier. The amplifier operates on the PSA Comfort CAN bus, receiving tone adjustments (Bass, Treble, Equalizer, Balance, Fader, Dynamic Loudness, Speed-Dependent Volume) and broadcasting current internal gain settings.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 JBL Digital Audio Amplifier                    |
-|             [10-Speaker Multichannel DSP, Bass, Treble, EQ, Balance, Fader]        |
-+------------------------------------------------------------------------------------+
-                                          │
-                                [PSA CAN 0x1E5 / 0x280]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Captures amplifier state telemetry from CAN ID 0x1E5                          |
-|   2. Converts discrete gain steps (0..14) to Hiworld DSP packets                   |
-|   3. Decodes Android equalizer adjustments (Cmd 0xAD / 0xC5) -> CAN ID 0x280       |
-+------------------------------------------------------------------------------------+
-                                          │
-                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Equalizer / DSP Application                   |
-|           (Renders graphic sliders for Bass/Treble/Bal/Fad & EQ profiles)          |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
@@ -44,30 +21,6 @@ High-trim Peugeot 407 vehicles feature a digital JBL 10-speaker sound system pow
 - **CAN ID:** `0x1E5` (Standard 11-bit Identifier)
 - **DLC:** 8 bytes
 - **Transmission Cycle:** Periodic 500 ms or immediate on adjustment
-
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Value / Range Definition    |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | 7..0   | Fixed Padding Byte                 | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | 7..0   | Bass Level                         | 0..14 (7 = Center / 0 dB)   |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | 7..0   | Treble Level                       | 0..14 (7 = Center / 0 dB)   |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | 7..0   | Balance (Left / Right)             | 0..14 (0=Left, 7=Mid, 14=Rt)|
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | 7..0   | Fader (Rear / Front)               | 0..14 (0=Rear, 7=Mid, 14=Fr)|
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 5 | 7..0   | EQ Preset Profile                  | 0=Off, 1=Pop, 2=Classic,    |
-|        |        |                                    | 3=Elec, 4=Jazz, 5=Vocal     |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 6 | Bit 4  | Loudness Dynamic Boost             | 0x10 (1 = ON, 0 = OFF)      |
-|        | Bit 3..0| Speed Volume Compensation Level   | 0..3 (0=Off, 1=Low, 3=High) |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 7 | 7..0   | Master JBL Amplifier Volume        | 0..30 (Discrete gain steps) |
-+--------+--------+------------------------------------+-----------------------------+
-```
 
 ---
 

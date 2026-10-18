@@ -16,44 +16,6 @@ In PSA CAN2004 (AEE2004) vehicles such as the Peugeot 407, the OEM **RD4 radio**
 
 The CAN Box intercepts these CAN frames, caches the radio/media state, and translates them into Hiworld UART frames sent to the Android Head Unit:
 
-```
-+-----------------------------------------------------------------------------------------+
-|                               PSA CAN2004 Comfort Bus (125 kbps)                        |
-|                                                                                         |
-|   0x165 (ETAT_AUTORADIO): Audio Source (Tuner, CD, CDC, AUX 1, AUX 2, BT)              |
-|   0x225 (ETAT_TUNER):     Waveband, Preset Slot, RDS Flags, Raw Tuner Frequency         |
-|   0x2A5 (NOM_STATION):    8-Byte ASCII RDS Station Service Name (PS)                    |
-|   0x0A4 (TEXTE_RADIO):    ISO-TP Segmented Dynamic RDS RadioText (Song Title / Artist)   |
-|   0x3A6 (CDC_STATUS):     CD Changer Disc Slot, Track No, Elapsed MM:SS, Total Tracks    |
-|   0x1A5 (VOLUME_RADIO):   Master Volume Level & Pop-up Animation Trigger                |
-|   0x1E5 (REGLAGES_SON):   Balance, Fader, Bass, Treble, Loudness, Equalizer Ambiance    |
-+-----------------------------------------------------------------------------------------+
-                                             │
-                                             ▼
-+-----------------------------------------------------------------------------------------+
-|                       CAN Box Microcontroller (Pure C99 Engine)                         |
-|                                                                                         |
-|   1. Audio Source & Power State Router (0x165)                                          |
-|   2. Tuner Frequency Scaler & Waveband Mapper (0x225: Freq_Hiworld = Raw / 2 + 500)     |
-|   3. RDS PS Station Name Extractor (0x2A5)                                              |
-|   4. Static ISO-TP Multi-Frame Reassembler (0x0A4: Strips 4-byte 10 00 00 00 prefix)   |
-|   5. CD Changer State Parser (0x3A6: Disc, Track, Time, Status)                         |
-|   6. Master Volume & Tone Adjustment Parser (0x1A5 & 0x1E5)                             |
-|   7. State Cache & Rate-Limited Serial Dispatcher                                       |
-+-----------------------------------------------------------------------------------------+
-                                             │
-                        Hiworld UART Protocol (38,400 baud, 8N1)
-                                             │
-      ┌───────────────────┬───────────────────┴───────────────────┬───────────────────┐
-      ▼                   ▼                                       ▼                   ▼
-+───────────────────+ +──────────────────────────+   +──────────────────────────+   +──────────────────────────+
-| Cmd 0x84          | | Cmd 0x85                 |   | Cmd 0x86 (RadioTextInfo) |   | Cmd 0x97 (CarMediaState) |
-| (CarRadioState)   | | (CarRadioPreFrequency)   |   | Dynamic RDS RadioText    |   | Disc Slot, Loaded Mask,  |
-| Band, Freq, Preset| | Preset 1..6 Frequencies  |   | String (Song / Artist)   |   | Track uint16, MM:SS,     |
-| RDS, PS Name      | | or 6x8-ASCII Names       |   | (Routes to tv_radio_text)|   | Play State, Total uint16 |
-+───────────────────+ +──────────────────────────+   +──────────────────────────+   +──────────────────────────+
-```
-
 ---
 
 ## 2. PSA CAN Bus Ground Truth Specifications
@@ -772,3 +734,386 @@ The following edge cases and protocol interactions require bench testing with ph
 5. **Head Unit Auto-Switch Debounce Window:**
    - When switching radio presets rapidly, `0x225` frequency frames may arrive before `0x2A5` station name frames.
    - *Manual Check:* Verify whether debouncing `Cmd 0x84` transmission by 50–100 ms prevents empty/stale station name rendering on the Android screen during fast manual seeking.
+
+---
+
+# Peugeot RD4 CD Player & CD Changer (CDC) Firmware Uplink Specification
+
+## Document Target: CAN Box Firmware Developer & Firmware AI Agents
+**Applicable Vehicle Platforms:** PSA Peugeot 407, 307, 207, 308, 607, 807, Citroën C4, C5 (RD4 Audio Architecture)  
+**Target Head Unit Application:** `com.qf.vehicle.activities.OriginalMediaPlayer` ("Car CD" UI)  
+**Target Hardware Protocol:** Hiworld PSA CAN Box UART Protocol (38400 baud, 8N1)  
+**Reference Codebase:** `QF_Canbus_system` (`PeugeotDataParser.smali`, `OriginalMediaPlayer.smali`, `CarMediaState.smali`)
+
+---
+
+## 1. Architectural Overview
+
+In PSA vehicles equipped with the RD4 audio system, CD audio playback is handled either by the **single internal in-dash CD drive** inside the RD4 head unit, or by an **optional external 6-disc CD Changer (CDC)** (typically manufactured by Blaupunkt/Clarion and mounted in the glovebox or boot).
+
+The CAN Box MCU sits between the vehicle's low-speed body CAN network (**CAN-CONFORT at 125 kbps**) and the Android Head Unit (connected via **UART serial at 38400 baud**).
+
+```
+ +-------------------------------------------------------+
+ |                 PSA Vehicle Bus (125 kbps)            |
+ |                                                       |
+ |   [RD4 In-Dash CD / External 6-Disc CDC]              |
+ |          |                                            |
+ |          | CAN 0x165 (RD4 Audio Source: 0x2 = CD)     |
+ |          | CAN 0x365 (CD Disc Info: Total Tracks)     |
+ |          | CAN 0x3A5 (CD Track & Playback Elapsed)    |
+ |          | CAN 0x325 (CD Drive / Tray Mechanism)      |
+ |          | CAN 0x3A6 (Optional 6-Disc CDC Telemetry)  |
+ |          | CAN 0x0A4 (CD-Text & MP3 ID3 Tags)         |
+ +----------|--------------------------------------------+
+            v
+ +-------------------------------------------------------+
+ |             CAN Box MCU (Firmware Agent)              |
+ |  - Reads CAN-CONFORT frames                           |
+ |  - Tracks CD playback state machine                   |
+ |  - Packages data into Hiworld UART frames             |
+ +-------------------------------------------------------+
+            |
+            | UART Serial (38400 baud, 8N1)
+            | Cmd 0x97 (CarCdPlayInfo: Disc, Track, Time, Status)
+            | Cmd 0x84 (Audio Source: 0x30 = CD, 0x31 = CDC)
+            v
+ +-------------------------------------------------------+
+ |         Android Head Unit (com.qf.vehicle)            |
+ |                                                       |
+ |   PeugeotDataParser -> CarMediaState                  |
+ |          |                                            |
+ |          v                                            |
+ |   OriginalMediaPlayer (media_player.xml)              |
+ |   - Active Disc & Track (e.g. "5/18")                 |
+ |   - Elapsed Duration (e.g. "02:35")                   |
+ |   - Status: "Play", "Pause", "Loading", "Eject"       |
+ |   - 6 Disc Magazine Slot Statuses (In/Out/Play)       |
+ +-------------------------------------------------------+
+
++------------+------------+------------+------------+-----------------------+------------+
+| SYNC 1     | SYNC 2     | LENGTH     | CMD        | DATA PAYLOAD (11 B)   | CHECKSUM   |
+| 0x5A       | 0xA5       | 0x0B       | 0x97       | Data[0] .. Data[10]   | CS         |
++------------+------------+------------+------------+-----------------------+------------+
+smali
+invoke-static {p1, v1, 2, true}, Lcom/qf/vehicle/utils/JavaDecodeUtil;->byteArrToInt([BIIZ)I
+
+                       +------------------------------+
+                       | User Presses SOURCE -> CD    |
+                       +------------------------------+
+                                      |
+                 +--------------------+--------------------+
+                 |                                         |
+                 v                                         v
+   +---------------------------+             +---------------------------+
+   |   Hiworld Frame Cmd 0x84  |             |   Hiworld Frame Cmd 0x97  |
+   |   Audio Source Frame      |             |   Media Playback Frame    |
+   +---------------------------+             +---------------------------+
+   | Data[0] = 0x30 (CD)       |             | Data[0]  = 0x01 (Disc 1)  |
+   | Data[1..2] = 0x0000       |             | Data[1]  = 0x01 (Present) |
+   | Data[3] = 0x00            |             | Data[3..4] = 0x05, 0x00   |
+   | Data[5] = 0x01 (Power On) |             | Data[5..6] = 0x02, 0x23   |
+   | Data[6..13] = "CD      "  |             | Data[8]  = 0x02 (Play)    |
+   +---------------------------+             +---------------------------+
+c
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define HIWORLD_SYNC_1          0x5A
+#define HIWORLD_SYNC_2          0xA5
+#define HIWORLD_CMD_CD_PLAY     0x97
+#define HIWORLD_CMD_AUDIO_SRC   0x84
+
+/* Playback Status Codes for Cmd 0x97 Data[8] */
+typedef enum {
+    HIWORLD_CD_STATUS_READ    = 0x00,
+    HIWORLD_CD_STATUS_PAUSE   = 0x01,
+    HIWORLD_CD_STATUS_PLAY    = 0x02,
+    HIWORLD_CD_STATUS_FF      = 0x03,
+    HIWORLD_CD_STATUS_STOP    = 0x06,
+    HIWORLD_CD_STATUS_EJECT   = 0x0C,
+    HIWORLD_CD_STATUS_LOADING = 0x0D,
+    HIWORLD_CD_STATUS_ERROR   = 0x0E
+} hiworld_cd_status_t;
+
+/* Playback Mode Flags for Cmd 0x97 Data[7] */
+#define HIWORLD_CD_MODE_SCAN_TRACK    (1 << 7)
+#define HIWORLD_CD_MODE_SCAN_DISC     (1 << 6)
+#define HIWORLD_CD_MODE_REPEAT_TRACK  (1 << 5)
+#define HIWORLD_CD_MODE_REPEAT_DISC   (1 << 4)
+#define HIWORLD_CD_MODE_RANDOM_TRACK  (1 << 3)
+#define HIWORLD_CD_MODE_RANDOM_DISC   (1 << 2)
+
+/**
+ * Calculates the standard Hiworld checksum.
+ * Formula: ((Length + Cmd + sum(Data)) - 1) & 0xFF
+ */
+static uint8_t hiworld_calc_checksum(uint8_t len, uint8_t cmd, const uint8_t *payload) {
+    uint16_t sum = len + cmd;
+    for (uint8_t i = 0; i < len; i++) {
+        sum += payload[i];
+    }
+    return (uint8_t)((sum - 1) & 0xFF);
+}
+
+/**
+ * Builds a 16-byte Hiworld CD Media Status packet (Cmd 0x97).
+ *
+ * @param out_buf       Output buffer (must be at least 16 bytes).
+ * @param disc_slot     Active disc slot (1..6).
+ * @param loaded_mask   Loaded disc slots bitmask (bit 0 = disc 1, etc.).
+ * @param mp3_mask      MP3 format bitmask (bit 0 = disc 1 is MP3).
+ * @param track_num     Current track (1..999, Little-Endian).
+ * @param minutes       Elapsed minutes (0..59).
+ * @param seconds       Elapsed seconds (0..59).
+ * @param mode_flags    Playback modes (repeat, random, scan).
+ * @param status        Playback status enum (0x02 = Play, 0x01 = Pause, etc.).
+ * @param total_tracks  Total tracks on current disc (1..999, Little-Endian).
+ * @return              Total bytes written (16).
+ */
+int build_hiworld_cd_packet(
+    uint8_t *out_buf,
+    uint8_t disc_slot,
+    uint8_t loaded_mask,
+    uint8_t mp3_mask,
+    uint16_t track_num,
+    uint8_t minutes,
+    uint8_t seconds,
+    uint8_t mode_flags,
+    hiworld_cd_status_t status,
+    uint16_t total_tracks
+) {
+    uint8_t payload[11];
+
+    payload[0]  = disc_slot & 0x0F;
+    payload[1]  = loaded_mask & 0x3F;
+    payload[2]  = mp3_mask & 0x3F;
+    payload[3]  = (uint8_t)(track_num & 0xFF);        /* Little-endian Lo */
+    payload[4]  = (uint8_t)((track_num >> 8) & 0xFF); /* Little-endian Hi */
+    payload[5]  = minutes;
+    payload[6]  = seconds;
+    payload[7]  = mode_flags;
+    payload[8]  = (uint8_t)status;
+    payload[9]  = (uint8_t)(total_tracks & 0xFF);        /* Little-endian Lo */
+    payload[10] = (uint8_t)((total_tracks >> 8) & 0xFF); /* Little-endian Hi */
+
+    out_buf[0] = HIWORLD_SYNC_1;
+    out_buf[1] = HIWORLD_SYNC_2;
+    out_buf[2] = 0x0B;  /* Payload length */
+    out_buf[3] = HIWORLD_CMD_CD_PLAY;
+    memcpy(&out_buf[4], payload, 11);
+    out_buf[15] = hiworld_calc_checksum(0x0B, HIWORLD_CMD_CD_PLAY, payload);
+
+    return 16;
+}
+```
+
+---
+
+## 7. Concrete Wire Frame Examples & Hex Dumps
+
+### Example 1: Single In-Dash CD, Playing Track 5 of 18 at 02:35 (Normal Playback)
+* Disc Slot: `1` (`0x01`)
+* Discs Loaded: Disc 1 Present (`0x01`)
+* Format: Audio CD (`0x00`)
+* Track: `5` &rarr; `0x05 0x00` (`uint16_le`)
+* Elapsed: `2 min 35 sec` &rarr; `0x02 0x23`
+* Mode: Normal (`0x00`)
+* Status: Playing (`0x02`)
+* Total Tracks: `18` &rarr; `0x12 0x00` (`uint16_le`)
+
+**Raw Hex Wire Frame (16 bytes):**
+```
+5A A5 0B 97 01 01 00 05 00 02 23 00 02 12 00 E1
+```
+*Checksum check:* `(0x0B + 0x97 + 0x01 + 0x01 + 0x00 + 0x05 + 0x00 + 0x02 + 0x23 + 0x00 + 0x02 + 0x12 + 0x00) - 1 = 0x0E2 - 1 = 0xE1`.
+
+---
+
+### Example 2: 6-Disc CDC, All Slots Full, Disc 3 Playing Track 12 of 24 at 00:45, Repeat Track Active
+* Disc Slot: `3` (`0x03`)
+* Discs Loaded: Slots 1..6 Full (`0x3F`)
+* Format: Audio CD (`0x00`)
+* Track: `12` (`0x000C`) &rarr; `0x0C 0x00` (`uint16_le`)
+* Elapsed: `0 min 45 sec` &rarr; `0x00 0x2D`
+* Mode: Repeat Track (`0x20` / Bit 5)
+* Status: Playing (`0x02`)
+* Total Tracks: `24` (`0x0018`) &rarr; `0x18 0x00` (`uint16_le`)
+
+**Raw Hex Wire Frame (16 bytes):**
+```
+5A A5 0B 97 03 3F 00 0C 00 00 2D 20 02 18 00 52
+```
+
+---
+
+### Example 3: Single In-Dash CD Paused at 01:10 on Track 2
+* Status: Paused (`0x01`)
+* Track: `2` &rarr; `0x02 0x00`
+* Elapsed: `1 min 10 sec` &rarr; `0x01 0x0A`
+
+**Raw Hex Wire Frame (16 bytes):**
+```
+5A A5 0B 97 01 01 00 02 00 01 0A 00 01 12 00 C2
+```
+
+---
+
+### Example 4: CD Changer Magazine Loading / Changing to Disc 4
+* Disc Slot: `4` (`0x04`)
+* Status: Loading / Changing Disc (`0x0D` &rarr; maps to `"Loading"`)
+
+**Raw Hex Wire Frame (16 bytes):**
+```
+5A A5 0B 97 04 3F 00 01 00 00 00 00 0D 00 00 EA
+```
+
+---
+
+### Example 5: In-Dash CD Ejected / No Disc Present
+* Disc Slot: `1` (`0x01`)
+* Discs Loaded: `0` (`0x00`)
+* Status: Eject (`0x0C`)
+
+**Raw Hex Wire Frame (16 bytes):**
+```
+5A A5 0B 97 01 00 00 00 00 00 00 00 0C 00 00 BE
+```
+
+---
+
+### Example 6: Ground Truth Vehicle Log Vector (`dump_2026-10-10_11-12-22.log`)
+* Context: RD4 Single In-Dash CD, Track 3 of 12, 03:12 Elapsed, Playing:
+  - CAN `0x165` (dlc 4): `C8 C0 20 00` &rarr; Source `0x2` (Internal CD)
+  - CAN `0x365` (dlc 5): `0C 26 02 00 00` &rarr; Total Tracks = 12 (`0x0C`)
+  - CAN `0x3A5` (dlc 6): `03 03 19 03 0C 00` &rarr; Track 3, Playing, 03 min 12 sec
+* Disc Slot: `0` (`0x00` - single drive)
+* Discs Loaded: `0` (`0x00` - no changer magazine)
+* Format: Audio CD (`0x00`)
+* Track: `3` &rarr; `0x03 0x00` (`uint16_le`)
+* Elapsed: `3 min 12 sec` &rarr; `0x03 0x0C`
+* Modes: Intro/Repeat/Random OFF &rarr; `0x00`
+* Status: Playing (`0x02`)
+* Total Tracks: `12` &rarr; `0x0C 0x00` (`uint16_le`)
+
+**Raw Hex Wire Frame (16 bytes):**
+```
+5A A5 0B 97 00 00 00 03 00 03 0C 00 02 0C 00 C1
+```
+*Checksum check:* `(0x0B + 0x97 + 0x00 + 0x00 + 0x00 + 0x03 + 0x00 + 0x03 + 0x0C + 0x00 + 0x02 + 0x0C + 0x00) - 1 = 0x0C2 - 1 = 0xC1`.
+
+---
+
+## 8. Timing, Rate Limiting & Transmission Policy
+
+1. **Periodic Refresh:**
+   * When CD audio is actively playing, transmit `Cmd 0x97` once per second (`1.0 Hz`) to increment the elapsed seconds display on the Head Unit.
+2. **Immediate Event-Driven Dispatch:**
+   * Transmit `Cmd 0x97` **immediately** upon detecting:
+     * Track Skip (Next / Prev track button pressed).
+     * Play/Pause toggle.
+     * Disc selection change.
+     * Disc eject or insertion.
+3. **Audio Source Switching:**
+   * When switching to CD mode:
+     1. Transmit `Cmd 0x84` with `Data[0] = 0x30` (or `0x31`) and `station = "CD      "`.
+     2. Wait 50 ms.
+     3. Transmit `Cmd 0x97` with current playback state.
+
+---
+
+## 9. Testing & Validation Workflow
+
+### 9.1 Using the Python Test Tool (`send_peugeot_radio.py`)
+
+The test suite includes `scenarios/send_peugeot_radio.py` configured to transmit CD frames:
+
+```bash
+# 1. Inspect raw hex bytes without hardware (Dry-run):
+python3 scenarios/send_peugeot_radio.py \
+  --dry-run \
+  --cdc \
+  --cdc-disc 1 \
+  --cdc-track 5 \
+  --cdc-min 2 \
+  --cdc-sec 35 \
+  --cdc-total 18 \
+  --cdc-status 2
+
+# 2. Transmit to physical Head Unit over USB-UART:
+python3 scenarios/send_peugeot_radio.py \
+  --port /dev/ttyUSB0 \
+  --baud 38400 \
+  --cdc \
+  --cdc-disc 1 \
+  --cdc-track 5 \
+  --cdc-min 2 \
+  --cdc-sec 35 \
+  --cdc-total 18 \
+  --cdc-status 2
+
+# 3. Simulate CDC with 6 loaded discs and Track 12 playing:
+python3 scenarios/send_peugeot_radio.py \
+  --port /dev/ttyUSB0 \
+  --cdc \
+  --cdc-disc 3 \
+  --cdc-discs-mask 0x3F \
+  --cdc-track 12 \
+  --cdc-min 0 \
+  --cdc-sec 45 \
+  --cdc-total 24 \
+  --cdc-status 2
+
+# 4. Transmit via ADB shell injection:
+python3 scenarios/send_peugeot_radio.py \
+  --adb \
+  --adb-device-port /dev/ttyS1 \
+  --cdc \
+  --cdc-disc 1 \
+  --cdc-track 5 \
+  --cdc-min 2 \
+  --cdc-sec 35 \
+  --cdc-total 18 \
+  --cdc-status 2
+```
+
+### 9.2 Android Logcat Verification
+Monitor how `com.qf.vehicle` parses and routes the incoming frame:
+
+```bash
+adb logcat -v time -s PeugeotDataParser:D CarDataChannel:D OriginalMediaPlayer:D
+```
+
+Expected log output on valid packet reception:
+```text
+PeugeotDataParser: parseCarMediaState: disc=1, track=5/18, time=02:35, status=3
+OriginalMediaPlayer: updateMedia: track=5/18, duration=02:35, workMode=Play
+```
+
+---
+
+## 10. Summary Checklist for Firmware Developers
+
+- [ ] **Baud Rate:** Set UART to `38400 baud`, 8 data bits, no parity, 1 stop bit (`8N1`).
+- [ ] **Frame Opcode:** Use `0x97` with `LEN = 0x0B` (total wire length: 16 bytes).
+- [ ] **Endianness Check:** Ensure Track Number (`Data[3..4]`) and Total Tracks (`Data[9..10]`) are **Little-Endian (`uint16_le`)**.
+- [ ] **Play Status Value:** Send `0x02` for **Play**, `0x01` for **Pause**, `0x06` for **Stop**, `0x0D` for **Loading**.
+- [ ] **Source Pairing:** Pair CD status with `Cmd 0x84` (`0x30` for internal CD, `0x31` for external CDC).
+- [ ] **Single CD Drive Handling:** For internal CD drive, set `Data[0] = 0x01` and `Data[1] = 0x01` (or `0x00` when ejected).
+- [ ] **Rate Limiting:** Transmit 1 Hz periodic during active playback, plus immediately on event changes.
+
+---
+
+## 11. Passive CD Monitoring vs. Active Virtual CDC Emulation
+
+This document specifies the **passive uplink monitoring** of the OEM Peugeot RD4 in-dash CD drive and factory CD Changer:
+- In-dash CD drive mechanism: CAN `0x325` (disc tray presence)
+- In-dash CD track count: CAN `0x365` (total tracks, MP3 flags)
+- In-dash CD playback progress: CAN `0x3A5` (track number, elapsed mm:ss, playback status)
+- Factory CDC telemetry: CAN `0x3A6` (6-disc slot statuses)
+
+When an aftermarket Android Head Unit wishes to **actively emulate a CD Changer** to route Android audio into the factory RD4 via Quadlock Connector Part B (Pins 4, 10, 11) without physical CDs, refer to the dedicated specification:
+👉 **[CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md](CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md)**
+
+The Virtual CDC engine acts as an active Blaupunkt CDC node transmitting CAN `0x162`, `0x1A2`, `0x1E2`, `0x1A0`, `0x0E2`, `0x531`, processing `0x131` from the RD4, handling downlink controls (`Cmd 0xAD`), and automatically pulsing the virtual COM2000 stalk (`0x21F`) to switch audio sources.

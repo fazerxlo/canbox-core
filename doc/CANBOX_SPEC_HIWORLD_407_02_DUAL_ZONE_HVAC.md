@@ -19,29 +19,6 @@ The Peugeot 407 automatic climate control system drives three CAN frames on the 
 
 The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x8A`) to inject corresponding control frames back to the vehicle.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 HVAC Electronic Unit                           |
-|       [Driver/Pass Temps, 8-Speed Fan, Dual/Mono, Auto, AQS, Air Distribution]     |
-|         [Panel State (0x1D0), EMF Display (0x1E3), Compressor State (0x12D)]       |
-+------------------------------------------------------------------------------------+
-                         │ (Uplink 0x1D0 / 0x1E3)   ▲ (Downlink Overrides)
-                         ▼                          │
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Parses CAN 0x1D0 (Modes: 0x08 Auto, 0x28 Manual, 0x19 Demist, 0xA8 Standby)  |
-|   2. Converts Peugeot 23-step Temp Index (0..22) to 0.5 deg C units / LO / HI      |
-|   3. Serializes Hiworld 0x31 HVAC telemetry for Android popup bar                  |
-|   4. Decodes Android touch adjustments (Cmd 0x3B) -> CAN requests                  |
-+------------------------------------------------------------------------------------+
-                         │ (UART Telemetry)         ▲ (UART Commands)
-                         ▼                          │
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Climate Overlay / App                         |
-|     (Displays popup bar on HVAC change; accepts user touch input adjustments)      |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
@@ -52,41 +29,6 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 - **Note on DLC:** The RT4 re-emits `0x1D0` toward the Climate ECU as a 7-byte *demand* frame. The 8-byte format described here is the *panel broadcast* direction verified on the bench.
 - **Standby Frame (Ignition ON, Fan=0):** `A8 00 0F 00 00 <TempLeft> <TempRight> 00`
 - **Active Byte Layout:**
-
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Value / Encoding Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | 7..0   | Climate Mode Flags                 | 0x08 = AUTO mode            |
-|        |        |                                    | 0x28 = Manual mode (0x08|0x20)|
-|        |        |                                    | 0x19 = Front Demist active  |
-|        |        |                                    |   (bench-verified panel     |
-|        |        |                                    |    broadcast encoding;      |
-|        |        |                                    |    RT4 demand uses 0x80)    |
-|        |        |                                    | 0xA8 = Standby (System Off) |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | 7..0   | Constant Padding                   | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | 3..0   | Fan Speed Raw Nibble               | 0x0F = Off / Standby        |
-|        |        |                                    | 0x00..0x07 = Fan Levels 1..8|
-|        |        |                                    |   (bench-verified 8-speed;  |
-|        |        |                                    |    RT4 demand: 7 speeds +   |
-|        |        |                                    |    0xF = Max)               |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | 7..4   | Left Zone Air Distribution Code    | See Air Distribution Table  |
-|        | 3..0   | Right Zone Air Distribution Code   | See Air Distribution Table  |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | Bit 5  | Explicit Intake Fresh Air          | 1 = Forced Fresh Air (0x20) |
-|        | Bit 4  | Cabin Air Recirculation (Recycle)  | 1 = Cabin Recirc (0x10)     |
-|        | Bit 0  | Rear Screen / Mirror Demist        | 1 = Rear Demist Active      |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 5 | 7..0   | Driver Zone Temperature Index      | Index 0..22 (See Temp Table)|
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 6 | 7..0   | Passenger Zone Temperature Index   | Index 0..22 (See Temp Table)|
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 7 | 7..0   | Reserved Padding                   | Always 0x00                 |
-+--------+--------+------------------------------------+-----------------------------+
-```
 
 ### 2.2 Temperature Index Table (`0x1D0` Bytes 5 & 6)
 | Index | Display | Raw Android Celsius | Index | Display | Raw Android Celsius |
@@ -119,7 +61,6 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 | `0x04` | **Bi-level** (Screen + Feet) | `12` | Windshield + Floor |
 | `0x05` | **Face + Feet** (Vents + Footwell) | `5` | Face + Floor |
 
-
 ---
 
 ### 2.4 PSA Climate EMF / Display State Frame (`0x1E3`)
@@ -128,39 +69,6 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 - **Standby Frame (Ignition ON, Climate Off):** `1C 40 0B 0B 00 00 0F 00`
 
 **Active Byte Layout:**
-
-```
-+--------+--------+------------------------------------+------------------------------+
-| Byte   | Bit    | Signal Name                        | Value / Encoding             |
-+--------+--------+------------------------------------+------------------------------+
-| Byte 0 | Bit 7  | RECIRC_STATUS (Recirculation)      | 1 = Cabin recirc active      |
-|        | Bit 4  | AQS_AUTO_INTAKE                    | 1 = Auto Air Intake (AQS)    |
-|        |        |                                    |   (bench-verified; 0x15=Auto |
-|        |        |                                    |    intake, 0x05=Fresh,       |
-|        |        |                                    |    0x85=Recirc)              |
-|        | Bit 3  | AUTO_BLOWER (both bits 3+2 = AUTO) | 0x0C = AUTO mode active      |
-|        | Bit 2  | BASELINE_FLAG / DISTRIBUTION       | Always 1 (0x04) in dual setup|
-|        | Bit 1  | INTAKE_NOTIFY (one-shot)           | 1 = MFD popup trigger pulse  |
-|        | Bit 0  | DUAL_ACTIVE                        | 1 = Dual-zone independent    |
-+--------+--------+------------------------------------+------------------------------+
-| Byte 1 | Bit 7  | UNFROST_FRONT                      | 1 = Front demist active      |
-|        | Bits 5..4 | Baseline flags                  | Always 0x30 (0x20 | 0x10)   |
-+--------+--------+------------------------------------+------------------------------+
-| Byte 2 | 4..0   | DISPLAY_TEMP_L (Driver)            | 0x00=LO, 0x01..0x15=14.5°C  |
-|        |        |                                    |   ..27°C (14.0+raw×0.5),    |
-|        |        |                                    |   0x16=HI                   |
-|        | 7..5   | STATUS_BITS (clim.bits)            | Upper-nibble diagnostic flags|
-+--------+--------+------------------------------------+------------------------------+
-| Byte 3 | 7..0   | DISPLAY_TEMP_R (Passenger)         | Same encoding as Byte 2      |
-+--------+--------+------------------------------------+------------------------------+
-| Byte 4 | 7..4   | AIR_FLOW_L (Driver distribution)   | See Air Distribution Table   |
-+--------+--------+------------------------------------+------------------------------+
-| Byte 5 | 7..4   | AIR_FLOW_R (Passenger distribution)| See Air Distribution Table   |
-+--------+--------+------------------------------------+------------------------------+
-| Byte 6 | 3..0   | DISPLAY_FAN_BARS                   | 0x0F = Off, 0x00..0x07 =    |
-|        |        |                                    |   Fan Levels 1..8            |
-+--------+--------+------------------------------------+------------------------------+
-```
 
 **Byte 0 mode bit combinations (bench-verified):**
 

@@ -22,31 +22,6 @@ In Peugeot 407 (PSA CAN2004 architecture), engine telemetry, odometer readings, 
 
 The CAN box translates these parameters into Hiworld trip computer packets (`Cmd 0x13`, `0x14`, `0x15`) and accepts touchscreen trip reset commands from the Android system to clear Trip 1 or Trip 2.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 BSI & Engine Management                        |
-|        [BSI Slow Data (0x0F6), Power/Ignition (0x036), Trip Metrics (0x221)]       |
-|        [Fast Dynamics (0x0B6), Historical Trip1 (0x2A1), Historical Trip2 (0x261)]  |
-+------------------------------------------------------------------------------------+
-                                          │
-                  [PSA CAN 0x0B6 / 0x0F6 / 0x221 / 0x2A1 / 0x261]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Extracts Coolant Temp, Ambient Temp, Reverse from 0x0F6                       |
-|   2. Decodes RPM and Vehicle Speed from 0x0B6                                      |
-|   3. Translates trip data to Hiworld 0x13 (Instant/DTE), 0x14 (Trip1), 0x15 (Trip2)|
-|   4. Dispatches BSI Personalization & Trip computer pages                          |
-+------------------------------------------------------------------------------------+
-                                          │
-                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Vehicle Info & Dashboard App                  |
-|          (Displays live digital gauges, trip graphs, and outside temperature)      |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
@@ -363,4 +338,3 @@ static inline void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t
 - **Decoded Values:**
   - RPM: `(0x1900 >> 3) = 6400 >> 3 = 800 rpm`
   - Speed: `0x03E8 / 100 = 1000 / 100 = 10 km/h`
-

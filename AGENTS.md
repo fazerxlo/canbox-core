@@ -1,232 +1,47 @@
 # AI Agent Workflow Guidelines: OpenCanbox Core
 
-You are acting as an embedded systems software engineer specializing in automotive firmware, CAN bus reverse engineering, and bare-metal/portable C99 development.
+Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps)** to **Hiworld Android Head Unit (`0x5A 0xA5`, 38,400 baud 8N1)**.
 
 ---
 
-## 1. Token & Tool Call Efficiency (Fast-Path Execution Rules)
+## 1. Fast-Path Token Efficiency Rules
 
-To complete tasks rapidly with minimal token and tool-call overhead:
-
-1. **Silent PlatformIO Builds (`-s`):**
-   - Always run firmware builds with `-s` (`--silent`): `~/.platformio/penv/bin/pio run -s -e stm32_cbox` and `~/.platformio/penv/bin/pio run -s -e esp32_cbox`.
-   - Suppresses voluminous object file compilation chatter (saving 5,000–10,000 tokens per build cycle). Only compiler warnings and errors are streamed into context.
-2. **Surgical Edits vs. Full Block Replacements:**
-   - In `replace_file_content`, target only the exact lines, variables, or function signatures needing modification rather than wrapping entire multi-hundred-line functions into the replacement block.
-   - When extracting or decoupling modules, create fresh files using `write_to_file` instead of generating massive replacement diffs inside monolithic files.
-3. **Targeted Line-Number Discovery via Grep (No Speculative Reading):**
-   - Use `grep -n` or `rg -n` first to locate exact symbol line ranges before calling `view_file` or `replace_file_content`, rather than executing multiple speculative `view_file` scrolling calls across large files.
-4. **Filtered Test Iteration (`-f`), Full Suite on Gate Only:**
-   - During code iteration, run only the targeted test suite using `./tools/test_fast.sh [-f <filter>]` (e.g. `./tools/test_fast.sh -f test_peugeot_407`).
-   - Run the full 4-target verification suite via `./tools/verify_all.sh` once at the end of the phase.
-5. **Large-Window File Reads (No Micro-Slicing):**
-   - `view_file` supports up to **800 lines per call**. Read 300–800 lines in a single call rather than chaining multiple 20–50 line reads across the same file.
-6. **Parallel Tool Call Batching:**
-   - Always batch independent `view_file`, `replace_file_content`, or command calls in parallel within a single turn rather than issuing them sequentially one per turn. Emitting multiple tool calls in one turn avoids repeated full-context-window billing for intermediate turns.
-7. **Log-Fix Short-Circuit (`[APP_UART_TX]` Awareness):**
-   - When the user provides an E2E dump log (`dump_*.log`) **and** explicitly states the required fix rule (e.g., *"When RD4 radio is off, do not send CD/Tuner frames"*), extract only the relevant `[CAN_RX]` test vectors from the log and proceed directly to code implementation.
-   - Remember that `[APP_UART_TX]` in bench/vehicle logs is emitted by the *firmware binary flashed on the MCU at capture time* (which may be an older build), not necessarily the current local source code. Never spend tool calls hunting through local C files to explain historical `[APP_UART_TX]` anomalies if the current code path is already clear.
-8. **PSA Architecture & Decoder Map (Skip Exploratory Grepping):**
-   - `src/profiles/profile_psa.c`: Pure declarative CAN ID routing table (`s_psa_rules[]`) and power/ignition synthesis (`0x036`, `0x0F6`), dispatching frames to profile handlers.
-   - `src/profiles/peugeot_407.c`: Pure Layer 2 CAN2004 decoders (`psa_*_decode_frame()`, `psa_*_process_can_*`). Mutates canonical data sub-structs and flags `state->dirty.*`. CAN `0x165` is the sole authority over `state->media.radio` power (`power_status`), presence (`present`), sleep (`sleep`), and active source (`source_mode`).
-   - `src/protocols/hiworld_psa_builders.c` / `raise_psa_builders.c`: Pure Layer 5 protocol wire builders (`build_hiworld_*`, `build_raise_*`).
-   - `src/core/can_router.c`: Handles delta detection (`state->dirty.*` and `memcmp` over pure canonical data structs) in `can_router_process_can()` and the 60-second periodic resync in `can_router_periodic_100ms()`.
-9. **State-Machine-First Design (No Ad-Hoc Boolean Patching):**
-   - For stateful subsystems (RD4 `source_mode`, HVAC flap/AQS modes, DSP menu activity), define a clean `(Current State, Event) -> Next State & Serial Action` transition rule upfront rather than adding extra boolean flags across layers.
-   - Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) always cache their data into `state->media` without turning the radio ON or overwriting `source_mode == 0xFF` (`OFF`) or `>= 0x20` (`AUX`/`CD`/`CDC`).
-   - `can_router.c` dispatches `0x84`/`0x85`/`0x86`/`0x97` strictly based on `source_mode` (`< 0x20` Tuner, `0x20..0x21` AUX, `0x30..0x31` CD/CDC, `0xFF` one-shot OFF).
-10. **ESP-IDF Source Registration (`src/CMakeLists.txt` Awareness):**
-   - ESP32 uses ESP-IDF CMake (`src/CMakeLists.txt`), which explicitly enumerates all C source files under `src/`.
-   - Whenever creating a new `.c` source file, immediately register it in `src/CMakeLists.txt` in the same turn to prevent `esp32_cbox` linking failures (`undefined reference`).
-11. **Type & Struct Pre-Verification (First-Pass Header Correctness):**
-   - Before adding `#include` directives or referencing domain types (e.g. `hvac_state_t`, `canbox_tpms_state_t`), run `grep -rn "typedef struct <Name> include/"` to identify the authoritative header instead of guessing.
-12. **Mass Prune & Rename Optimization (Scripts vs Repetitive Tool Diffs):**
-   - When extracting code, deleting large blocks (>30% of file lines), or renaming/removing symbols across 3+ files, use a shell/python one-liner via `run_command` (e.g. `python3 -c ...` or `sed -i ...`) rather than chaining 5+ sequential `replace_file_content` tool calls. This saves thousands of output and input tokens.
-13. **Compact Test Output & Single Verification Gate (`tools/test_fast.sh` & `tools/verify_all.sh`):**
-   - Use `./tools/test_fast.sh` for instant, compact test output during code iteration.
-   - Run the multi-target `./tools/verify_all.sh` gate **strictly once** before completing tasks.
-   - **Never re-run `verify_all.sh` after documentation edits:** Markdown changes (`doc/*.md`) cannot break C builds; do not waste token-heavy build cycles re-verifying docs.
-14. **Milestone Context Compaction (`/compact`):**
-   - After completing major architectural milestones or multi-turn refactoring tasks, recommend or use `/compact` to summarize history and reclaim context tokens.
-15. **Spec-Implementation Fast Path (Zero Re-Exploration & Aggressive Tool Batching):**
-   - When asked to implement a specific `doc/*_SPEC.md` specification:
-     - **Direct Blueprint Ingestion:** The spec is authoritative and already defines target CAN IDs, byte positions, UART framing, and affected files. Strictly forbid exploratory grep searches (`grep -rn "0x..."`) for items documented in the spec.
-     - **Parallel Batch Reads:** In Turn 1, read all relevant headers, implementations, and test files in parallel (using `view_file` up to 800 lines) instead of chaining sequential reads.
-     - **Parallel Batch Edits:** Batch code changes across all layers in a single turn.
-     - **Unified Test & Doc Updates:** Write test implementations, runner registrations, and specification updates in a single wrap-up turn to minimize context re-billing.
+1. **Silent Builds (`-s`):** Always pass `-s` to PlatformIO builds: `~/.platformio/penv/bin/pio run -s -e stm32_cbox`.
+2. **Surgical Edits & Batching:** Target only exact changed lines in `replace_file_content`. Batch independent `view_file` (up to 800 lines/call), `replace_file_content`, and command calls in parallel in a single turn.
+3. **Grep Line Discovery:** Use `grep -n` to locate line numbers before reading/editing; check `grep -rn "typedef struct <Name> include/"` before guessing headers.
+4. **Scripted Mass Edits:** Use Python/shell one-liners via `run_command` when refactoring across 3+ files or pruning >30% of a file.
+5. **Test Fast, Gate Once:** Iterate with `./tools/test_fast.sh` (or `./tools/test_fast.sh -e integration_test`). Run `./tools/verify_all.sh` **strictly once** at task completion. Never re-run C builds after editing `*.md` docs.
+6. **Log-Fix Short-Circuit:** When given `dump_*.log` + an explicit user rule, extract only `[CAN_RX]` test vectors and implement directly. Note: `[APP_UART_TX]` in logs reflects the binary flashed at capture time, not necessarily current local source.
+7. **ESP-IDF Registration:** Always register new `src/**/*.c` files in `src/CMakeLists.txt` in the same turn.
+8. **Spec Implementation Fast Path:** Treat user specs (`doc/CANBOX_SPEC_*.md`) as pre-verified ground truth. Do not run exploratory greps or subagent audits on documented bitfields/formulas. Read headers/sources/tests in parallel (Turn 1), batch all code edits (Turn 2), and batch test + doc updates (Turn 3).
 
 ---
 
-## 2. Operating Boundaries & Strict Constraints
+## 2. Architecture & Domain Map
 
-* **Pure C99 Only:** All core logic (`src/core/`, `src/protocols/`, `src/profiles/`) must compile under `-std=c99 -Wall -Wextra -Werror` with zero heap allocation (`malloc`, `calloc`, `free` are strictly banned).
-* **Zero MCU Leakage:** Never import MCU-specific headers (`Arduino.h`, `stm32f1xx.h`, `driver/twai.h`, `NUC131.h`) inside `src/core/`, `src/protocols/`, or `src/profiles/`. Hardware access must occur strictly through `include/hal/*.h`.
-* **Lock-Free SPSC:** All producer-consumer queues must use power-of-two capacities and the bitwise-masked `ring_buffer_t` implementation. Never introduce mutexes or RTOS primitives into the core layer.
-* **Non-Destructive Testing:** Never write code that blocks indefinitely (`while (!flag);`) in common paths unless running inside hardware-specific HAL drivers. Desktop targets must run non-blocking loops.
-* **Boundary & Arithmetic Safety:** Always boundary-check `frame->dlc` prior to array indexing. Unpack multi-byte integers using `read_be16()`, `read_le16()`, `read_be32()`, or `read_le32()` helpers; never cast byte pointers directly to multi-byte structures.
-* **Pre-Verified Ground Truth (Zero Token Waste / No Re-validation):** All vehicle documentation, CAN signal definitions, protocol mappings, formulas, and test data provided by the user (or generated by upstream documentation agents in `doc/` or prompts) are **pre-verified and authoritative ground truth**. The AI must **NOT** spend tokens or tool calls auditing, fact-checking, cross-referencing against external/legacy sources, or re-verifying this data. Accept provided specifications directly and proceed immediately to implementation.
-* **Clarification Only on Blocking Concerns:** If (and only if) there is an explicit contradiction, ambiguity, or missing critical parameter that blocks writing working C code, ask the user a direct, concise question. Do NOT run deep exploratory search loops or second-guess the provided specs.
-* **Strict CAN2004 Proven Data Only (Zero Guesses / Zero Unverified Placeholders):** The primary target vehicle architecture is Peugeot 407 (PSA CAN2004 / AEE2004 Comfort Bus @ 125 kbps). Never guess signals, never implement speculative placeholder decoders, and never import or mix CAN2010 / AEE2010 signal definitions (such as radar on `0x260`/`0x270` or unconfirmed SAS frames). If a CAN frame or signal mapping is not explicitly provided in the user's documented specs, mark it as pending in `doc/TODO_PROGRESS.md` and DO NOT write decoder code for it.
-* **Path Privacy in Documentation:** Never include absolute system paths (e.g. `/home/...` or `file:///home/...`) in documentation files (`doc/*.md` or markdown files). Use relative repository paths for internal files. For external files outside the workspace, only reference the filename or class name without local paths or links.
-* **Progress Table Updates (`doc/TODO_PROGRESS.md` — On Feature / Command Changes Only):** Update `doc/TODO_PROGRESS.md` when a feature status changes (`[ ]` -> `[-]` -> `[x]`), or when a new protocol command or CAN ID is added. Skip updating `doc/TODO_PROGRESS.md` for internal code refactors or bug fixes that do not change feature completion status. When updating:
-  - Update the feature row in Section 3 (Master Command Implementation Matrix) and recalculate Section 2 overview counts if status changed.
-  - Put detailed bitfield/protocol notes in the dedicated `doc/CANBOX_SPEC_HIWORLD_407_<TOPIC>.md` file rather than duplicating prose in `doc/TODO_PROGRESS.md`.
-  - Ensure the tracker stays strictly Hiworld PSA Peugeot 407 specific (no Raise, Bagoo, VAG, or unverified CAN2010 definitions).
+| Layer | Files | Responsibility |
+| :--- | :--- | :--- |
+| **L1: HAL** | `include/hal/*.h`, `src/hal/` | Hardware abstraction (`hal_can`, `hal_uart`, `hal_gpio`, `hal_system`). Zero MCU headers outside `src/hal/`. |
+| **L2: Profile** | `src/profiles/profile_psa.c`<br>`src/profiles/psa_407_*.c`<br>`src/profiles/psa_virtual_cdc.c` | `s_psa_rules[]` routing table (`profile_psa.c`), CAN2004 decoders (`psa_407_rd4_audio.c`, `psa_407_hvac_body.c`, `psa_407_telemetry.c`, `psa_407_alerts.c`), Virtual CDC (`psa_virtual_cdc.c`). |
+| **L3: Router** | `include/core/can_router.h`<br>`src/core/can_router.c` | $O(1)$ 256-byte CAN ID bitmask filter, `vehicle_state_t` cache, `dirty.*` + `memcmp` delta dispatch, 60s periodic full resync. |
+| **L4/L5: Proto** | `src/protocols/proto_hiworld*.c`<br>`src/protocols/hiworld_*.c` | Hiworld framing (`0x5A 0xA5 <len> <cmd> <payload...> <cs>`, `cs = ((len + cmd + sum) - 1) & 0xFF`), builders (`hiworld_psa_builders.c`), handshake (`hiworld_connection.c`). |
 
-
----
-
-## 3. Standard CLI Build & Verification Commands
-
-Before proposing code changes or completing a task, ensure the change compiles and passes tests on the native host:
-
-* **Fast Compact Test Runner (Recommended for iteration - Zero token bloat):**
-```bash
-./tools/test_fast.sh                        # Run native_test_runner with compact summary
-./tools/test_fast.sh -f test_peugeot_407    # Filtered test execution
-./tools/test_fast.sh -e integration_test    # Run integration suite
-```
-
-* **Full 4-Target Verification Gate (Single command before completing tasks):**
-```bash
-./tools/verify_all.sh
-```
-
-* **Direct PlatformIO Commands (Fallback):**
-```bash
-~/.platformio/penv/bin/pio test -e native_test_runner -f test_protocol_parser
-~/.platformio/penv/bin/pio test -e integration_test -f test_integration
-~/.platformio/penv/bin/pio run -s -e stm32_cbox
-~/.platformio/penv/bin/pio run -s -e esp32_cbox
-```
-
-* **Execute Interactive Desktop Simulator:**
-```bash
-CANBOX_CAN_IFACE="vcan0" ~/.platformio/penv/bin/pio run -e native_test -t exec
-```
-
+### Key State-Machine & Timing Rules
+* **RD4 Audio (`0x165` Authority):** `0x165` owns `present`, `sleep`, `power_status`, and `source_mode` (`<0x20` Tuner, `0x20` CD, `0x31` CDC, `0x40..0x41` AUX, `0xFF` OFF). Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) only update cached fields without turning radio ON or overwriting `source_mode >= 0x20`.
+* **Serial Dispatch Classes (38,400 baud protection):**
+  - **Immediate Event (0 ms cooldown, on change):** Keys (`0x11`, `0x21`), Doors (`0x12`), Radar (`0x41`), Alerts (`0x42`, `0xEA`), Audio/DSP (`0x56`, `0x84`–`0x86`, `0x97`).
+  - **Throttled Fast Telemetry ($\le 10\text{ Hz}$):** SAS steering angle (`0x11` in reverse), speed/RPM.
+  - **State-Cached Subsystem ($\le 2\text{ Hz}$ on change):** HVAC (`0x31`), Trip (`0x13`–`0x15`), TPMS (`0x66`).
+  - **Heartbeat & Resync:** Link ping `0xFF` at $1\text{ Hz}$ (1000 ms); full state resync on `0x24`/`0x30` handshake and every $60\text{ s}$.
 
 ---
 
-## 4. Input Types & Reverse Engineering Interpretation Rules
+## 3. Strict Engineering Boundaries
 
-When implementing functionality, the user will typically provide three sources of information:
-
-### 4.1 PSA CAN2004 Reverse Engineering & Proven Ground Truth (CAN Bus Messages)
-* **User-Provided Documentation is Authoritative Ground Truth (Zero Token Waste):** The user generates documentation and data using dedicated upstream agents. Treat all user-provided documentation, CAN IDs, bit positions, scaling formulas, and serial mappings as 100% pre-verified ground truth. Do NOT spend tokens or invoke subagents to re-verify, audit, or second-guess this data. If an ambiguity or missing parameter is encountered, ask the user directly with a concise question rather than running re-validation loops.
-* **CAN2004 vs CAN2010 Architectural Isolation:** Peugeot 407 operates strictly on PSA CAN2004 (AEE2004 Comfort Bus @ 125 kbps). Never mix CAN2010 / AEE2010 definitions into CAN2004 profile code:
-  - CAN ID `0x0E1` is the native CAN2004 parking radar (AAS) frame.
-  - CAN ID `0x260` on CAN2004 is `MSG_BSI_INF_PROFILS` (BSI User Profiles: Profile 1, Profile 2, Manufacturer; 8 bytes, 250 ms), NOT parking sensors (which only use `0x260` on CAN2010).
-* **Zero Unverified Placeholders:** Never implement placeholder decoders for unconfirmed CAN IDs (e.g. SAS steering angles, ABS pulses as steering). If a frame is unconfirmed, do not implement it in code; keep it marked as pending in `doc/TODO_PROGRESS.md`.
-* **Byte Ordering (Endianness):** PSA CAN frames typically use Motorola (Big-Endian) byte order for multi-byte telemetry (e.g. RPM, speed, mileage, temperatures). Pay strict attention to whether high bits/bytes arrive first.
-* **Bit Offset & Bitfield Indexing:** Disentangle MSB-0 vs LSB-0 numbering. Verify signal bit offsets against known constants (e.g., PSA RPM on `0x0B6` is `(data[0]<<8 | data[1]) >> 3`).
-* **Scale Factors & Offsets:** Watch for common PSA transformations:
-  - Temperature: $T = \text{Raw} - 40^\circ\text{C}$ or $T = \text{Raw} \times 0.5 - 40.0^\circ\text{C}$.
-  - Speed: Raw value scaled by $100$ ($\text{km/h} \times 100$).
-  - Fuel Consumption: $0.1\text{ L/100km}$ units.
-* **Sentinels & Invalid Values:** Handle error states and uninitialized values gracefully (e.g., `0xFF`, `0xFFFF`, or `0xFFFFFF` indicating sensor disconnected, display off, or invalid telemetry). Do not propagate invalid sensor codes as valid zero/extreme values.
-
-### 4.2 Chinese Android APK Reverse Engineering (Head Unit Serial Protocols)
-* **Java Signed Byte Semantics:** Java `byte` is signed (`-128` to `127`). In decompiled code (e.g. `(data[i] & 0xFF)`), always convert to C `uint8_t` to prevent signed sign-extension bugs in bit shifts (`>>`, `<<`).
-* **Protocol Framing & Sync:**
-  - Hiworld: `0x5A 0xA5 <len> <cmd> <payload...> <checksum>` (Additive sum modulo 256: `((len + cmd + sum(payload)) - 1) & 0xFF`).
-  - Raise (RZC): `0x2E <cmd> <len> <payload...> <checksum>`.
-  - Bagoo: `0xD5` / `0xFD` framing.
-* **Command IDs & Payloads:** Extract the target command identifier, byte position offsets, bit masks, and data units.
-* **Uplink vs Downlink Distinction:**
-  - **Uplink (CAN -> HU):** Telemetry status reports, periodic pages, trip computers, radar alerts, air-conditioning status.
-  - **Downlink (HU -> CAN):** User input from Android touchscreen (AC control, trip reset, vehicle personalization settings, time sync).
-
-### 4.3 Test Scripts (Proven Reference Scenarios)
-* **Treat as Ground Truth:** Test scripts provided by the user represent verified, proven scenarios and expected wire frames.
-* **Do Not Rely Only on External Execution:** Convert the proven test script's payloads and scenarios into native C Unity unit tests (`test/unit/`) or integration tests (`test/integration/`) to preserve test repeatability in CI/CD.
-
-
----
-
-## 5. Feature Implementation Lifecycle & AI Interactive Workflow
-
-Whenever a new feature is requested or reverse engineering documentation is provided, adhere to the following streamlined, token-efficient lifecycle:
-
-```
-[Phase 1: Direct Ingestion (Accept User Ground Truth)]
-               │
-               ▼
-[Phase 2: Streamlined Plan / Clarification (On Concerns Only)]
-               │
-               ▼
-[Phase 3: Uplink Implementation Across 5-Layer Core]
-               │
-               ▼
-[Phase 4: Automated C Tests (Based on Proven Scenario)]
-               │
-               ▼
-[Phase 5: Documentation & Progress Updates (doc/CANBOX_SPEC_*.md & doc/TODO_PROGRESS.md)]
-               │
-               ▼
-[Phase 6: Uplink Verified -> Ask User to Proceed with Downlink]
-```
-
-### Phase 1: Direct Ingestion (Accept User Ground Truth)
-Read the user-provided documentation, APK decompiled sources, or test scripts.
-1. **Zero Re-validation:** Do not burn tokens or invoke subagents to cross-check or audit user-provided specs against legacy or external files. Upstream agents already verified them.
-2. Ingest CAN frame IDs, cycle periods, DLC, signal bitfields, protocol command IDs, and conversion formulas directly as authoritative ground truth.
-
-### Phase 2: Streamlined Plan / Clarification (On Concerns Only)
-1. **Do NOT Regurgitate Specifications:** Do not spend tokens reproducing full signal mapping tables if the user or upstream agents already provided the specification. Provide at most a brief, bulleted summary of files to touch and proceed directly to implementation.
-2. **Clarify Only If Blocked:** If (and only if) there is an explicit ambiguity, logical contradiction, or missing parameter that strictly prevents writing working code, ask the user a concise question. Do not pause execution for confirmation if the task requirements are already clear.
-3. **Downlink Scope:** Preview of user commands sent from Android HU to vehicle remains deferred to Phase 6.
-
-### Phase 3: Uplink Implementation Across the 5-Layer Architecture
-Implement the Uplink path strictly traversing the 5 layers:
-* **Layer 1 (HAL):** Ensure CAN reception interface is utilized (`include/hal/hal_can.h`).
-* **Layer 2 (Vehicle Profile Decoder):** Implement or extend the car decoder (e.g. `src/profiles/peugeot_407.c`). Unpack CAN frames safely, apply scaling, check boundary conditions, and update the canonical state.
-* **Layer 3 (CAN Router & Canonical State Cache):** Store normalized data in the vehicle state structures (`include/core/canbox_state.h`, `src/core/can_router.c`). Always normalize to canonical units (e.g., standard degrees Celsius, km/h, RPM) before protocol serialization.
-* **Layer 4 (Protocol Driver Interface):** Define or hook into driver function pointers in `include/protocols/hu_protocol_driver.h`.
-* **Layer 5 (HU Protocol Adapter & Serializer):** Implement or extend the protocol serializer (e.g., `src/protocols/proto_hiworld_adapter.c`, `src/protocols/proto_raise_adapter.c`). Pack canonical state into protocol wire packets with correct checksums.
-
-### Phase 4: Automated Verification (Proven Scenario Transcription)
-1. Transcribe the user's test script data vectors into automated C unit tests (`test/unit/test_*.c`) or pipeline tests (`test/integration/`).
-2. Run host tests:
-   ```bash
-   ~/.platformio/penv/bin/pio test -e native_test_runner
-   ~/.platformio/penv/bin/pio test -e integration_test
-   ```
-3. Ensure zero compilation warnings (`-Wall -Wextra -Werror`) on desktop, STM32, and ESP32 targets.
-
-### Phase 5: Documentation & Specification Tracking
-1. **Update `doc/CANBOX_SPEC_HIWORLD_407_<TOPIC>.md`:** Document new or modified bitfields, state machine transitions, wire frames, and APK mappings in the topic specification file.
-2. **Update `doc/TODO_PROGRESS.md` When Feature Status Changes:** If a feature transitions (`[ ]` -> `[-]` -> `[x]`) or a new command/CAN ID is added, update Section 2 and Section 3 in `doc/TODO_PROGRESS.md`. Skip for internal refactors or bug fixes.
-
-### Phase 6: Downlink Progression
-Once the Uplink path is fully implemented, verified with tests, and documented:
-* Inform the user that the Uplink implementation is verified.
-* **Ask the user whether to proceed with implementing the Downlink (HU -> CAN) controls.**
-
-
----
-
-## 6. Serial Dispatch, Rate Limiting & Head Unit Reboot Sync Rules
-
-To protect the 38,400 baud serial bus while guaranteeing display responsiveness:
-
-1. **Delta Detection & Rate Limiting:**
-   - Uplink telemetry packets must be dispatched upon state change (**delta detection**).
-   - Enforce a minimum cooldown/rate-limit timer per command (e.g. maximum 10-20 Hz for fast telemetry, 1-2 Hz for slow metrics) to avoid saturating serial bandwidth.
-2. **Head Unit Reboot Recovery (Full Resync):**
-   - **Handshake Trigger:** Upon receiving an initialization command, handshake, or version request from the Android HU (e.g., `0x90`, `0xCA`), trigger a complete retransmission of all cached state frames.
-   - **Slow Periodic Resync (1 Minute):** Maintain a slow periodic heartbeat timer ($60\text{ seconds} / 1\text{ minute}$) that retransmits all cached state frames to ensure UI state synchronization if the Head Unit silently reboots or disconnects without a handshake.
-
-
----
-
-## 7. Vehicle Profile & Protocol Checklist
-
-When adding or editing a car profile:
-1. Verify that all CAN IDs and signal bitfields match user-provided, documented CAN2004 frames. Zero unverified placeholders.
-2. Unpack multi-byte integers using `read_be16()`, `read_le16()`, etc. Never cast byte pointers directly.
-3. Boundary-check `frame->dlc` prior to array indexing.
-4. Update `vehicle_profile_id_t` in `include/core/vehicle_profile.h` and the registry table in `src/core/vehicle_profile_manager.c`.
-5. Add model index mappings in `raise_car_mapping.c` and `hiworld_car_mapping.c`.
-6. Keep profile decoders decoupled from protocol adapters—all inter-layer communication flows via the canonical state cache.
-
+* **Pure C99 & Zero Heap:** `-std=c99 -Wall -Wextra -Werror`. `malloc`/`calloc`/`free` and blocking loops are banned.
+* **Lock-Free SPSC:** Power-of-two `ring_buffer_t` only; no mutexes/RTOS primitives in core.
+* **Safe Unpacking & Bounds:** Always check `frame->dlc` before indexing `data[]`. Use `read_be16()`/`read_le16()` (PSA CAN is Big-Endian; watch Java signed-byte casts `(uint8_t)` and sentinels `0xFF`/`0xFFFF`).
+* **Strict CAN2004 Isolation:** Only implement proven CAN2004 signals (e.g., radar is `0x0E1`; `0x260` is BSI profiles, NOT radar). Zero unverified placeholders.
+* **Path Privacy:** Never write absolute paths (`/home/...` or `file:///...`) in repo `*.md` files.
+* **Doc & Tracker Updates:** Update `doc/CANBOX_SPEC_HIWORLD_407_*.md` on spec changes. Update `doc/TODO_PROGRESS.md` **only** when a feature status (`[ ]`/`[-]`/`[x]`) or command changes.
+* **Lifecycle:** Ingest spec $\rightarrow$ clarify only if blocked $\rightarrow$ implement Uplink (L1–L5) $\rightarrow$ add Unity tests in `test/test_protocol_parser/test_407_*.c` $\rightarrow$ update spec $\rightarrow$ ask user before implementing Downlink.

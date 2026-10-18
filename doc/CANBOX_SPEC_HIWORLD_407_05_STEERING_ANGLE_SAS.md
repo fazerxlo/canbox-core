@@ -19,32 +19,6 @@ The Peugeot 407 Steering Column Control Module (`COM2005`) integrates an optical
 
 When the vehicle is running (`0x036` Ignition ON) and placed in reverse gear (`0x0F6` Byte 7 `0x80`), the CAN box translates the 16-bit signed value from `0x10B` (Bytes 0–1, in $0.1^\circ$ units) by dividing by `10` and inverting the sign into whole degrees ($1^\circ$ units) inside Hiworld **`Cmd 0x11`** (Bytes 6–7) and **`Cmd 0x1A`** (Bytes 6–7).
 
-
-```
-
-+------------------------------------------------------------------------------------+
-|              Peugeot 407 Steering Column (COM2005) -> BSI Gateway                  |
-|      [CAN IS 0x305 @ 500k] ---> [BSI Gateway] ---> [CAN Comfort 0x10B @ 125k]      |
-+------------------------------------------------------------------------------------+
-│
-[PSA CAN 0x10B]
-▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Captures 50 ms steering angle frames (CAN ID 0x10B, DLC 8)                    |
-|   2. Verifies Byte 3 status flags (0x00 = valid) & converts 0.1° to -1.0° steps    |
-|   3. Dispatches Hiworld (Cmd 0x11, Bytes 6-7, LEN=0x0A) / Raise (Cmd 0x29, LE)     |
-+------------------------------------------------------------------------------------+
-│
-[UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-▼
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Reverse Parking Application                   |
-|          (Renders dynamic curving guide tracks over the camera live feed)          |
-+------------------------------------------------------------------------------------+
-
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
@@ -54,31 +28,6 @@ When the vehicle is running (`0x036` Ignition ON) and placed in reverse gear (`0
 - **DLC:** 8 bytes (7 or 8 bytes accepted)
 - **Transmission Cycle:** Periodic 50 ms
 - **Quiescent / Center Frame:** `00 00 00 00 00 00 00 00`
-
-
-```
-
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Value / Encoding Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | 7..0   | Steering Angle High Byte (MSB)     | Signed 16-bit Big-Endian    |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | 7..0   | Steering Angle Low Byte (LSB)      | Signed 16-bit Big-Endian    |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | 7..0   | Rotation Speed                     | Unsigned 8-bit (4 deg/s/bit)|
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | 7..0   | Sensor Status / Error Flags        | Must be 0x00 for valid SAS  |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | 7..0   | Reserved / Counter                 | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 5 | 7..0   | Reserved Padding                   | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 6 | 7..0   | Reserved Padding                   | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 7 | 7..0   | Reserved Padding                   | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-
-```
 
 > [!IMPORTANT]
 > **Byte 3 Validation Gate:** Hiworld PA12.20 validates the status byte (`Byte 3`) of `0x10B`. Non-zero error bits in `Byte 3..7` cause the decoder to discard the frame and freeze or zero out the UART steering angle output. Setting `Bytes 2..7` to `0x00` guarantees acceptance.
@@ -236,13 +185,10 @@ cansend can0 10B#0000000000000000
 
 ```
 
-
 * **Expected UART Output (Hiworld PA12.20 `Cmd 0x11`):**
 * Frame: `5A A5 0A 11 27 00 00 00 00 00 00 00 5E 22 C1`
 * Decoded Angle (`Data[6..7]`): `0x0000` ($0^\circ$)
 * Checksum Calculation: `(0x0A + 0x11 + 0x27 + 0x5E + 0x22 - 1) & 0xFF = 0xC1`
-
-
 
 ### Vector 2: Steering Turned Left +21.0° (CAN Raw = +210 = `0x00D2` -> UART = -21° = `0xFFEB`)
 
@@ -252,13 +198,10 @@ cansend can0 10B#00D2000000000000
 
 ```
 
-
 * **Expected UART Output (Hiworld PA12.20 `Cmd 0x11`):**
 * Frame: `5A A5 0A 11 27 00 00 00 00 00 FF EB 5E 22 AB`
 * Decoded Angle (`Data[6..7]`): `0xFFEB` ($-21^\circ$)
 * Checksum Calculation: `(0x0A + 0x11 + 0x27 + 0xFF + 0xEB + 0x5E + 0x22 - 1) & 0xFF = 0xAB`
-
-
 
 ### Vector 3: Steering Turned Left +60.0° (CAN Raw = +600 = `0x0258` -> UART = -60° = `0xFFC4`)
 
@@ -268,13 +211,10 @@ cansend can0 10B#0258000000000000
 
 ```
 
-
 * **Expected UART Output (Hiworld PA12.20 `Cmd 0x11`):**
 * Frame: `5A A5 0A 11 27 00 00 00 00 00 FF C4 5E 22 84`
 * Decoded Angle (`Data[6..7]`): `0xFFC4` ($-60^\circ$)
 * Checksum Calculation: `(0x0A + 0x11 + 0x27 + 0xFF + 0xC4 + 0x5E + 0x22 - 1) & 0xFF = 0x84`
-
-
 
 ### Vector 4: Steering Turned Right -90.0° (CAN Raw = -900 = `0xFC7C` -> UART = +90° = `0x005A`)
 
@@ -284,9 +224,7 @@ cansend can0 10B#FC7C000000000000
 
 ```
 
-
 * **Expected UART Output (Hiworld PA12.20 `Cmd 0x11`):**
 * Frame: `5A A5 0A 11 27 00 00 00 00 00 00 5A 5E 22 1B`
 * Decoded Angle (`Data[6..7]`): `0x005A` ($+90^\circ$)
 * Checksum Calculation: `(0x0A + 0x11 + 0x27 + 0x00 + 0x5A + 0x5E + 0x22 - 1) & 0xFF = 0x1B`
-

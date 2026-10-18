@@ -36,28 +36,6 @@
 
 When the user interacts with the **Car Settings / Vehicle Personalization** app on the Android touchscreen, the headunit sends discrete configuration downlink frames to the CAN box adapter. The CAN box decodes the setting index, validates parameters, maps them to native PSA BSI CAN frames (`0x221`, `0x228`, `0x1E0`, `0x1A1`), and broadcasts updated state telemetry back to Android.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Android Headunit "Car Settings" UI                         |
-|     [Follow-Me-Home: 30s | DRL: ON | Auto-Lock: ON | Mirror Fold: ON | Units: C]   |
-+------------------------------------------------------------------------------------+
-                         │ (Downlink Cmd 0x7B / 0x7D) ▲ (Uplink Feedback Cmd 0x76/0x79)
-                         ▼                            │
-+------------------------------------------------------------------------------------+
-|                         Hiworld CAN Box Microcontroller                            |
-|   1. Decodes Sub-Setting Index & Param Value (hiworld_car_config_parser)           |
-|   2. Updates internal `hiworld_car_config_t` state model                           |
-|   3. Synthesizes PSA BSI Configuration Frame (CAN ID 0x221 / 0x228)                |
-|   4. Broadcasts Feature Availability Masks (Cmd 0x71 / 0x72)                       |
-+------------------------------------------------------------------------------------+
-                         │ (PSA CAN Bus: 125 kbps)    ▲ (BSI Status CAN 0x221/0x0F6)
-                         ▼                            │
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 Built-in Systems Interface                     |
-|           [Executes Relays, Headlamp Timers, Actuators, Mirror Solenoids]          |
-+------------------------------------------------------------------------------------+
-```
-
 ### 1.1 Bidirectional Settings Pipeline
 1. **Discovery / Capability Handshake:** CAN box emits `Cmd 0x71` & `Cmd 0x72` feature masks; Android hides unsupported switches.
 2. **User Tap:** Android emits `Cmd 0x7B` or `Cmd 0x7D` with `[SettingID]` and `[Value]`.
@@ -788,4 +766,3 @@ void hiworld_config_process_downlink(hiworld_config_ctx_t *ctx, uint8_t cmd_id, 
   - Checksum: `(0x02 + 0x7D + 0x03 + 0x01 - 1) & 0xFF = 0x82`
 - **Expected PSA BSI CAN Frame Injected:**
   - `ID 0x221#0000001000000000` (`Byte 3: 0x10` = Calibration Pulse)
-

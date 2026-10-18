@@ -25,67 +25,11 @@ In Peugeot 407 vehicles equipped with the factory **Blaupunkt / Continental RD4 
 - Automatically handles source switching via virtual COM2000 stalk pulse injection (`0x21F`).
 - Un-mutes the RD4 Quadlock Part B pre-amp, providing clean, high-fidelity audio from Android to the car speakers.
 
-```mermaid
-flowchart TD
-    subgraph AndroidHU ["Android Head Unit (com.qf.vehicle)"]
-        Audio["Audio Player (Spotify, YouTube, Navi, Calls)"]
-        RouteMgr["PsaAudioRouteManager"]
-        UART_TX["UART Downlink: Cmd 0xAD"]
-    end
-
-    subgraph CanboxCore ["canbox-core Firmware MCU"]
-        UART_RX["proto_hiworld_adapter.c (Cmd 0xAD Dispatch)"]
-        CDC_Engine["psa_virtual_cdc.c (100ms Scheduler & State Machine)"]
-        Stalk_Inject["Stalk 0x21F Source Pulse Injection"]
-        CAN_TX["hal_can_send (125 kbps)"]
-        CAN_RX["hal_can_receive (0x131 Feedback)"]
-    end
-
-    subgraph Vehicle ["Peugeot 407 (CAN2004 Comfort Bus @ 125 kbps)"]
-        RD4["Factory RD4 Radio"]
-        MFD["Multi-Function Display (EMF / Type C)"]
-        Quadlock["Quadlock Part B (Pins 4, 10, 11)"]
-        Speakers["Vehicle Amplifier / Speakers"]
-    end
-
-    Audio --> RouteMgr
-    RouteMgr -->|5A A5 03 AD 02 01 B2| UART_TX
-    UART_TX -->|UART 38400| UART_RX
-    UART_RX --> CDC_Engine
-    CDC_Engine -->|Inject 0x21F Source Pulse| Stalk_Inject
-    Stalk_Inject --> CAN_TX
-    CDC_Engine -->|0x162, 0x1A2, 0x1E2, 0x1A0, 0x0E2, 0x531| CAN_TX
-    CAN_TX -->|CAN Comfort Bus| RD4
-    RD4 -->|0x131 Radio Status & Track Controls| CAN_RX
-    CAN_RX --> CDC_Engine
-    RD4 -.->|0x165, 0x225, 0x2A5| MFD
-    Audio -.->|Analog Line Out| Quadlock
-    Quadlock -->|Un-muted Audio| RD4
-    RD4 --> Speakers
-```
-
 ---
 
 ## 2. Factory Hardware Wiring: RD4 Quadlock Connector
 
 The audio signal from the Android Head Unit (RCA / Line Out L, R, GND) connects directly to the 12-pin **Part B** sub-connector of the factory RD4 Quadlock:
-
-```
-                      RD4 Quadlock Rear Connector
-    ┌─────────────────────────────────────────────────────────┐
-    │  [Part A: Power, CAN, Speakers]                         │
-    │  Pin 9: CAN High (Comfort Bus @ 125k)                   │
-    │  Pin 10: CAN Low  (Comfort Bus @ 125k)                  │
-    │  Pin 12: Ground                                         │
-    │  Pin 15: +12V Battery Constant                          │
-    ├────────────────────────────┬────────────────────────────┤
-    │  [Part B: CD Changer Port] │  [Part C: AUX 1 / AUX 2]   │
-    │  Pin 4:  Audio Right (+)   │  Pin 4:  AUX 1 Audio Right │
-    │  Pin 10: Audio Left (+)    │  Pin 10: AUX 1 Audio Left  │
-    │  Pin 11: Audio Ground/Shield│ Pin 11: AUX 1 Ground      │
-    │  Pin 2:  CDC Data (Unused) │                            │
-    └────────────────────────────┴────────────────────────────┘
-```
 
 | Quadlock Part B Pin | Function | Connection to Android Head Unit |
 |:---:|:---|:---|
@@ -284,4 +228,3 @@ const psa_virtual_cdc_t *psa_virtual_cdc_get_context(void);
   - Transmission of CAN `0x162` with magic byte `0x06`.
   - Disabling via `5A A5 03 AD 01 00 B0` (verifies zero CAN frames transmitted).
   - Re-enabling via `5A A5 03 AD 01 01 B1` (verifies resumption of CAN transmissions).
-

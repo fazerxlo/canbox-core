@@ -35,32 +35,6 @@ In Peugeot 407 vehicles equipped with factory infotainment (RD4, RT3, RT4, RT5),
 1. **Immediate Modal Alerts:** When a fault or safety alert triggers while driving (e.g. low fuel, puncture, door opened in motion, engine overheat), the BSI broadcasts high-priority frame `0x1A1`. The Head Unit displays a modal dialog or floating toast (`WindowTextWarning`) accompanied by an acoustic chime.
 2. **Persistent Alert Log (Journal des Alertes):** Drivers browse the **Alert Log** via the `Vehicle Diagnostics` -> `Diagnostic Information` UI menu (`DignosticFrgment`). The BSI transfers the complete active fault table over segmented CAN frames on `0x120`.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 Vehicle Network (125 kbps)                     |
-|           [BSI Module (0x1A1 / 0x120) | ABS ECU (0x0E6) | Airbag (0x269)]          |
-+------------------------------------------------------------------------------------+
-                                         │
-                                         ▼ (CAN Confort)
-+------------------------------------------------------------------------------------+
-|                         OpenCanbox Core (Pure C99 Microcontroller)                 |
-|   1. L1 HAL: hal_can receives frames 0x1A1 and 0x120                               |
-|   2. L2 Profile: psa_decode_alert_message_0x1a1() & psa_process_journal_0x120()    |
-|   3. L3 Router: vehicle_alerts_t canonical state cache                             |
-|   4. L4 Driver: hu_protocol_send_alert_single() / hu_protocol_send_alerts_summary()|
-|   5. L5 Adapter: proto_hiworld_serialize() with Command 0x42 (Format A or B)       |
-+------------------------------------------------------------------------------------+
-                                         │
-                                         ▼ (UART 38400 8N1: 0x5A 0xA5)
-+------------------------------------------------------------------------------------+
-|                         Android Head Unit (com.qf.vehicle)                         |
-|   - UartDataReceiver -> WcVehicleDataRuleHead5aa5 (Checksum & framing verification)|
-|   - PeugeotDataParser.parseWarningInfo() (Unpacks mNumber & 16-bit alert codes)    |
-|   - PeugeotDataController.getWarningString() (Maps codes to localized resources)  |
-|   - DignosticFrgment (UI list) & WindowTextWarning (Real-time toast overlay)       |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. Vehicle CAN Transport Protocols
@@ -71,12 +45,6 @@ In Peugeot 407 vehicles equipped with factory infotainment (RD4, RT3, RT4, RT5),
 - **DLC:** 8 bytes
 
 #### Frame Layout:
-```
- Byte 0            Byte 1            Byte 2            Byte 3            Bytes 4..7
-+--------+--------+-----------------+--------+--------+-----------------+-----------------------+
-| ACT[7] | ALARM_ID_H[6:0]          | DISP[7]| PRI[6:4]| SOUND[3:0]      | PARAM_DOOR_MASK       | CONTEXT_PARAM_DATA    |
-+--------+--------+-----------------+--------+--------+-----------------+-----------------------+
-```
 
 - **Byte 0 [7] (`ACT`):** `1` = Alert is currently triggered; `0` = Alert acknowledged or cleared.
 - **Byte 0 [6:0] & Byte 1 (`ALARM_ID`):** 15-bit native PSA Alert Identifier: `((Byte 0 & 0x7F) << 8) | Byte 1`.
@@ -154,12 +122,6 @@ Transmitted for real-time driver notifications, toast popups, alert dismissals, 
 | `9` | `CHK` | Additive checksum: `(Len + CmdID + sum(D0..D4) - 1) & 0xFF` |
 
 #### Control Byte (`D2`) Bitfield Breakdown:
-```
- Bit 7        Bit 6        Bits 5..4      Bits 3..0
-┌──────────┬────────────┬──────────────┬──────────────┐
-│  ACTIVE  │    INFO    │   SEVERITY   │   SOUND_ID   │
-└──────────┴────────────┴──────────────┴──────────────┘
-```
 
 - **Bit 7 (`0x80`) — ACTIVE:**
   - `1` = **Alert Active / Triggered:** Displays modal floating toast popup (`WindowTextWarning`).
@@ -209,36 +171,6 @@ Transmitted when all faults in the BSI journal are cleared ($N = 0$):
 
 ### 3.6 Cockpit CHECK Sequence Protocol Walkthrough
 When the driver initiates the dashboard **CHECK** diagnostic routine via button or wiper stalk, `canbox-core` coordinates the rolling status messages and diagnostic log update:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Car as PSA CAN (0x1A1 / 0x167)
-    participant Core as canbox-core
-    participant HU as Android HU (com.qf.vehicle)
-
-    Car->>Core: 0x1A1 ID 0x00F0 ("Diagnosis in progress")
-    Core->>HU: 5A A5 05 EA 00 F0 C0 00 00 9E
-    Note over HU: Clears activeAlerts, diagnosticLock = false,<br/>Shows "Diagnosis in progress..." Toast
-
-    loop For each active vehicle fault
-        Car->>Core: 0x1A1 ID 0x0008 (Fault Active)
-        Core->>HU: 5A A5 05 EA 00 08 C0 00 00 B6
-        Note over HU: Shows "Braking system faulty" Toast (3.5s timeout)
-        
-        Car->>Core: 0x1A1 ID 0x0000 (Inter-Alert Blanking)
-        Core->>HU: 5A A5 05 EA 00 00 C0 00 00 AE
-        Note over HU: Resets lastSingleAlertCode = 0 (Debounce reset)
-    end
-
-    Car->>Core: 0x1A1 ID 0x00F1 ("Diagnosis completed")
-    Core->>HU: 5A A5 05 EA 00 F1 C0 00 00 9F
-    Note over HU: Sets diagnosticLock = true,<br/>Shows "Diagnosis complete" Toast
-
-    Car->>Core: CAN 0x120 21-byte bitfield active
-    Core->>HU: Cmd 0xEA Summary Table (Len 4+5*N)
-    Note over HU: Populates DignosticFrgment with clean numbered list!
-```
 
 - **Step 1: Start of Diagnosis (`0x00F0`):** `5A A5 05 EA 00 F0 C0 00 00 9E` (Resets journal, shows status toast).
 - **Step 2: Single Rolling Alerts (e.g. `0x0008`):** `5A A5 05 EA 00 08 C0 00 00 B6` (Shows modal toast without polluting journal).

@@ -3,12 +3,12 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-/*.log
+*.log
 __pycache__
+*.pyc
 
 openocd_nuc131_bin/
 openocd_nuc131_bin
 *.bin.dump
 *.iap
 *.dump
-

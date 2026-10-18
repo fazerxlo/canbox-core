@@ -93,4 +93,3 @@ Detailed topic specifications documenting PSA CAN frame decoders, Head Unit seri
 | Document | Description |
 |:---|:---|
 | [MANUAL_TESTING_WITH_HEADUNIT.md](MANUAL_TESTING_WITH_HEADUNIT.md) | Bench and vehicle verification procedures with physical Android Head Units, virtual CAN test harnesses, and protocol analyzers. |
-

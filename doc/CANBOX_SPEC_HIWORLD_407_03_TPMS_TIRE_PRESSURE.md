@@ -17,29 +17,6 @@ The Peugeot 407 features active TPMS wheel transmitters in all four road wheels 
 - **`0x3A1` (Direct Pressures / `MSG_DONNEES_PRESSION_ROUES`, 250 ms):** 1 byte per wheel scaled by 0.05 Bar/LSB.
 - **`0x168` Byte 1 (Combine Warning Overlay):** Bits 7..6 carry instrument cluster TPMS warning lamp illumination flags.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 Direct TPMS Wheel Sensors                      |
-|             [0x1E1 Status Enum, 0x361 (14-bit 0.1 Bar), 0x3A1 (0.05 Bar)]          |
-+------------------------------------------------------------------------------------+
-                                          │
-                               [PSA CAN 0x361 / 0x1E1]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Extracts 4-wheel numeric pressures (0.1 Bar / 0.05 Bar) from 0x361 / 0x3A1    |
-|   2. Classifies discrete alarm states (Under-inflation, Puncture, Battery Low)     |
-|   3. Dispatches Hiworld 0x18 (Discrete) & 0x66 (Numeric TPMS, verified in PeugeotDataParser) │
-+------------------------------------------------------------------------------------+
-                                          │
-                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                       Android Headunit Vehicle Info / TPMS App                     |
-|           (Renders 4-wheel car model with real-time numeric Bar/PSI)               |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
@@ -51,19 +28,6 @@ The Peugeot 407 features active TPMS wheel transmitters in all four road wheels 
   - Bytes 2–3: Front Right (FR)
   - Bytes 4–5: Rear Right (RR)
   - Bytes 6–7: Rear Left (RL)
-
-```
-+---------------+--------+------------------------------------+-----------------------------+
-| Byte Range    | Bit    | Function / Signal Name             | Bit Mask / Value Definition |
-+---------------+--------+------------------------------------+-----------------------------+
-| High Byte     | 15..14 | Wheel Diagnostic State             | 00 = OK                     |
-|               |        |                                    | 01 = UNDER_INFLATED         |
-|               |        |                                    | 10 = PUNCTURE               |
-|               |        |                                    | 11 = SENSOR_FAULT / NO_DATA |
-| High + Low    | 13..0  | Physical Tire Pressure Raw         | 0..16383 (0.1 Bar per LSB)  |
-|               |        |                                    | 0x3FFF = Sensor Missing     |
-+---------------+--------+------------------------------------+-----------------------------+
-```
 
 ### 2.2 PSA Wheel Status Enum Frame (`0x1E1`)
 - **CAN ID:** `0x1E1` (Standard 11-bit Identifier, DLC: 8, Period: 250 ms)
@@ -315,4 +279,3 @@ static inline void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t
 - **Expected UART Output:**
   - **Numeric (`Cmd 0x66`):** `5A A5 06 66 01 18 04 18 18 00 B8`
   - **Discrete (`Cmd 0x18`):** `5A A5 04 18 00 02 00 00 1D` (FR alarm = `0x02` PUNCTURE)
-
