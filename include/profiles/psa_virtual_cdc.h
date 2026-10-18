@@ -49,9 +49,9 @@ typedef struct {
 #define PSA_RD4_SRC_CDC   0x03
 #define PSA_RD4_SRC_AUX   0x04
 
-#define STALK_PRESS_DURATION_MS     60   /* Hold 0x21F#020000 for 60 ms */
-#define STALK_WAIT_CONFIRM_MAX_MS  350   /* Wait up to 350 ms for CAN 0x165 source nibble to change */
-#define STALK_POST_CHANGE_SETTLE_MS 80   /* Wait 80 ms AFTER 0x165 changes before next press */
+#define STALK_PRESS_DURATION_MS     50   /* Hold 0x21F#020000 for 50 ms */
+#define STALK_WAIT_CONFIRM_MAX_MS  650   /* Wait up to 650 ms for CAN 0x165 source nibble to change */
+#define STALK_POST_CHANGE_SETTLE_MS 150  /* Wait 150 ms AFTER 0x165 changes before next press */
 
 void psa_virtual_cdc_init(void);
 void psa_virtual_cdc_set_enabled(bool enabled);

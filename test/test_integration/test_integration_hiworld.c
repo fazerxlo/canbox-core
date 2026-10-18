@@ -1299,6 +1299,26 @@ void test_integration_hiworld_rd4_downlink_resume_queries(void) {
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[7]);
     TEST_ASSERT_EQUAL_HEX8(0x0B, rx_buf[8]);
     TEST_ASSERT_EQUAL_HEX8(0x97, rx_buf[9]);
+
+    // 3. Send Tuner UI Open Query: Cmd 0xA1 -> 5A A5 03 A1 00 01 FF A3
+    const uint8_t q_tuner_a1[] = { 0x5A, 0xA5, 0x03, 0xA1, 0x00, 0x01, 0xFF, 0xA3 };
+    for (size_t i = 0; i < sizeof(q_tuner_a1); i++) {
+        can_router_process_uart_byte(q_tuner_a1[i]);
+    }
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= (6 + 19));
+    /* Universal ACK frame: 5A A5 01 FF A1 A0 */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rx_buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, rx_buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0xA1, rx_buf[4]);
+    /* Radio State response: 5A A5 0E 84 ... */
+    TEST_ASSERT_EQUAL_HEX8(0x5A, rx_buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[9]);
 }
 
 void test_integration_hiworld_rd4_preset_list_pipeline(void) {

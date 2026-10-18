@@ -129,6 +129,8 @@ void test_peugeot_407_rd4_physical_button_debounce(void);
 void test_peugeot_407_rd4_cd_switch_intermediate_aux1_stepping(void);
 void test_peugeot_407_rd4_no_premature_pulse_when_new_cmd_arrives(void);
 void test_peugeot_407_rd4_confirm_timeout_350ms(void);
+void test_peugeot_407_rd4_post_target_settle_guard(void);
+void test_peugeot_407_virtual_cdc_always_enabled_and_subcmd_0x02(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -279,6 +281,8 @@ int main(void) {
     RUN_TEST(test_peugeot_407_rd4_cd_switch_intermediate_aux1_stepping);
     RUN_TEST(test_peugeot_407_rd4_no_premature_pulse_when_new_cmd_arrives);
     RUN_TEST(test_peugeot_407_rd4_confirm_timeout_350ms);
+    RUN_TEST(test_peugeot_407_rd4_post_target_settle_guard);
+    RUN_TEST(test_peugeot_407_virtual_cdc_always_enabled_and_subcmd_0x02);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

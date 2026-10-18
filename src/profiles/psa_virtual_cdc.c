@@ -10,6 +10,8 @@
 static psa_virtual_cdc_t s_cdc;
 static psa_source_arbiter_t s_arbiter;
 static uint8_t s_stalk_rotary_cnt = 0;
+static uint32_t s_target_reached_tick_ms = 0;
+static uint32_t s_last_station_list_scroll_ms = 0;
 
 void psa_virtual_cdc_init(void) {
     memset(&s_cdc, 0, sizeof(s_cdc));
@@ -27,6 +29,8 @@ void psa_virtual_cdc_init(void) {
     s_cdc.repeat_mode = false;
     s_cdc.timer_ticks_100ms = 0;
     s_stalk_rotary_cnt = 0;
+    s_target_reached_tick_ms = 0;
+    s_last_station_list_scroll_ms = 0;
 
     memset(&s_arbiter, 0, sizeof(s_arbiter));
     s_arbiter.sync_state = SRC_SYNC_IDLE;
@@ -71,7 +75,7 @@ void psa_virtual_cdc_process_can_0x131(const uint8_t *data, uint8_t dlc) {
 
     /* Byte 0 Bit 1: radio_playing (RD4 currently selected CDC as source) */
     bool rd4_playing_cdc = (data[0] & 0x02) != 0;
-    if (rd4_playing_cdc) {
+    if (rd4_playing_cdc && !s_cdc.playback_active && s_cdc.status_icon != 2) {
         s_cdc.playback_active = true;
         s_cdc.status_icon = 3; /* STATUS_ICON_PLAY1 */
     }
@@ -114,7 +118,10 @@ void psa_virtual_cdc_process_can_0x131(const uint8_t *data, uint8_t dlc) {
     s_cdc.random_mode = (data[1] & 0x01) != 0;
 }
 
-#define PSA_RD4_MAX_SWITCH_RETRIES 5
+#define PSA_RD4_MAX_SWITCH_RETRIES      8
+#define PSA_RD4_WAIT_CONFIRM_TIMEOUT_MS 650
+#define PSA_RD4_POST_CHANGE_SETTLE_MS   150
+#define PSA_RD4_POST_TARGET_SETTLE_MS   400
 
 void psa_virtual_cdc_update_stalk_rotary(uint8_t rotary_cnt) {
     s_stalk_rotary_cnt = rotary_cnt;
@@ -142,7 +149,9 @@ static bool psa_rd4_is_source(uint8_t target_source, const vehicle_radio_t *radi
 }
 
 static void psa_virtual_cdc_pulse_source(void) {
-    /* 1. Press Frame: Transmit 21F#02<cnt>00 (Byte 0 = 0x02 SRC button, Byte 1 = rolling thumbwheel counter <cnt>) */
+    /* Press Frame: Transmit 21F#02<cnt>00 strictly ONCE for STALK_PRESS_DURATION_MS (50 ms).
+     * Never transmit multiple press frames within one pulse, as any intervening
+     * COM2000 idle frame (21F#00<cnt>00) would cause RD4 to register a double-click! */
     can_frame_t frame_press;
     memset(&frame_press, 0, sizeof(frame_press));
     frame_press.id = PSA_CAN_ID_STALK_21F;
@@ -152,10 +161,9 @@ static void psa_virtual_cdc_pulse_source(void) {
     frame_press.data[2] = 0x00;
     hal_can_send(&frame_press);
 
-    /* 2. Hold Duration: Wait 60 ms */
     hal_delay_ms(STALK_PRESS_DURATION_MS);
 
-    /* 3. Release Frame: Transmit 21F#00<cnt>00 (Byte 0 = 0x00 Idle) */
+    /* Release Frame: Transmit 21F#00<cnt>00 (Byte 0 = 0x00 Idle) */
     can_frame_t frame_release;
     memset(&frame_release, 0, sizeof(frame_release));
     frame_release.id = PSA_CAN_ID_STALK_21F;
@@ -167,6 +175,12 @@ static void psa_virtual_cdc_pulse_source(void) {
 }
 
 static void psa_virtual_cdc_execute_station_list_scroll(void) {
+    uint32_t now = hal_get_tick_ms();
+    if (s_last_station_list_scroll_ms != 0 && (now - s_last_station_list_scroll_ms) < 2000) {
+        return; /* Debounce repeated 0xA1 bursts from HU */
+    }
+    s_last_station_list_scroll_ms = (now != 0) ? now : 1;
+
     /* Step 1 (Scroll UP): <cnt> = (<cnt> + 1) & 0xFF */
     s_stalk_rotary_cnt = (uint8_t)(s_stalk_rotary_cnt + 1);
     can_frame_t frame;
@@ -207,40 +221,69 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
         }
         s_arbiter.reported_hu_source = 0;
         s_arbiter.pending_station_list_trigger = false;
+        s_target_reached_tick_ms = 0;
+        s_cdc.radio_enabled = false;
         return;
     }
 
+    /* RD4 is ON: ensure CDC emulation is always enabled and present on CAN */
+    s_cdc.radio_enabled = true;
+    s_cdc.enabled = true;
+
     uint8_t new_source = psa_source_mode_to_arbiter(source_mode);
     if (new_source == 0) return;
+
+    /* When RD4 is active on another source, CDC remains enabled in PAUSE state */
+    if (new_source != PSA_RD4_SRC_CDC && s_arbiter.sync_state == SRC_SYNC_IDLE) {
+        s_cdc.playback_active = false;
+        s_cdc.status_icon = 2; /* STATUS_ICON_PAUSE */
+    }
 
     /* First arrival after boot: sync immediately without debounce delay */
     if (s_arbiter.reported_hu_source == 0) {
         s_arbiter.actual_rd4_source = new_source;
         s_arbiter.reported_hu_source = new_source;
         s_arbiter.sync_state = SRC_SYNC_IDLE;
+        s_target_reached_tick_ms = 0;
         psa_virtual_cdc_check_pending_station_list();
         return;
     }
 
+    uint8_t prev_rd4_source = s_arbiter.actual_rd4_source;
     s_arbiter.actual_rd4_source = new_source;
 
     switch (s_arbiter.sync_state) {
         case SRC_SYNC_IDLE:
             if (new_source != s_arbiter.reported_hu_source) {
+                /* Post-target settle guard (400 ms): in-flight RD4 step cannot trigger debounce */
+                if (s_target_reached_tick_ms != 0) {
+                    if ((hal_get_tick_ms() - s_target_reached_tick_ms) < PSA_RD4_POST_TARGET_SETTLE_MS) {
+                        break;
+                    }
+                    s_target_reached_tick_ms = 0;
+                }
                 /* Rule F3: Physical Button Settle Filter - enter 800ms debounce */
                 s_arbiter.sync_state = SRC_SYNC_PHYSICAL_DEBOUNCE;
                 s_arbiter.state_timer_ms = hal_get_tick_ms();
+                if (new_source == PSA_RD4_SRC_TUNER) {
+                    s_arbiter.pending_station_list_trigger = true;
+                }
             }
             break;
 
         case SRC_SYNC_PHYSICAL_DEBOUNCE:
-            /* User clicked again: reset 800ms debounce timer */
-            s_arbiter.state_timer_ms = hal_get_tick_ms();
+            /* Reset 800ms debounce timer ONLY if the source actually changed again */
+            if (new_source != prev_rd4_source) {
+                s_arbiter.state_timer_ms = hal_get_tick_ms();
+                if (new_source == PSA_RD4_SRC_TUNER) {
+                    s_arbiter.pending_station_list_trigger = true;
+                }
+            }
             break;
 
         case SRC_SYNC_WAIT_CONFIRM:
         case SRC_SYNC_SEEKING:
-            /* Ignore stale frame if RD4 hasn't reacted yet */
+            /* Ignore periodic 0x165 frame if RD4 hasn't moved from the source where we pulsed */
             if (new_source == s_arbiter.last_pulse_source) {
                 break;
             }
@@ -254,21 +297,23 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
                 s_arbiter.sync_state = SRC_SYNC_IDLE;
                 can_router_push_radio_and_media_state();
                 psa_virtual_cdc_check_pending_station_list();
+                s_target_reached_tick_ms = hal_get_tick_ms();
             } else {
-                /* Not target yet: step to next */
+                /* Intermediate source reached: wait settle time, then send ONE pulse for the next step */
                 s_arbiter.retry_count++;
                 if (s_arbiter.retry_count >= PSA_RD4_MAX_SWITCH_RETRIES) {
                     /* Safety Fallback: abort seeking, accept current source */
                     s_arbiter.sync_state = SRC_SYNC_IDLE;
                     s_arbiter.reported_hu_source = new_source;
                     s_arbiter.target_source = 0;
+                    s_target_reached_tick_ms = 0;
                     can_router_push_radio_and_media_state();
                     psa_virtual_cdc_check_pending_station_list();
                 } else {
-                    /* Wait 80 ms settle after 0x165 change before next press */
-                    hal_delay_ms(STALK_POST_CHANGE_SETTLE_MS);
-                    psa_virtual_cdc_pulse_source();
+                    hal_delay_ms(PSA_RD4_POST_CHANGE_SETTLE_MS);
                     s_arbiter.last_pulse_source = new_source;
+                    psa_virtual_cdc_pulse_source();
+                    /* Record timestamp AFTER pulse completes so tick_100ms waits a full 450 ms */
                     s_arbiter.state_timer_ms = hal_get_tick_ms();
                     s_arbiter.sync_state = SRC_SYNC_WAIT_CONFIRM;
                 }
@@ -278,6 +323,10 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
 }
 
 void psa_virtual_cdc_switch_source(uint8_t target_source) {
+    if (target_source == PSA_RD4_SRC_TUNER) {
+        s_arbiter.pending_station_list_trigger = true;
+    }
+
     /* Rule F1: If already on target source, confirm immediately */
     if (s_arbiter.actual_rd4_source == target_source && s_arbiter.reported_hu_source == target_source) {
         s_arbiter.sync_state = SRC_SYNC_IDLE;
@@ -287,13 +336,8 @@ void psa_virtual_cdc_switch_source(uint8_t target_source) {
         return;
     }
 
-    /* Bug 3 Fix: Never reset the 0x21F pulse timer when a new Cmd 0xAD arrives.
-     * If a pulse/switch is currently in progress, only update target_source = new_target.
-     * Do not call the pulse function directly from psa_virtual_cdc_handle_hu_cmd() / switch_source().
-     * Let the periodic tick scheduler or 0x165 response finish the current pulse first. */
     if (s_arbiter.sync_state != SRC_SYNC_IDLE) {
         if (s_arbiter.actual_rd4_source == target_source) {
-            /* Already reached new target while switching */
             s_arbiter.reported_hu_source = target_source;
             s_arbiter.target_source = 0;
             s_arbiter.retry_count = 0;
@@ -310,13 +354,14 @@ void psa_virtual_cdc_switch_source(uint8_t target_source) {
     s_arbiter.target_source = target_source;
     s_arbiter.retry_count = 0;
     s_arbiter.sync_state = SRC_SYNC_WAIT_CONFIRM;
+    s_arbiter.last_pulse_source = s_arbiter.actual_rd4_source;
+    s_arbiter.state_timer_ms = hal_get_tick_ms();
 
     /* Fire first 0x21F pulse */
     psa_virtual_cdc_pulse_source();
 
     const vehicle_state_t *state = can_router_get_state();
     if (state == NULL || !state->media.radio.present) {
-        /* In test environments without real RD4 presence feedback, conclude immediately */
         s_arbiter.sync_state = SRC_SYNC_IDLE;
         s_arbiter.reported_hu_source = target_source;
         can_router_push_radio_and_media_state();
@@ -324,7 +369,7 @@ void psa_virtual_cdc_switch_source(uint8_t target_source) {
         return;
     }
 
-    s_arbiter.last_pulse_source = s_arbiter.actual_rd4_source;
+    /* Record timer AFTER pulse finishes */
     s_arbiter.state_timer_ms = hal_get_tick_ms();
 }
 
@@ -423,20 +468,19 @@ void psa_virtual_cdc_tick_100ms(void) {
             psa_virtual_cdc_check_pending_station_list();
         }
     } else if (s_arbiter.sync_state == SRC_SYNC_WAIT_CONFIRM) {
-        if ((now - s_arbiter.state_timer_ms) >= STALK_WAIT_CONFIRM_MAX_MS) {
-            /* Rule F2: Wait up to 350 ms for CAN 0x165 source nibble to change */
+        if ((now - s_arbiter.state_timer_ms) >= PSA_RD4_WAIT_CONFIRM_TIMEOUT_MS) {
+            /* Timeout: RD4 missed the pulse (e.g. bus collision) - retry */
             s_arbiter.retry_count++;
             if (s_arbiter.retry_count >= PSA_RD4_MAX_SWITCH_RETRIES) {
-                /* Safety Fallback: abort seeking, return true RD4 source */
                 s_arbiter.sync_state = SRC_SYNC_IDLE;
                 s_arbiter.reported_hu_source = s_arbiter.actual_rd4_source;
                 s_arbiter.target_source = 0;
                 can_router_push_radio_and_media_state();
                 psa_virtual_cdc_check_pending_station_list();
             } else {
-                psa_virtual_cdc_pulse_source();
                 s_arbiter.last_pulse_source = s_arbiter.actual_rd4_source;
-                s_arbiter.state_timer_ms = now;
+                psa_virtual_cdc_pulse_source();
+                s_arbiter.state_timer_ms = hal_get_tick_ms();
             }
         }
     }
@@ -548,7 +592,14 @@ bool psa_virtual_cdc_is_switching_in_progress(void) {
 }
 
 bool psa_virtual_cdc_is_source_filtered(void) {
-    return (s_arbiter.sync_state != SRC_SYNC_IDLE);
+    if (s_arbiter.sync_state != SRC_SYNC_IDLE) {
+        return true;
+    }
+    if (s_arbiter.reported_hu_source != 0 &&
+        s_arbiter.actual_rd4_source != s_arbiter.reported_hu_source) {
+        return true;
+    }
+    return false;
 }
 
 uint8_t psa_virtual_cdc_get_target_source(void) {

@@ -84,7 +84,16 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if (packet->cmd == 0x0F) {
         /* Head Unit resume query forwardType(0x0F): immediate retransmit of radio state */
         hu_protocol_send_radio_state(NULL);
+        hu_protocol_send_radio_presets(NULL);
         psa_virtual_cdc_trigger_station_list();
+    } else if (packet->cmd == HIWORLD_CMD_RADIO_CONTROL) { /* 0xA1 */
+        /* When HU Tuner UI opens, it sends 5A A5 03 A1 00 01 FF A3 (or 00 01 1D C1)
+         * to query/sync current radio state and preset list. */
+        if (packet->payload_len >= 2 && packet->payload[0] == 0x00 && packet->payload[1] == 0x01) {
+            hu_protocol_send_radio_state(NULL);
+            hu_protocol_send_radio_presets(NULL);
+            psa_virtual_cdc_trigger_station_list();
+        }
     } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
         /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */
         hu_protocol_send_media_state(NULL);

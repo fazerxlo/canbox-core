@@ -3329,8 +3329,9 @@ void test_peugeot_407_rd4_station_list_trigger(void) {
     TEST_ASSERT_EQUAL_HEX8(0x10, frame_sent.data[1]); /* Restored to original counter */
 
     /* Case C: Arbiter is busy seeking -> defers scroll trigger until settled on Tuner */
+    psa_virtual_cdc_init();
+    psa_virtual_cdc_update_stalk_rotary(0x10);
     /* Target is CDC (0x03). Trigger switch to CDC and settle */
-    psa_virtual_cdc_handle_hu_cmd(0x03, 0x03);
     can_frame_t frame_165_cdc = {
         .id = 0x165,
         .dlc = 8,
@@ -3360,6 +3361,12 @@ void test_peugeot_407_rd4_station_list_trigger(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
     TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
     TEST_ASSERT_EQUAL_HEX8(0x10, frame_sent.data[1]);
+
+    /* Case D: 2-second cooldown debounces rapid consecutive station list triggers */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_trigger_station_list();
+    /* Immediately triggering again within 2 seconds must be debounced (no CAN transmission) */
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
 }
 
 void test_peugeot_407_rd4_source_switch_lockout_and_suppression(void) {
@@ -3614,22 +3621,106 @@ void test_peugeot_407_rd4_confirm_timeout_350ms(void) {
     can_frame_t frame_pulse;
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
 
-    /* 3. Advance 200 ms (under 350ms threshold) */
+    /* 3. Advance 300 ms (under 650ms threshold) */
     hal_can_native_clear_sent_frame();
-    hal_delay_ms(200);
+    hal_delay_ms(300);
     psa_virtual_cdc_tick_100ms();
 
-    /* Must NOT fire a retry pulse yet! Waiting up to 350ms for RD4 0x165 */
+    /* Must NOT fire a retry pulse yet! Waiting up to 650ms for RD4 0x165 */
     const psa_source_arbiter_t *arbiter = psa_virtual_cdc_get_arbiter();
     TEST_ASSERT_EQUAL_UINT8(0, arbiter->retry_count);
     TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
 
-    /* 4. Advance past 350ms (total > 350ms) */
-    hal_delay_ms(200);
+    /* 4. Advance past 650ms (total 300 + 400 = 700ms > 650ms) */
+    hal_delay_ms(400);
     psa_virtual_cdc_tick_100ms();
 
     /* Now timeout expired, retry pulse was fired and retry_count incremented */
     TEST_ASSERT_EQUAL_UINT8(1, arbiter->retry_count);
+}
+
+void test_peugeot_407_rd4_post_target_settle_guard(void) {
+    can_router_init();
+    psa_virtual_cdc_init();
+
+    /* 1. Radio on CD */
+    can_frame_t frame_165_cd = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xD0, 0x20, 0x00 }
+    };
+    can_router_process_can(&frame_165_cd);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CD, psa_virtual_cdc_get_reported_source());
+
+    /* 2. Switch to Tuner */
+    psa_virtual_cdc_handle_hu_cmd(0x03, 0x01);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+
+    /* 3. RD4 confirms Tuner: Target reached! */
+    can_frame_t frame_165_tuner = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xD0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_165_tuner);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_TUNER, psa_virtual_cdc_get_reported_source());
+
+    /* 4. An in-flight RD4 step arrives 100 ms later (e.g. residual step to CD) */
+    hal_delay_ms(100);
+    can_router_process_can(&frame_165_cd);
+
+    /* Post-target settle guard (400ms) MUST ignore this in-flight step:
+     * Arbiter must remain in SRC_SYNC_IDLE and NOT enter SRC_SYNC_PHYSICAL_DEBOUNCE! */
+    const psa_source_arbiter_t *arbiter = psa_virtual_cdc_get_arbiter();
+    TEST_ASSERT_EQUAL_INT(SRC_SYNC_IDLE, arbiter->sync_state);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_TUNER, arbiter->reported_hu_source);
+
+    /* 5. Advance past 400ms settle guard window */
+    hal_delay_ms(350);
+
+    /* 6. Now a physical source change to CD arrives (driver click) */
+    can_router_process_can(&frame_165_cd);
+    TEST_ASSERT_EQUAL_INT(SRC_SYNC_PHYSICAL_DEBOUNCE, arbiter->sync_state);
+}
+
+void test_peugeot_407_virtual_cdc_always_enabled_and_subcmd_0x02(void) {
+    psa_virtual_cdc_init();
+
+    /* 1. RD4 powers on in Tuner mode: 165#c8d01000 */
+    can_frame_t frame_165_tuner = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xD0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_165_tuner);
+
+    /* CDC must be enabled on CAN, but in PAUSE state (not active playback) */
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    const psa_virtual_cdc_t *ctx = psa_virtual_cdc_get_context();
+    TEST_ASSERT_TRUE(ctx->radio_enabled);
+    TEST_ASSERT_EQUAL_UINT8(2, ctx->status_icon); /* STATUS_ICON_PAUSE */
+
+    /* 2. HU requests playback / switch to CDC: SubCmd 0x02, Param 0x01 */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+
+    /* Verify CDC playback active and source switch sequence initiated */
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, psa_virtual_cdc_get_target_source());
+
+    can_frame_t frame_pulse;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+
+    /* 3. HU requests standby: SubCmd 0x02, Param 0x00 */
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x00);
+    /* CDC playback stopped, in PAUSE state, but remains ENABLED on bus */
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
+    TEST_ASSERT_EQUAL_UINT8(2, ctx->status_icon); /* STATUS_ICON_PAUSE */
 }
 
 

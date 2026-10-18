@@ -19,8 +19,9 @@ uint32_t hal_get_tick_ms(void) {
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
         return 0;
     }
-    uint64_t ms = (uint64_t)(now.tv_sec - s_start_time.tv_sec) * 1000ULL +
-                  (uint64_t)(now.tv_nsec - s_start_time.tv_nsec) / 1000000ULL;
+    int64_t sec = (int64_t)now.tv_sec - (int64_t)s_start_time.tv_sec;
+    int64_t nsec = (int64_t)now.tv_nsec - (int64_t)s_start_time.tv_nsec;
+    int64_t ms = sec * 1000LL + nsec / 1000000LL;
     return (uint32_t)ms;
 }
 

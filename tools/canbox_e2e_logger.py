@@ -404,6 +404,13 @@ class UartProxy(threading.Thread):
         self.tx_reassembler = SerialFrameReassembler()
         self.rx_reassembler = SerialFrameReassembler()
 
+    def inject_hu_frame(self, frame_bytes: bytes):
+        self.stats["HU_RX_BYTES"] += len(frame_bytes)
+        frames = self.rx_reassembler.feed(frame_bytes)
+        for f in frames:
+            self.logger.log("APP_UART_RX", f"{f.hex()}")
+        os.write(self.master_fd, frame_bytes)
+
     def run(self):
         try:
             ser = serial.Serial(self.real_port, self.baud, timeout=0.1)
@@ -638,14 +645,49 @@ def main():
     t_app = threading.Thread(target=read_stream, args=(app_proc.stdout, logger, "APP", stats), daemon=True)
     t_app.start()
     
-    print("[*] App started. Press 'L' to dump last 5s of logs. Press 'S' to dump last 30s of logs. Press 'q' or Esc to quit.\r")
+    DOWNLINK_COMMANDS = {
+        '1': ("Switch RD4 to CDC", bytes.fromhex("5AA502AD0201B1")),
+        '2': ("CDC Standby", bytes.fromhex("5AA502AD0200B0")),
+        '3': ("Switch RD4 to Tuner", bytes.fromhex("5AA502AD0301B3")),
+        '4': ("Switch RD4 to CD", bytes.fromhex("5AA502AD0302B4")),
+        '5': ("Query Radio State (0x0F)", bytes.fromhex("5AA5010F0F")),
+    }
+
+    pipe_path = "/tmp/canbox_hu_cmd.pipe"
+    if os.path.exists(pipe_path):
+        try:
+            os.remove(pipe_path)
+        except Exception:
+            pass
+    try:
+        os.mkfifo(pipe_path)
+        pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+    except Exception:
+        pipe_fd = None
+
+    print("[*] App started. Controls:\r")
+    print("    '1': Switch to CDC   | '2': CDC Standby | '3': Switch to Tuner\r")
+    print("    '4': Switch to CD    | '5': Query 0x0F  | 'pipe': /tmp/canbox_hu_cmd.pipe\r")
+    print("    'L': Dump 5s logs    | 'S': Dump 30s    | 'q'/Esc: Quit\r")
     
     # Terminal setup to read single characters
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    is_tty = sys.stdin.isatty()
+    fd = sys.stdin.fileno() if is_tty else None
+    old_settings = termios.tcgetattr(fd) if is_tty else None
     
     def cleanup(signum=None, frame=None):
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        if is_tty and old_settings:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
+        if pipe_fd is not None:
+            try:
+                os.close(pipe_fd)
+                if os.path.exists(pipe_path):
+                    os.remove(pipe_path)
+            except Exception:
+                pass
         if app_proc.poll() is None:
             app_proc.terminate()
         if orig_ser and orig_ser.is_open:
@@ -661,7 +703,8 @@ def main():
     signal.signal(signal.SIGTERM, cleanup)
     
     try:
-        tty.setcbreak(fd)
+        if is_tty:
+            tty.setcbreak(fd)
         last_stats_time = 0
         while app_proc.poll() is None:
             now = time.time()
@@ -671,9 +714,39 @@ def main():
                 sys.stdout.flush()
                 last_stats_time = now
                 
-            if select.select([sys.stdin], [], [], 0.1)[0]:
+            read_fds = []
+            if is_tty:
+                read_fds.append(sys.stdin)
+            if pipe_fd is not None:
+                read_fds.append(pipe_fd)
+
+            r_avail, _, _ = select.select(read_fds, [], [], 0.1) if read_fds else ([], [], [])
+            
+            if pipe_fd is not None and pipe_fd in r_avail:
+                try:
+                    pipe_data = os.read(pipe_fd, 1024).decode('utf-8', errors='ignore').strip()
+                    if pipe_data:
+                        # Allow key number ('1'..'5') or raw hex string
+                        if pipe_data in DOWNLINK_COMMANDS:
+                            desc, cmd_bytes = DOWNLINK_COMMANDS[pipe_data]
+                            print(f"\n[*] Pipe Command [{pipe_data}]: {desc} ({cmd_bytes.hex()})\r")
+                            uart_proxy.inject_hu_frame(cmd_bytes)
+                        else:
+                            clean_hex = re.sub(r'[^0-9A-Fa-f]', '', pipe_data)
+                            if len(clean_hex) >= 2:
+                                cmd_bytes = bytes.fromhex(clean_hex)
+                                print(f"\n[*] Pipe Custom Command: {cmd_bytes.hex()}\r")
+                                uart_proxy.inject_hu_frame(cmd_bytes)
+                except Exception as e:
+                    pass
+
+            if is_tty and sys.stdin in r_avail:
                 ch = sys.stdin.read(1)
-                if ch.lower() == 'l':
+                if ch in DOWNLINK_COMMANDS:
+                    desc, cmd_bytes = DOWNLINK_COMMANDS[ch]
+                    print(f"\n[*] Sending HU Cmd [{ch}]: {desc} ({cmd_bytes.hex()})\r")
+                    uart_proxy.inject_hu_frame(cmd_bytes)
+                elif ch.lower() == 'l':
                     logger.dump_last_ns(5)
                 elif ch.lower() == 's':
                     logger.dump_last_ns(30)
