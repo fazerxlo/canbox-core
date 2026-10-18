@@ -122,6 +122,7 @@ void test_peugeot_407_aux_mode_suppression(void);
 void test_peugeot_407_virtual_cdc_initial_state(void);
 void test_peugeot_407_virtual_cdc_downlink_controls(void);
 void test_peugeot_407_virtual_cdc_periodic_transmission(void);
+void test_peugeot_407_virtual_cdc_suppression_on_indash_cd(void);
 void test_peugeot_407_rd4_audio_source_switching(void);
 void test_peugeot_407_rd4_station_list_trigger(void);
 void test_peugeot_407_rd4_source_switch_lockout_and_suppression(void);
@@ -133,6 +134,7 @@ void test_peugeot_407_rd4_post_target_settle_guard(void);
 void test_peugeot_407_virtual_cdc_always_enabled_and_subcmd_0x02(void);
 void test_peugeot_407_rd4_physical_override_blocks_periodic_0xad_02_01(void);
 void test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression(void);
+void test_peugeot_407_virtual_cdc_vs_line_in_1_modes(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -276,6 +278,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_virtual_cdc_initial_state);
     RUN_TEST(test_peugeot_407_virtual_cdc_downlink_controls);
     RUN_TEST(test_peugeot_407_virtual_cdc_periodic_transmission);
+    RUN_TEST(test_peugeot_407_virtual_cdc_suppression_on_indash_cd);
     RUN_TEST(test_peugeot_407_rd4_audio_source_switching);
     RUN_TEST(test_peugeot_407_rd4_station_list_trigger);
     RUN_TEST(test_peugeot_407_rd4_source_switch_lockout_and_suppression);
@@ -287,6 +290,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_virtual_cdc_always_enabled_and_subcmd_0x02);
     RUN_TEST(test_peugeot_407_rd4_physical_override_blocks_periodic_0xad_02_01);
     RUN_TEST(test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression);
+    RUN_TEST(test_peugeot_407_virtual_cdc_vs_line_in_1_modes);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

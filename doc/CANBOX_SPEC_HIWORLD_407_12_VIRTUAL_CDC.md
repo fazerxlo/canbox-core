@@ -137,9 +137,9 @@ $$\text{Checksum} = \left( \left( \text{LEN} + \text{CMD} + \sum \text{Payload} 
 
 | SubCmd | Parameter Range | Description | Wire Frame Example | `canbox-core` Action |
 |:---:|:---:|:---|:---|:---|
-| **`0x01`** | `0x00` / `0x01` | **Enable / Disable CDC Emulation** | `5A A5 03 AD 01 01 B1` (Enable)<br>`5A A5 03 AD 01 00 B0` (Disable) | Sets `enabled` flag. When disabled, all CAN periodic transmissions cease immediately. Enabled by default. |
-| **`0x02`** | `0x00` / `0x01` | **Audio Play / Standby** | `5A A5 02 AD 02 01 B1` (Play)<br>`5A A5 02 AD 02 00 B0` (Standby) | `0x01`: Sets playback active, pulses stalk `0x21F` (SRC) to switch RD4 source.<br>`0x00`: Standby mode (`status_icon = 2`), keeps presence heartbeat alive. |
-| **`0x03`** | `0x01` / `0x02` | **Switch RD4 Source** | `5A A5 02 AD 03 01 B3` (Tuner)<br>`5A A5 02 AD 03 02 B4` (CD) | `0x01`: Switches RD4 to FM/AM Tuner via `0x21F` stalk pulses.<br>`0x02`: Switches RD4 to Internal CD via `0x21F` stalk pulses. |
+| **`0x01`** | `0x00` / `0x01` | **Enable / Disable CDC Emulation** | `5A A5 03 AD 01 01 B1` (Enable)<br>`5A A5 03 AD 01 00 B0` (Disable) | Sets `enabled` flag. When disabled, all CAN periodic CDC transmissions cease immediately and HU audio requests route to Line In 1 (`AUX 1`). |
+| **`0x02`** | `0x00` / `0x01` | **Audio Play / Standby** | `5A A5 02 AD 02 01 B1` (Play)<br>`5A A5 02 AD 02 00 B0` (Standby) | `0x01`: In Mode 1 (`enabled == true`), sets playback active and switches RD4 to `CDC`. In Mode 2 (`enabled == false`), switches RD4 to `Line In 1` (`AUX 1`).<br>`0x00`: Standby mode (`status_icon = 2`), keeps presence heartbeat alive if enabled. |
+| **`0x03`** | `0x01 .. 0x04` | **Switch RD4 Source** | `5A A5 02 AD 03 01 B3` (Tuner)<br>`5A A5 02 AD 03 02 B4` (CD)<br>`5A A5 02 AD 03 03 B5` (HU Audio)<br>`5A A5 02 AD 03 04 B6` (AUX) | `0x01`: Switches RD4 to FM/AM Tuner via `0x21F` stalk pulses.<br>`0x02`: Switches RD4 to Internal CD via `0x21F` stalk pulses.<br>`0x03`: Switches RD4 to `CDC` when Virtual CDC is enabled (Mode 1), or to `Line In 1` (`AUX 1`) when Virtual CDC is disabled (Mode 2).<br>`0x04`: Switches RD4 to `AUX 1`. |
 | **`0x0E`** | `0x01 .. 0x06` | **Select Disc Slot** | `5A A5 03 AD 0E 01 BE` (Disc 1) | Updates `active_disc` reported in `0x162` and `0x0E2`. |
 | **`0x0F`** | `0x00 .. 0x3B` | **Set Elapsed Seconds** | `5A A5 03 AD 0F 14 D2` (20 sec) | Updates `elapsed_sec` reported in `0x1E2`. |
 | **`0x10`** | `0x01 .. 0x63` | **Set Track Number** | `5A A5 03 AD 10 05 C4` (Track 5) | Updates `track_num` reported in `0x1E2`. |
@@ -149,10 +149,11 @@ $$\text{Checksum} = \left( \left( \text{LEN} + \text{CMD} + \sum \text{Payload} 
 ## 5. Automatic Source Switching & Virtual COM2000 Stalk Injection
 
 When Android starts playback (YouTube, Spotify, incoming Bluetooth call) or switches audio sources, the Head Unit issues `Cmd 0xAD`:
-- `Cmd 0xAD SubCmd 0x02 Param 0x01`: Switch to CDC.
+- `Cmd 0xAD SubCmd 0x02 Param 0x01`: Switch to HU Audio (`CDC` in Mode 1, `Line In 1 / AUX 1` in Mode 2).
 - `Cmd 0xAD SubCmd 0x02 Param 0x00`: CDC Standby.
 - `Cmd 0xAD SubCmd 0x03 Param 0x01`: Switch to Tuner.
 - `Cmd 0xAD SubCmd 0x03 Param 0x02`: Switch to Internal CD.
+- `Cmd 0xAD SubCmd 0x03 Param 0x03`: Switch to HU Audio (`CDC` in Mode 1, `Line In 1 / AUX 1` in Mode 2).
 - `Cmd 0x0F`: Tuner query + station list trigger (Scroll UP / DOWN pulse on `0x21F`).
 
 ### 5.1 Virtual Stalk Injection Primitive (`CAN 0x21F`)
@@ -161,26 +162,30 @@ To switch the RD4 source without requiring driver dashboard interaction:
 2. If the current source is not the target source:
    - Injects momentary `SOURCE` key pulses on virtual COM2000 stalk:
      - **Press Frame:** `CAN 0x21F` (DLC 3: `[ 0x02, <cnt>, 0x00 ]`).
-     - **Hold Duration:** 60 ms.
+     - **Hold Duration:** 50 ms.
      - **Release Frame:** `CAN 0x21F` (DLC 3: `[ 0x00, <cnt>, 0x00 ]`).
-     - **Debounce Interval:** 120 ms between pulses.
+     - **Debounce Interval:** 150 ms post-change settle between pulses.
    - Repeats until `CAN 0x165` confirms target source reached (up to 8 retries).
-3. When CDC is active, `canbox-core` emits Hiworld `Cmd 0x84` (`0x31` = CDC) to notify the Head Unit.
+3. When target source is reached, `canbox-core` emits Hiworld `Cmd 0x84` (`0x31` = CDC in Mode 1, or `0x40` = Line In 1 / AUX 1 in Mode 2) to notify the Head Unit.
 
 ### 5.2 Physical Button Override & Anti-Hijack Policy (`user_override_non_cdc`)
-When the driver manually presses the physical RD4 `SOURCE` button (or COM2000 stalk button) to switch away from `CDC` to `TUNER`, `CD`, or `AUX`:
+When the driver manually presses the physical RD4 `SOURCE` button (or COM2000 stalk button) to switch away from the active HU audio source (`CDC` in Mode 1, or `AUX 1` in Mode 2):
 1. `psa_virtual_cdc_process_can_0x165()` enters the 800 ms `SRC_SYNC_PHYSICAL_DEBOUNCE` state, sets `user_override_non_cdc = true`, and transitions CDC to `PAUSE` (`status_icon = 2`).
-2. While `user_override_non_cdc == true` (or during `SRC_SYNC_PHYSICAL_DEBOUNCE`), repeated/periodic background `Cmd 0xAD SubCmd 0x02 Param 0x01` (`Audio Play`) frames from the Head Unit are **ignored** so `canbox-core` never hijacks the RD4 back to CDC against the user's manual selection.
+2. While `user_override_non_cdc == true` (or during `SRC_SYNC_PHYSICAL_DEBOUNCE`), repeated/periodic background `Cmd 0xAD SubCmd 0x02 Param 0x01` (`Audio Play`) frames from the Head Unit are **ignored** so `canbox-core` never hijacks the RD4 back to the HU source against the user's manual selection.
 3. `user_override_non_cdc` is cleared only when:
-   - The Head Unit sends `Cmd 0xAD SubCmd 0x02 Param 0x00` (`Audio Standby/Stop`), allowing a subsequent fresh `0xAD 02 01` transition to switch back to CDC;
+   - The Head Unit sends `Cmd 0xAD SubCmd 0x02 Param 0x00` (`Audio Standby/Stop`), allowing a subsequent fresh `0xAD 02 01` transition to switch back;
    - The Head Unit sends an explicit `Cmd 0xAD SubCmd 0x03 <src>` source switch request; or
-   - The driver physically cycles the RD4 back to `CDC`.
+   - The driver physically cycles the RD4 back to the HU audio source (`CDC` in Mode 1, `AUX 1` in Mode 2).
 
 ---
 
 ## 6. Optional Configuration & C API Reference
 
-The Virtual CDC Emulation Engine is designed to be **optional but enabled by default**. It is fully decoupled from hardware and allocates zero heap memory (`sizeof(psa_virtual_cdc_t)` is 16 bytes statically allocated).
+The Virtual CDC Emulation Engine supports two operating modes configured via the compile-time build flag `-DPSA_VIRTUAL_CDC_ENABLED` in `platformio.ini` (and toggleable at runtime via `psa_virtual_cdc_set_enabled()` / `Cmd 0xAD SubCmd 0x01`):
+1. **Mode 1 (`-DPSA_VIRTUAL_CDC_ENABLED=1`, default):** HU connected via Quadlock Part B CDC audio input. Virtual CDC presence (`0x162`) and playback frames (`0x1A2`, `0x1E2`, `0x1A0`, `0x531`, `0x0E2`) are enabled. `5A A5 02 AD 03 03 B5` and `5A A5 02 AD 02 01 B1` switch RD4 source to `CDC` (`0x31`).
+2. **Mode 2 (`-DPSA_VIRTUAL_CDC_ENABLED=0`):** HU connected via RD4 Line In 1 (`AUX 1`). Virtual CDC CAN frames are completely disabled. `5A A5 02 AD 03 03 B5` and `5A A5 02 AD 02 01 B1` switch RD4 source to `Line In 1` (`0x40`).
+
+It is fully decoupled from hardware and allocates zero heap memory (`sizeof(psa_virtual_cdc_t)` is 16 bytes statically allocated).
 
 ### 6.1 Public Header (`include/profiles/psa_virtual_cdc.h`)
 
@@ -211,7 +216,7 @@ uint8_t psa_virtual_cdc_get_stalk_rotary(void);
 void psa_virtual_cdc_process_can_0x131(const uint8_t *data, uint8_t dlc);
 void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status);
 
-/* 100ms periodic scheduler: broadcasts 0x162, 0x1A2, 0x1E2, 0x1A0, 0x531, 0x0E2 */
+/* 100ms periodic scheduler: broadcasts 0x162, and gates 0x1A2, 0x1E2, 0x1A0, 0x531, 0x0E2 by playback_active */
 void psa_virtual_cdc_tick_100ms(void);
 
 /* Status accessors */
@@ -220,14 +225,19 @@ bool psa_virtual_cdc_is_presence_enabled(void);
 const psa_virtual_cdc_t *psa_virtual_cdc_get_context(void);
 ```
 
+### 6.1 Bus Collision Protection Rules
+1. **Active Playback Gating:** Active CDC telemetry frames (`0x1A2`, `0x1E2`, `0x1A0`, `0x531`, `0x0E2`) are **strictly gated by `playback_active == true`**. When in standby or listening to non-CDC sources, these frames are completely silenced to prevent CAN arbitration collisions with the in-dash CD player (`0x365`/`0x3A5`) or the factory JBL amplifier (`0x1A0`).
+2. **In-Dash CD Silence:** When the vehicle radio is actively in in-dash CD mode (`PSA_RD4_SRC_CD` / `0x165` byte 2 = `0x20`), all CDC frames including `0x162` are silenced while CDC playback is inactive, preventing dual-disc DSP errors and RD4 watchdog resets.
+
 ---
 
 ## 7. Verification & Automated Test Vectors
 
-### 7.1 Unit Tests (`test/test_protocol_parser/test_peugeot_407.c`)
+### 7.1 Unit Tests (`test/test_protocol_parser/test_407_virtual_cdc.c`)
 - `test_peugeot_407_virtual_cdc_initial_state`: Verifies default initialization (`enabled = true`, standby, default disc 1, track 1, 99 total tracks, transmission of `0x162` with magic byte `0x06`).
 - `test_peugeot_407_virtual_cdc_downlink_controls`: Verifies `SubCmd 0x0E` (disc), `0x0F` (sec), `0x10` (track), `0x02` (play/pause), and `0x01` (enable/disable optional toggle).
 - `test_peugeot_407_virtual_cdc_periodic_transmission`: Verifies 500 ms group (`0x1A0`, `0x1A2`, `0x1E2`), 1000 ms group (`0x531`, `0x0E2`), and `0x131` track skip decoding.
+- `test_peugeot_407_virtual_cdc_suppression_on_indash_cd`: Verifies complete suppression of 500 ms and 1000 ms groups during standby, and total silence of all CDC frames (including `0x162`) while the in-dash CD player is active.
 
 ### 7.2 Integration Tests (`test/test_integration/test_integration_hiworld.c`)
 - `test_integration_hiworld_virtual_cdc_pipeline`: End-to-end integration test through the CAN router and UART parser:

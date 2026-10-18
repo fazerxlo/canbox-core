@@ -10,6 +10,10 @@
 extern "C" {
 #endif
 
+#ifndef PSA_VIRTUAL_CDC_ENABLED
+#define PSA_VIRTUAL_CDC_ENABLED 1
+#endif
+
 typedef struct {
     bool     enabled;            /* Continuous presence heartbeat active */
     bool     playback_active;    /* Audio actively playing */

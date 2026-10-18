@@ -15,7 +15,7 @@ static uint32_t s_last_station_list_scroll_ms = 0;
 
 void psa_virtual_cdc_init(void) {
     memset(&s_cdc, 0, sizeof(s_cdc));
-    s_cdc.enabled = true;              /* Continuously broadcast CDC presence by default */
+    s_cdc.enabled = (PSA_VIRTUAL_CDC_ENABLED != 0); /* Mode 1 (true): Virtual CDC, Mode 2 (false): Line In 1 */
     s_cdc.playback_active = false;      /* Standby initially (no audio streaming) */
     s_cdc.radio_enabled = true;        /* Assume radio enabled by default */
     s_cdc.active_disc = 1;              /* Disc 1 default */
@@ -68,7 +68,7 @@ uint8_t psa_source_mode_to_arbiter(uint8_t source_mode) {
 }
 
 void psa_virtual_cdc_process_can_0x131(const uint8_t *data, uint8_t dlc) {
-    if (!data || dlc < 5) return;
+    if (!s_cdc.enabled || !data || dlc < 5) return;
 
     /* Byte 0 Bit 7: radio_enabled */
     s_cdc.radio_enabled = (data[0] & 0x80) != 0;
@@ -227,14 +227,14 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
         return;
     }
 
-    /* RD4 is ON: ensure CDC emulation is always enabled and present on CAN */
     s_cdc.radio_enabled = true;
-    s_cdc.enabled = true;
 
     uint8_t new_source = psa_source_mode_to_arbiter(source_mode);
     if (new_source == 0) return;
 
-    /* When RD4 is active on another source, CDC remains enabled in PAUSE state */
+    uint8_t hu_audio_src = s_cdc.enabled ? PSA_RD4_SRC_CDC : PSA_RD4_SRC_AUX;
+
+    /* When RD4 is active on another source, CDC remains in PAUSE state */
     if (new_source != PSA_RD4_SRC_CDC && s_arbiter.sync_state == SRC_SYNC_IDLE) {
         s_cdc.playback_active = false;
         s_cdc.status_icon = 2; /* STATUS_ICON_PAUSE */
@@ -266,7 +266,7 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
                 /* Rule F3: Physical Button Settle Filter - enter 800ms debounce */
                 s_arbiter.sync_state = SRC_SYNC_PHYSICAL_DEBOUNCE;
                 s_arbiter.state_timer_ms = hal_get_tick_ms();
-                s_arbiter.user_override_non_cdc = (new_source != PSA_RD4_SRC_CDC);
+                s_arbiter.user_override_non_cdc = (new_source != hu_audio_src);
                 if (new_source != PSA_RD4_SRC_CDC) {
                     s_cdc.playback_active = false;
                     s_cdc.status_icon = 2; /* STATUS_ICON_PAUSE */
@@ -279,7 +279,7 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
             if (new_source != prev_rd4_source) {
                 s_arbiter.state_timer_ms = hal_get_tick_ms();
             }
-            s_arbiter.user_override_non_cdc = (new_source != PSA_RD4_SRC_CDC);
+            s_arbiter.user_override_non_cdc = (new_source != hu_audio_src);
             if (new_source != PSA_RD4_SRC_CDC) {
                 s_cdc.playback_active = false;
                 s_cdc.status_icon = 2; /* STATUS_ICON_PAUSE */
@@ -390,11 +390,18 @@ void psa_virtual_cdc_trigger_station_list(void) {
 
 void psa_virtual_cdc_set_state(bool active) {
     if (active) {
-        s_cdc.playback_active = true;
-        s_cdc.status_icon = 3;         /* STATUS_ICON_PLAY1 = 3 */
-        psa_virtual_cdc_switch_source(PSA_RD4_SRC_CDC);
+        if (s_cdc.enabled) {
+            s_cdc.playback_active = true;
+            s_cdc.status_icon = 3;         /* STATUS_ICON_PLAY1 = 3 */
+            psa_virtual_cdc_switch_source(PSA_RD4_SRC_CDC);
+        } else {
+            /* Mode 2 (Line In 1): Virtual CDC disabled, route HU audio to AUX 1 */
+            s_cdc.playback_active = false;
+            s_cdc.status_icon = 2;         /* STATUS_ICON_PAUSE = 2 */
+            psa_virtual_cdc_switch_source(PSA_RD4_SRC_AUX);
+        }
     } else {
-        /* Pause / Standby: keep CDC presence alive */
+        /* Pause / Standby: keep CDC presence alive if enabled */
         s_cdc.playback_active = false;
         s_cdc.status_icon = 2;         /* STATUS_ICON_PAUSE = 2 */
     }
@@ -408,7 +415,7 @@ void psa_virtual_cdc_handle_hu_cmd(uint8_t subcmd, uint8_t param) {
 
         case 0x02: /* Audio Start / Stop */
             if (param == 0x01) {
-                /* Ignore periodic/repeated 0xAD 02 01 polls if user manually switched RD4 away from CDC */
+                /* Ignore periodic/repeated 0xAD 02 01 polls if user manually switched RD4 away from HU source */
                 if (!s_arbiter.user_override_non_cdc && s_arbiter.sync_state != SRC_SYNC_PHYSICAL_DEBOUNCE) {
                     psa_virtual_cdc_set_state(true);
                 }
@@ -418,7 +425,7 @@ void psa_virtual_cdc_handle_hu_cmd(uint8_t subcmd, uint8_t param) {
             }
             break;
 
-        case 0x03: /* Switch RD4 Source (0x01 = Tuner, 0x02 = Internal CD, 0x03 = CDC, 0x04 = AUX) */
+        case 0x03: /* Switch RD4 Source (0x01 = Tuner, 0x02 = Internal CD, 0x03 = HU Audio [CDC or AUX 1], 0x04 = AUX) */
             s_arbiter.user_override_non_cdc = false;
             if (param == 0x01) {
                 s_cdc.playback_active = false;
@@ -429,7 +436,13 @@ void psa_virtual_cdc_handle_hu_cmd(uint8_t subcmd, uint8_t param) {
                 s_cdc.status_icon = 2; /* PAUSE */
                 psa_virtual_cdc_switch_source(PSA_RD4_SRC_CD);
             } else if (param == 0x03) {
-                psa_virtual_cdc_switch_source(PSA_RD4_SRC_CDC);
+                if (s_cdc.enabled) {
+                    psa_virtual_cdc_switch_source(PSA_RD4_SRC_CDC);
+                } else {
+                    s_cdc.playback_active = false;
+                    s_cdc.status_icon = 2; /* PAUSE */
+                    psa_virtual_cdc_switch_source(PSA_RD4_SRC_AUX);
+                }
             } else if (param == 0x04) {
                 s_cdc.playback_active = false;
                 s_cdc.status_icon = 2; /* PAUSE */
@@ -502,33 +515,29 @@ void psa_virtual_cdc_tick_100ms(void) {
     /* --------------------------------------------------------------------------
      * 1. CAN 0x162: CDC Status & Source Availability Heartbeat (Every 100 ms)
      * Payload: [ Byte0, Byte1, 0x06, DiscNum, 0x00, 0x06, 0x00 ]
-     * Byte 0: 0xA0 (Radio enabled bit 7 = 1, bit 5 = 1)
-     * Byte 1: Status icon in bits 2:0 (3 = Play, 2 = Pause, 1 = Stop, 6 = None)
-     *         Bit 1 set (0x02) if playing
-     * Byte 2: 0x06
-     * Byte 3: DiscNum (1..6)
-     * Byte 4: 0x00
-     * Byte 5: 0x06 (Non-zero value required by RD4 to register CDC in source list!)
-     * Byte 6: 0x00
+     * Suppressed when RD4 is playing in-dash CD and CDC is inactive to prevent bus clash.
      * -------------------------------------------------------------------------- */
-    can_frame_t frame_162;
-    memset(&frame_162, 0, sizeof(frame_162));
-    frame_162.id = PSA_CAN_ID_CDC_STATUS_162;
-    frame_162.dlc = 7;
-    frame_162.data[0] = s_cdc.radio_enabled ? 0xA0 : 0x20;
-    frame_162.data[1] = (uint8_t)((s_cdc.playback_active ? 0x02 : 0x00) | (s_cdc.status_icon & 0x07));
-    frame_162.data[2] = 0x06;
-    frame_162.data[3] = s_cdc.active_disc;
-    frame_162.data[4] = 0x00;
-    frame_162.data[5] = 0x06;
-    frame_162.data[6] = 0x00;
-    hal_can_send(&frame_162);
+    if (!(s_arbiter.actual_rd4_source == PSA_RD4_SRC_CD && !s_cdc.playback_active)) {
+        can_frame_t frame_162;
+        memset(&frame_162, 0, sizeof(frame_162));
+        frame_162.id = PSA_CAN_ID_CDC_STATUS_162;
+        frame_162.dlc = 7;
+        frame_162.data[0] = s_cdc.radio_enabled ? 0xA0 : 0x20;
+        frame_162.data[1] = (uint8_t)((s_cdc.playback_active ? 0x02 : 0x00) | (s_cdc.status_icon & 0x07));
+        frame_162.data[2] = 0x06;
+        frame_162.data[3] = s_cdc.active_disc;
+        frame_162.data[4] = 0x00;
+        frame_162.data[5] = 0x06;
+        frame_162.data[6] = 0x00;
+        hal_can_send(&frame_162);
+    }
 
     /* --------------------------------------------------------------------------
      * 2. Periodic 500 ms Group (Every 5 ticks of 100ms)
      * Frames: 0x1A2 (Track Count), 0x1E2 (Current Track & Time), 0x1A0 (Play Modes)
+     * Gated strictly by active CDC playback to prevent CAN collisions with RD4 CD / JBL Amp.
      * -------------------------------------------------------------------------- */
-    if (s_cdc.timer_ticks_100ms % 5 == 0) {
+    if (s_cdc.playback_active && (s_cdc.timer_ticks_100ms % 5 == 0)) {
         /* CAN 0x1A2: Track Count on Current Disc (DLC 5) */
         can_frame_t frame_1a2;
         memset(&frame_1a2, 0, sizeof(frame_1a2));
@@ -568,8 +577,9 @@ void psa_virtual_cdc_tick_100ms(void) {
     /* --------------------------------------------------------------------------
      * 3. Periodic 1000 ms Group (Every 10 ticks of 100ms)
      * Frames: 0x531 (CDC Wakeup/Heartbeat), 0x0E2 (Disc Slot Indicators)
+     * Gated strictly by active CDC playback.
      * -------------------------------------------------------------------------- */
-    if (s_cdc.timer_ticks_100ms % 10 == 0) {
+    if (s_cdc.playback_active && (s_cdc.timer_ticks_100ms % 10 == 0)) {
         /* CAN 0x531: CDC Device Alive Heartbeat (DLC 8) */
         can_frame_t frame_531;
         memset(&frame_531, 0, sizeof(frame_531));

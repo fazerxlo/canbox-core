@@ -83,6 +83,7 @@ void test_integration_hiworld_virtual_cdc_pipeline(void);
 void test_integration_hiworld_rd4_audio_routing_spec(void);
 void test_integration_hiworld_source_switch_suppression(void);
 void test_integration_hiworld_multi_hop_source_switch(void);
+void test_integration_hiworld_cmd_0xad_03_03_cdc_vs_line_in_modes(void);
 
 // 3. Bagoo Protocol Integration Tests (test_integration_bagoo.c)
 void test_integration_bagoo_steering_wheel_volume_up_pipeline(void);
@@ -136,6 +137,7 @@ int main(void) {
     RUN_TEST(test_integration_hiworld_rd4_audio_routing_spec);
     RUN_TEST(test_integration_hiworld_source_switch_suppression);
     RUN_TEST(test_integration_hiworld_multi_hop_source_switch);
+    RUN_TEST(test_integration_hiworld_cmd_0xad_03_03_cdc_vs_line_in_modes);
 
     // 3. Bagoo Protocol Integration Tests
     RUN_TEST(test_integration_bagoo_steering_wheel_volume_up_pipeline);

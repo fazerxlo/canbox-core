@@ -524,3 +524,80 @@ void test_integration_hiworld_multi_hop_source_switch(void) {
     TEST_ASSERT_TRUE(found_84_cd);
 }
 
+void test_integration_hiworld_cmd_0xad_03_03_cdc_vs_line_in_modes(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+    psa_virtual_cdc_init();
+
+    /* 1. Mode 1 (Virtual CDC Enabled): Command 5A A5 02 AD 03 03 B5 switches RD4 from Tuner to CDC */
+    can_frame_t frame_tuner = {
+        .id = 0x165, .dlc = 4, .data = { 0x80, 0x00, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_tuner);
+
+    uint8_t rx_buf[128];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    hal_can_native_clear_sent_frame();
+    const uint8_t pkt_ad_03_03[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x03, 0x03, 0xB5 };
+    for (size_t i = 0; i < sizeof(pkt_ad_03_03); i++) {
+        can_router_process_uart_byte(pkt_ad_03_03[i]);
+    }
+
+    can_frame_t frame_pulse;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, psa_virtual_cdc_get_target_source());
+
+    /* RD4 confirms CDC (0x30) */
+    can_frame_t frame_cdc = {
+        .id = 0x165, .dlc = 4, .data = { 0x80, 0x00, 0x30, 0x00 }
+    };
+    can_router_process_can(&frame_cdc);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, psa_virtual_cdc_get_reported_source());
+
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_84_cdc = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 4) < rx_len && rx_buf[i + 3] == 0x84 && rx_buf[i + 4] == 0x31) {
+            found_84_cdc = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_84_cdc);
+
+    /* 2. Mode 2 (Line In 1, Virtual CDC Disabled): Command 5A A5 02 AD 03 03 B5 switches RD4 from Tuner to Line In 1 (AUX 1) */
+    can_router_init();
+    psa_virtual_cdc_init();
+    psa_virtual_cdc_set_enabled(false);
+
+    can_router_process_can(&frame_tuner);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_presence_enabled());
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    hal_can_native_clear_sent_frame();
+    for (size_t i = 0; i < sizeof(pkt_ad_03_03); i++) {
+        can_router_process_uart_byte(pkt_ad_03_03[i]);
+    }
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, psa_virtual_cdc_get_target_source());
+
+    /* RD4 confirms Line In 1 / AUX 1 (0x40) */
+    can_frame_t frame_aux1 = {
+        .id = 0x165, .dlc = 4, .data = { 0x80, 0x00, 0x40, 0x00 }
+    };
+    can_router_process_can(&frame_aux1);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, psa_virtual_cdc_get_reported_source());
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_84_aux1 = false;
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && (i + 4) < rx_len && rx_buf[i + 3] == 0x84 && rx_buf[i + 4] == 0x40) {
+            found_84_aux1 = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_84_aux1);
+}

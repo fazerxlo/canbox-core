@@ -171,6 +171,40 @@ void test_peugeot_407_virtual_cdc_periodic_transmission(void) {
     TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
 }
 
+void test_peugeot_407_virtual_cdc_suppression_on_indash_cd(void) {
+    psa_virtual_cdc_init();
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* 1. When playback_active is false, 500ms and 1000ms groups must NOT be sent */
+    can_frame_t frame;
+    for (int i = 0; i < 10; i++) {
+        hal_can_native_clear_sent_frame();
+        psa_virtual_cdc_tick_100ms();
+        if (hal_can_native_get_last_sent_frame(&frame)) {
+            /* Only 0x162 presence heartbeat is permitted while in standby */
+            TEST_ASSERT_EQUAL_HEX32(0x162, frame.id);
+        }
+    }
+
+    /* 2. Switch RD4 ground truth to in-dash CD (0x20) */
+    psa_virtual_cdc_process_can_0x165(0x20, 0x01);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* While in-dash CD is playing, ALL CDC frames (including 0x162) must be silenced */
+    for (int i = 0; i < 10; i++) {
+        hal_can_native_clear_sent_frame();
+        psa_virtual_cdc_tick_100ms();
+        TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame));
+    }
+
+    /* 3. Switch RD4 away from CD to Tuner (0x10) */
+    psa_virtual_cdc_process_can_0x165(0x10, 0x01);
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_tick_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame));
+    TEST_ASSERT_EQUAL_HEX32(0x162, frame.id);
+}
+
 void test_peugeot_407_rd4_audio_source_switching(void) {
     can_router_init();
     psa_virtual_cdc_init();
@@ -784,6 +818,97 @@ void test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression(void) {
     TEST_ASSERT_EQUAL_UINT8(0x01, st->media.cdc.play_status);
 }
 
+void test_peugeot_407_virtual_cdc_vs_line_in_1_modes(void) {
+    /* --------------------------------------------------------------------------
+     * Mode 1: Virtual CDC Enabled (Default: PSA_VIRTUAL_CDC_ENABLED=1)
+     * - Command 5A A5 02 AD 03 03 B5 (SubCmd 0x03, Param 0x03) changes source to CDC (PSA_RD4_SRC_CDC)
+     * - Command 5A A5 02 AD 02 01 B1 (SubCmd 0x02, Param 0x01) changes source to CDC
+     * -------------------------------------------------------------------------- */
+    can_router_init();
+    psa_virtual_cdc_init();
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
 
+    /* Start RD4 on Tuner (165#c8d01000) */
+    can_frame_t frame_165_tuner = {
+        .id = 0x165, .dlc = 4, .data = { 0xC8, 0xD0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_165_tuner);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_TUNER, psa_virtual_cdc_get_reported_source());
 
+    /* SubCmd 0x03 Param 0x03 in Mode 1 -> targets PSA_RD4_SRC_CDC */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x03, 0x03);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, psa_virtual_cdc_get_target_source());
 
+    /* Confirm CDC via 0x165 */
+    can_frame_t frame_165_cdc = {
+        .id = 0x165, .dlc = 4, .data = { 0xC8, 0xD0, 0x30, 0x00 }
+    };
+    can_router_process_can(&frame_165_cdc);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, psa_virtual_cdc_get_reported_source());
+
+    /* --------------------------------------------------------------------------
+     * Mode 2: Line In 1 / AUX 1 (Virtual CDC Disabled: PSA_VIRTUAL_CDC_ENABLED=0 or set_enabled(false))
+     * - Virtual CDC CAN frames (0x162, 0x1A2, etc.) are completely suppressed even when RD4 is ON
+     * - Command 5A A5 02 AD 03 03 B5 (SubCmd 0x03, Param 0x03) changes source to Line In 1 (PSA_RD4_SRC_AUX)
+     * - Command 5A A5 02 AD 02 01 B1 (SubCmd 0x02, Param 0x01) changes source to Line In 1 (PSA_RD4_SRC_AUX)
+     * - Physical button override tracks switching away from AUX 1
+     * -------------------------------------------------------------------------- */
+    can_router_init();
+    psa_virtual_cdc_init();
+    psa_virtual_cdc_set_enabled(false);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_presence_enabled());
+
+    /* RD4 powers on in Tuner mode (165#c8d01000) -> MUST NOT re-enable Virtual CDC! */
+    can_router_process_can(&frame_165_tuner);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_presence_enabled());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* Verify 100ms tick transmits zero CDC frames on CAN */
+    can_frame_t frame_sent;
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_tick_100ms();
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+
+    /* SubCmd 0x03 Param 0x03 in Mode 2 -> targets Line In 1 (PSA_RD4_SRC_AUX) */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x03, 0x03);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, psa_virtual_cdc_get_target_source());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+
+    /* Confirm Line In 1 / AUX 1 via 0x165 (165#c8d04000) */
+    can_frame_t frame_165_aux1 = {
+        .id = 0x165, .dlc = 4, .data = { 0xC8, 0xD0, 0x40, 0x00 }
+    };
+    can_router_process_can(&frame_165_aux1);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, psa_virtual_cdc_get_reported_source());
+
+    /* Physical button override in Mode 2: user presses physical SRC button to switch to Tuner */
+    hal_delay_ms(450); /* Past post-target settle guard */
+    can_router_process_can(&frame_165_tuner);
+    const psa_source_arbiter_t *arbiter = psa_virtual_cdc_get_arbiter();
+    TEST_ASSERT_EQUAL_INT(SRC_SYNC_PHYSICAL_DEBOUNCE, arbiter->sync_state);
+    TEST_ASSERT_TRUE(arbiter->user_override_non_cdc);
+
+    /* Periodic 0xAD 02 01 is blocked while user manually overrode to Tuner */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+
+    /* Settle debounce on Tuner, then send 0xAD 02 00 followed by fresh 0xAD 02 01 -> switches to AUX 1 */
+    hal_delay_ms(850);
+    psa_virtual_cdc_tick_100ms();
+    TEST_ASSERT_EQUAL_INT(SRC_SYNC_IDLE, arbiter->sync_state);
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x00);
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, psa_virtual_cdc_get_target_source());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+}

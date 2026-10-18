@@ -450,14 +450,24 @@ void can_router_process_can(const can_frame_t *frame) {
 }
 
 void can_router_push_radio_and_media_state(void) {
-    if (!s_current_state.media.radio.present && psa_virtual_cdc_is_active()) {
-        vehicle_radio_t cdc_radio;
-        memset(&cdc_radio, 0, sizeof(cdc_radio));
-        cdc_radio.source_mode = 0x31;
-        cdc_radio.power_status = 0x01;
-        hu_protocol_send_radio_state(&cdc_radio);
-        hu_protocol_send_media_state(&s_current_state.media.cdc);
-        return;
+    if (!s_current_state.media.radio.present) {
+        if (psa_virtual_cdc_is_active() || psa_virtual_cdc_get_reported_source() == PSA_RD4_SRC_CDC) {
+            vehicle_radio_t cdc_radio;
+            memset(&cdc_radio, 0, sizeof(cdc_radio));
+            cdc_radio.source_mode = 0x31;
+            cdc_radio.power_status = 0x01;
+            hu_protocol_send_radio_state(&cdc_radio);
+            hu_protocol_send_media_state(&s_current_state.media.cdc);
+            return;
+        }
+        if (psa_virtual_cdc_get_reported_source() == PSA_RD4_SRC_AUX) {
+            vehicle_radio_t aux_radio;
+            memset(&aux_radio, 0, sizeof(aux_radio));
+            aux_radio.source_mode = 0x40;
+            aux_radio.power_status = 0x01;
+            hu_protocol_send_radio_state(&aux_radio);
+            return;
+        }
     }
 
     uint8_t old_src = s_last_sent_state.media.radio.source_mode;
