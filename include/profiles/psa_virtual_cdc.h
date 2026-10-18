@@ -42,6 +42,7 @@ typedef struct {
     uint8_t retry_count;            /* Max 5 pulses per request */
     uint32_t state_timer_ms;        /* Timestamp / tick counter for debounce & timeouts */
     bool     pending_station_list_trigger; /* Deferred 0x0F rotary scroll trigger waiting for Tuner */
+    bool     user_override_non_cdc; /* True when user manually switched away from CDC via physical RD4/stalk */
 } psa_source_arbiter_t;
 
 #define PSA_RD4_SRC_TUNER 0x01

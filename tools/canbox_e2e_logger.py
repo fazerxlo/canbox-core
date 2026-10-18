@@ -438,12 +438,12 @@ class UartProxy(threading.Thread):
                         for f in frames:
                             self.logger.log("APP_UART_RX", f"{f.hex()}")
                         os.write(self.master_fd, data)
-                        # Forward Head Unit downlink data (including handshake) to original canbox,
-                        # but strictly filter out 0xAD (Virtual CDC / Audio source control) to prevent
-                        # dual-transmission of 0x21F pulses on the shared vehicle CAN bus!
+                        # Forward Head Unit downlink handshake/keepalive data to original canbox,
+                        # but strictly filter out active control commands (0xA1, 0xA2, 0xA4, 0xAD,
+                        # 0x0F, 0x7A, 0x2F) to prevent ORIG_CANBOX from colliding on the vehicle CAN bus!
                         if self.orig_ser and self.orig_ser.is_open:
                             for f in frames:
-                                if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] == 0xAD:
+                                if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] in (0xA1, 0xA2, 0xA4, 0xAD, 0x0F, 0x7A, 0x2F):
                                     continue
                                 try:
                                     self.orig_ser.write(f)
@@ -458,7 +458,7 @@ class UartProxy(threading.Thread):
                 for f in self.rx_reassembler.flush_stale(0.2):
                     self.logger.log("APP_UART_RX", f"{f.hex()}")
                     if self.orig_ser and self.orig_ser.is_open:
-                        if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] == 0xAD:
+                        if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] in (0xA1, 0xA2, 0xA4, 0xAD, 0x0F, 0x7A, 0x2F):
                             continue
                         try:
                             self.orig_ser.write(f)

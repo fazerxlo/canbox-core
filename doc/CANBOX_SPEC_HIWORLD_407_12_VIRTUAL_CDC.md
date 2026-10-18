@@ -164,8 +164,17 @@ To switch the RD4 source without requiring driver dashboard interaction:
      - **Hold Duration:** 60 ms.
      - **Release Frame:** `CAN 0x21F` (DLC 3: `[ 0x00, <cnt>, 0x00 ]`).
      - **Debounce Interval:** 120 ms between pulses.
-   - Repeats until `CAN 0x165` confirms target source reached (up to 5 retries).
+   - Repeats until `CAN 0x165` confirms target source reached (up to 8 retries).
 3. When CDC is active, `canbox-core` emits Hiworld `Cmd 0x84` (`0x31` = CDC) to notify the Head Unit.
+
+### 5.2 Physical Button Override & Anti-Hijack Policy (`user_override_non_cdc`)
+When the driver manually presses the physical RD4 `SOURCE` button (or COM2000 stalk button) to switch away from `CDC` to `TUNER`, `CD`, or `AUX`:
+1. `psa_virtual_cdc_process_can_0x165()` enters the 800 ms `SRC_SYNC_PHYSICAL_DEBOUNCE` state, sets `user_override_non_cdc = true`, and transitions CDC to `PAUSE` (`status_icon = 2`).
+2. While `user_override_non_cdc == true` (or during `SRC_SYNC_PHYSICAL_DEBOUNCE`), repeated/periodic background `Cmd 0xAD SubCmd 0x02 Param 0x01` (`Audio Play`) frames from the Head Unit are **ignored** so `canbox-core` never hijacks the RD4 back to CDC against the user's manual selection.
+3. `user_override_non_cdc` is cleared only when:
+   - The Head Unit sends `Cmd 0xAD SubCmd 0x02 Param 0x00` (`Audio Standby/Stop`), allowing a subsequent fresh `0xAD 02 01` transition to switch back to CDC;
+   - The Head Unit sends an explicit `Cmd 0xAD SubCmd 0x03 <src>` source switch request; or
+   - The driver physically cycles the RD4 back to `CDC`.
 
 ---
 

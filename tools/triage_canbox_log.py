@@ -20,6 +20,7 @@ from collections import defaultdict, deque
 from typing import List, Dict, Tuple, Optional, Any
 
 HIWORLD_CMD_NAMES = {
+    0x0F: "RADIO_QUERY_DOWNLINK",
     0x11: "CAR_BASE_INFO / SWC_ANGLE",
     0x12: "DOORS_WINDOWS",
     0x13: "TRIP_INFO_1",
@@ -29,26 +30,38 @@ HIWORLD_CMD_NAMES = {
     0x18: "TIRE_PRESSURE_NUMERIC",
     0x21: "WHEEL_BUTTONS",
     0x22: "STALK_BUTTONS",
+    0x24: "CAR_TYPE_SET_DOWNLINK",
+    0x2F: "DIAGNOSTIC_QUERY_DOWNLINK",
     0x31: "HVAC_STATUS",
     0x32: "FRONT_RADAR_TOYOTA",
     0x33: "REAR_RADAR_TOYOTA",
     0x41: "PARKING_RADAR_PSA",
     0x42: "ALERTS_WARNING_INFO",
+    0x56: "AUDIO_SETTINGS_DSP",
     0x66: "TPMS_DETAILED",
     0x71: "FEATURE_CONFIG_1",
     0x72: "FEATURE_CONFIG_2",
     0x76: "PANEL_KEYS",
     0x79: "SYSTEM_STATUS",
+    0x7A: "ECU_SETTING_DOWNLINK",
     0x81: "AUDIO_AMP_1",
     0x82: "AUDIO_AMP_2",
     0x83: "AUDIO_AMP_3",
-    0x85: "AUDIO_INFO",
+    0x84: "CAR_RADIO_STATE",
+    0x85: "RADIO_PRESETS",
+    0x86: "RADIO_TEXT",
     0x93: "PARKING_SYSTEM",
     0x94: "ALARM_STATUS",
     0x95: "MAINTENANCE_INFO",
     0x96: "CAR_SETTINGS_1",
-    0x97: "CAR_SETTINGS_2",
+    0x97: "CAR_MEDIA_STATE",
+    0xA1: "RADIO_CONTROL_DOWNLINK",
+    0xA2: "MEDIA_CONTROL_DOWNLINK",
+    0xA4: "AUDIO_CONTROL_DOWNLINK",
+    0xAD: "VIRTUAL_CDC_DOWNLINK",
     0xC1: "LANGUAGE_CONFIG",
+    0xCA: "TIME_SYNC_DOWNLINK",
+    0xEA: "EXTENDED_ALERT",
     0xF0: "VERSION_REPORT",
     0xFF: "HEARTBEAT"
 }
@@ -168,6 +181,7 @@ def triage_log(log_path: str):
 
     orig_parser = StreamReassembler("ORIG")
     app_parser = StreamReassembler("APP")
+    rx_parser = StreamReassembler("HU_DOWNLINK")
 
     recent_can = deque(maxlen=20)
     can_msg_counts = defaultdict(int)
@@ -176,6 +190,9 @@ def triage_log(log_path: str):
 
     app_packets: List[Tuple[SerialPacket, List[CanFrameInfo]]] = []
     orig_packets: List[Tuple[SerialPacket, List[CanFrameInfo]]] = []
+    rx_packets: List[SerialPacket] = []
+    timeline_events: List[Tuple[float, str]] = []
+    WATCHED_CAN_IDS = {0x165, 0x21F, 0x1A5, 0x1E5, 0x325, 0x365, 0x3A5, 0x131, 0x3E5}
 
     total_lines = 0
     start_ts = None
@@ -212,12 +229,23 @@ def triage_log(log_path: str):
                     if can_last_data.get(cid) != dhex:
                         can_changed_counts[cid] += 1
                         can_last_data[cid] = dhex
+                        if cid in WATCHED_CAN_IDS:
+                            timeline_events.append((ts, f"CAN 0x{cid:03X} -> {dhex}"))
                     recent_can.append(CanFrameInfo(ts, cid, dlc, dhex))
 
             elif tag == "[APP_UART_TX]":
                 pkts = app_parser.feed(rest, ts)
                 for p in pkts:
                     app_packets.append((p, list(recent_can)))
+                    if p.cmd is not None and p.cmd not in (0xFF, 0x13, 0x14, 0x15, 0x66, 0x18):
+                        timeline_events.append((ts, f"APP_TX 0x{p.cmd:02X} ({p.cmd_name()}): {p.payload.hex()}"))
+
+            elif tag == "[APP_UART_RX]":
+                pkts = rx_parser.feed(rest, ts)
+                for p in pkts:
+                    rx_packets.append(p)
+                    if p.cmd is not None and p.cmd != 0xFF:
+                        timeline_events.append((ts, f"HU_RX  0x{p.cmd:02X} ({p.cmd_name()}): {p.payload.hex()}"))
 
             elif tag == "[ORIG_CANBOX]":
                 if rest.startswith("RX: "):
@@ -225,6 +253,11 @@ def triage_log(log_path: str):
                     pkts = orig_parser.feed(rest, ts)
                     for p in pkts:
                         orig_packets.append((p, list(recent_can)))
+                elif rest.startswith("TX: "):
+                    timeline_events.append((ts, f"ORIG_FWD_TX: {rest[4:]}"))
+
+            elif tag == "[APP]" and "[GPIO]" in rest:
+                timeline_events.append((ts, f"APP_GPIO: {rest}"))
 
     duration = (end_ts - start_ts) if (start_ts and end_ts) else 0.0
 
@@ -232,7 +265,7 @@ def triage_log(log_path: str):
     print(f"- **Log File:** `{os.path.basename(log_path)}`")
     print(f"- **Total Lines:** {total_lines:,} | **Duration:** {duration:.2f} s")
     print(f"- **CAN Frames Received:** {sum(can_msg_counts.values()):,} across {len(can_msg_counts)} unique IDs")
-    print(f"- **Serial Frames:** App = {len(app_packets)} | Real OEM Canbox = {len(orig_packets)}\n")
+    print(f"- **Serial Frames:** App TX = {len(app_packets)} | HU Downlink RX = {len(rx_packets)} | Real OEM Canbox = {len(orig_packets)}\n")
 
     # 1. Command Frequency Breakdown
     app_cmd_counts = defaultdict(int)
@@ -363,8 +396,18 @@ def triage_log(log_path: str):
     else:
         print("- No major structural discrepancies observed between App and OEM.")
 
+    if timeline_events:
+        print("\n---\n")
+        print("## 5. Causal Event Timeline (CAN State Transitions & UART RX/TX)")
+        for ts, ev in timeline_events[:120]:
+            rel_t = (ts - start_ts) if start_ts else 0.0
+            print(f"- `+{rel_t:6.3f}s` ({ts:.3f}): {ev}")
+        if len(timeline_events) > 120:
+            print(f"- *(... {len(timeline_events) - 120} more events truncated ...)*")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Triage OpenCanbox E2E Log")
     parser.add_argument("log_file", help="Path to dump_*.log")
     args = parser.parse_args()
     triage_log(args.log_file)
+

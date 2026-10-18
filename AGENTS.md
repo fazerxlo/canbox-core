@@ -7,11 +7,11 @@ Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004
 ## 1. Fast-Path Token Efficiency Rules
 
 1. **Silent Builds (`-s`):** Always pass `-s` to PlatformIO builds: `~/.platformio/penv/bin/pio run -s -e stm32_cbox`.
-2. **Surgical Edits & Batching:** Target only exact changed lines in `replace_file_content`. Batch independent `view_file` (up to 800 lines/call), `replace_file_content`, and command calls in parallel in a single turn.
+2. **Surgical Line-Range Reads & Batching:** Use `grep -n` first and read only the target function range (80–200 lines) in `view_file` rather than loading entire 700-line files. Batch independent `view_file`, `replace_file_content`, and command calls in parallel in a single turn.
 3. **Grep Line Discovery:** Use `grep -n` to locate line numbers before reading/editing; check `grep -rn "typedef struct <Name> include/"` before guessing headers.
 4. **Scripted Mass Edits:** Use Python/shell one-liners via `run_command` when refactoring across 3+ files or pruning >30% of a file.
-5. **Test Fast, Gate Once:** Iterate with `./tools/test_fast.sh` (or `./tools/test_fast.sh -e integration_test`). Run `./tools/verify_all.sh` **strictly once** at task completion. Never re-run C builds after editing `*.md` docs.
-6. **Log-Fix Short-Circuit:** When given `dump_*.log` + an explicit user rule, extract only `[CAN_RX]` test vectors and implement directly. Note: `[APP_UART_TX]` in logs reflects the binary flashed at capture time, not necessarily current local source.
+5. **Test Fast, Gate Once:** Iterate with `./tools/test_fast.sh` (or `./tools/test_fast.sh -e integration_test`). **NEVER execute `.pio/build/native_test/program` directly** (it is an infinite-loop SocketCAN daemon that hangs; unit tests live in `native_test_runner`). Run `./tools/verify_all.sh` **strictly once** at task completion. Never re-run C builds after editing `*.md` docs.
+6. **Single-Call Log Triage:** Run `./tools/triage_canbox_log.py <dump.log>` once (it includes CAN state transitions, `[APP_UART_RX]` downlinks, `[APP_UART_TX]` uplinks, and causal timelines). Avoid writing ad-hoc Python log parsers unless inspecting an unlisted CAN ID. Note: `[APP_UART_TX]` in logs reflects the binary flashed at capture time, not necessarily current local source.
 7. **ESP-IDF Registration:** Always register new `src/**/*.c` files in `src/CMakeLists.txt` in the same turn.
 8. **Spec Implementation Fast Path:** Treat user specs (`doc/CANBOX_SPEC_*.md`) as pre-verified ground truth. Do not run exploratory greps or subagent audits on documented bitfields/formulas. Read headers/sources/tests in parallel (Turn 1), batch all code edits (Turn 2), and batch test + doc updates (Turn 3).
 

@@ -33,6 +33,11 @@ bool psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio
         return false;
     }
 
+    if (data[0] == 0x00 && audio->valid && audio->master_volume > 2) {
+        /* Reject uninitialized 0x00 reset transient frame when volume was > 2 */
+        return false;
+    }
+
     uint8_t new_vol = data[0] & 0x1F;
     if (new_vol > 30) {
         new_vol = 30;
@@ -651,11 +656,22 @@ void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
             state->dirty.radio = true;
             break;
         case PSA_CAN_ID_RD4_VOLUME:
+            /* Ignore uninitialized 1A5#00 reset frame broadcast while RD4 is powered off/rebooting */
+            if (state->media.radio.present &&
+                (state->media.radio.power_status == 0 || state->media.radio.sleep) &&
+                frame->dlc >= 1 && (frame->data[0] & 0xE0) == 0x00) {
+                break;
+            }
             if (psa_decode_rd4_volume_0x1a5(frame->data, frame->dlc, &state->audio)) {
                 state->dirty.audio = true;
             }
             break;
         case PSA_CAN_ID_RD4_AUDIO_SETTINGS:
+            /* Ignore transient 0x1E5 frames while RD4 is powered off or in sleep/reset */
+            if (state->media.radio.present &&
+                (state->media.radio.power_status == 0 || state->media.radio.sleep)) {
+                break;
+            }
             if (psa_decode_rd4_audio_settings_0x1e5(frame->data, frame->dlc, &state->audio)) {
                 state->dirty.audio = true;
             }
@@ -696,6 +712,11 @@ void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
             }
             break;
         case PSA_CAN_ID_CD_TRAY_325:
+            /* Ignore 325#000000 reset frames emitted while RD4 is powered off/rebooting */
+            if (state->media.radio.present &&
+                (state->media.radio.power_status == 0 || state->media.radio.sleep)) {
+                break;
+            }
             if (psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc)) {
                 state->dirty.cdc = true;
             }

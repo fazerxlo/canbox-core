@@ -221,6 +221,7 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
         }
         s_arbiter.reported_hu_source = 0;
         s_arbiter.pending_station_list_trigger = false;
+        s_arbiter.user_override_non_cdc = false;
         s_target_reached_tick_ms = 0;
         s_cdc.radio_enabled = false;
         return;
@@ -265,8 +266,10 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
                 /* Rule F3: Physical Button Settle Filter - enter 800ms debounce */
                 s_arbiter.sync_state = SRC_SYNC_PHYSICAL_DEBOUNCE;
                 s_arbiter.state_timer_ms = hal_get_tick_ms();
-                if (new_source == PSA_RD4_SRC_TUNER) {
-                    s_arbiter.pending_station_list_trigger = true;
+                s_arbiter.user_override_non_cdc = (new_source != PSA_RD4_SRC_CDC);
+                if (new_source != PSA_RD4_SRC_CDC) {
+                    s_cdc.playback_active = false;
+                    s_cdc.status_icon = 2; /* STATUS_ICON_PAUSE */
                 }
             }
             break;
@@ -275,9 +278,11 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
             /* Reset 800ms debounce timer ONLY if the source actually changed again */
             if (new_source != prev_rd4_source) {
                 s_arbiter.state_timer_ms = hal_get_tick_ms();
-                if (new_source == PSA_RD4_SRC_TUNER) {
-                    s_arbiter.pending_station_list_trigger = true;
-                }
+            }
+            s_arbiter.user_override_non_cdc = (new_source != PSA_RD4_SRC_CDC);
+            if (new_source != PSA_RD4_SRC_CDC) {
+                s_cdc.playback_active = false;
+                s_cdc.status_icon = 2; /* STATUS_ICON_PAUSE */
             }
             break;
 
@@ -323,10 +328,6 @@ void psa_virtual_cdc_process_can_0x165(uint8_t source_mode, uint8_t power_status
 }
 
 void psa_virtual_cdc_switch_source(uint8_t target_source) {
-    if (target_source == PSA_RD4_SRC_TUNER) {
-        s_arbiter.pending_station_list_trigger = true;
-    }
-
     /* Rule F1: If already on target source, confirm immediately */
     if (s_arbiter.actual_rd4_source == target_source && s_arbiter.reported_hu_source == target_source) {
         s_arbiter.sync_state = SRC_SYNC_IDLE;
@@ -346,8 +347,10 @@ void psa_virtual_cdc_switch_source(uint8_t target_source) {
             psa_virtual_cdc_check_pending_station_list();
             return;
         }
-        s_arbiter.target_source = target_source;
-        return;
+        if (s_arbiter.sync_state == SRC_SYNC_WAIT_CONFIRM || s_arbiter.sync_state == SRC_SYNC_SEEKING) {
+            s_arbiter.target_source = target_source;
+            return;
+        }
     }
 
     /* Rule F1 & F4: Target acquisition & Initiate pulse sequence */
@@ -405,13 +408,18 @@ void psa_virtual_cdc_handle_hu_cmd(uint8_t subcmd, uint8_t param) {
 
         case 0x02: /* Audio Start / Stop */
             if (param == 0x01) {
-                psa_virtual_cdc_set_state(true);
+                /* Ignore periodic/repeated 0xAD 02 01 polls if user manually switched RD4 away from CDC */
+                if (!s_arbiter.user_override_non_cdc && s_arbiter.sync_state != SRC_SYNC_PHYSICAL_DEBOUNCE) {
+                    psa_virtual_cdc_set_state(true);
+                }
             } else if (param == 0x00) {
+                s_arbiter.user_override_non_cdc = false;
                 psa_virtual_cdc_set_state(false);
             }
             break;
 
         case 0x03: /* Switch RD4 Source (0x01 = Tuner, 0x02 = Internal CD, 0x03 = CDC, 0x04 = AUX) */
+            s_arbiter.user_override_non_cdc = false;
             if (param == 0x01) {
                 s_cdc.playback_active = false;
                 s_cdc.status_icon = 2; /* PAUSE */

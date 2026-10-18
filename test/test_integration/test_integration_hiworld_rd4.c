@@ -573,6 +573,12 @@ void test_integration_hiworld_rd4_downlink_resume_queries(void) {
     TEST_ASSERT_EQUAL_HEX8(0xA5, rx_buf[7]);
     TEST_ASSERT_EQUAL_HEX8(0x0E, rx_buf[8]);
     TEST_ASSERT_EQUAL_HEX8(0x84, rx_buf[9]);
+
+    /* CRITICAL: Verify that passive 0xA1 volume/source query does NOT trigger CAN 0x21F rotary scroll */
+    can_frame_t frame_sent;
+    if (hal_can_native_get_last_sent_frame(&frame_sent) && frame_sent.id == 0x21F) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, frame_sent.data[1]);
+    }
 }
 
 void test_integration_hiworld_rd4_preset_list_pipeline(void) {

@@ -257,11 +257,13 @@ void test_peugeot_407_rd4_station_list_trigger(void) {
     /* Now command switch to Tuner (0x01) -> actively seeking */
     psa_virtual_cdc_handle_hu_cmd(0x03, 0x01);
     TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+    const psa_source_arbiter_t *arb = psa_virtual_cdc_get_arbiter();
+    /* Switching to Tuner must NOT automatically arm station list trigger */
+    TEST_ASSERT_FALSE(arb->pending_station_list_trigger);
 
     /* While busy seeking, trigger station list (Cmd 0x0F arrived) */
     hal_can_native_clear_sent_frame();
     psa_virtual_cdc_trigger_station_list();
-    const psa_source_arbiter_t *arb = psa_virtual_cdc_get_arbiter();
     TEST_ASSERT_TRUE(arb->pending_station_list_trigger);
     /* No scroll frame should have been sent right now */
     TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
@@ -280,6 +282,33 @@ void test_peugeot_407_rd4_station_list_trigger(void) {
     psa_virtual_cdc_trigger_station_list();
     /* Immediately triggering again within 2 seconds must be debounced (no CAN transmission) */
     TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+
+    /* Case E: Normal switch to Tuner without Cmd 0x0F does NOT trigger rotary pulse */
+    psa_virtual_cdc_init();
+    psa_virtual_cdc_update_stalk_rotary(0x10);
+    can_router_process_can(&frame_165_cdc); /* On CDC */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x03, 0x01); /* Switch to Tuner */
+    can_router_process_can(&frame_165); /* Settles on Tuner */
+    TEST_ASSERT_FALSE(arb->pending_station_list_trigger);
+    /* Last sent frame must NOT be a rotary scroll pulse (i.e. not 0x21F with restored cnt) */
+    if (hal_can_native_get_last_sent_frame(&frame_sent)) {
+        /* If 0x21F was sent, it should only be SOURCE button pulse, never idle rotary scroll */
+        if (frame_sent.id == 0x21F) {
+            TEST_ASSERT_EQUAL_HEX8(0x00, frame_sent.data[0]);
+            TEST_ASSERT_EQUAL_HEX8(0x10, frame_sent.data[1]);
+        }
+    }
+
+    /* Case F: Physical button transition to Tuner does NOT trigger rotary pulse */
+    psa_virtual_cdc_init();
+    psa_virtual_cdc_update_stalk_rotary(0x10);
+    can_router_process_can(&frame_165_cdc); /* On CDC */
+    can_router_process_can(&frame_165);     /* Driver clicked SRC to Tuner -> enters physical debounce */
+    TEST_ASSERT_FALSE(arb->pending_station_list_trigger);
+    hal_delay_ms(850);
+    psa_virtual_cdc_tick_100ms();           /* Settles in IDLE on Tuner */
+    TEST_ASSERT_FALSE(arb->pending_station_list_trigger);
 }
 
 void test_peugeot_407_rd4_source_switch_lockout_and_suppression(void) {
@@ -635,6 +664,126 @@ void test_peugeot_407_virtual_cdc_always_enabled_and_subcmd_0x02(void) {
     TEST_ASSERT_TRUE(psa_virtual_cdc_is_presence_enabled());
     TEST_ASSERT_EQUAL_UINT8(2, ctx->status_icon); /* STATUS_ICON_PAUSE */
 }
+
+void test_peugeot_407_rd4_physical_override_blocks_periodic_0xad_02_01(void) {
+    /* Regression test for dump_2026-10-18_15-20-27.log:
+     * When user manually presses RD4 SOURCE button to switch away from CDC,
+     * repeated/periodic 5A A5 02 AD 02 01 B1 from HU must NOT hijack RD4 back to CDC. */
+    can_router_init();
+    psa_virtual_cdc_init();
+
+    /* 1. RD4 starts on CDC (165#c8d03000) */
+    can_frame_t frame_165_cdc = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xD0, 0x30, 0x00 }
+    };
+    can_router_process_can(&frame_165_cdc);
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, psa_virtual_cdc_get_reported_source());
+
+    /* 2. User presses physical RD4 SOURCE button -> switches to AUX 1 (165#c8d04000) */
+    can_frame_t frame_165_aux = {
+        .id = 0x165,
+        .dlc = 4,
+        .data = { 0xC8, 0xD0, 0x40, 0x00 }
+    };
+    can_router_process_can(&frame_165_aux);
+    const psa_source_arbiter_t *arbiter = psa_virtual_cdc_get_arbiter();
+    TEST_ASSERT_EQUAL_INT(SRC_SYNC_PHYSICAL_DEBOUNCE, arbiter->sync_state);
+    TEST_ASSERT_TRUE(arbiter->user_override_non_cdc);
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+
+    /* 3. During physical debounce (e.g. 200ms later), HU sends periodic 0xAD 02 01 */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+    can_frame_t frame_pulse;
+    /* Must NOT inject 0x21F pulse or change target_source! */
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_UINT8(0, arbiter->target_source);
+    TEST_ASSERT_EQUAL_INT(SRC_SYNC_PHYSICAL_DEBOUNCE, arbiter->sync_state);
+
+    /* 4. Physical debounce settles after 850ms on AUX 1 */
+    hal_delay_ms(850);
+    psa_virtual_cdc_tick_100ms();
+    TEST_ASSERT_EQUAL_INT(SRC_SYNC_IDLE, arbiter->sync_state);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, arbiter->reported_hu_source);
+    TEST_ASSERT_TRUE(arbiter->user_override_non_cdc);
+
+    /* 5. 447ms later, HU sends periodic 0xAD 02 01 again while settled on AUX 1 */
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+    /* Must NOT hijack RD4 back to CDC! */
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_FALSE(psa_virtual_cdc_is_active());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, arbiter->reported_hu_source);
+
+    /* 6. Once HU stops audio (0xAD 02 00) and later starts fresh playback (0xAD 02 01),
+     * or sends explicit SubCmd 0x03, switching to CDC is allowed again */
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x00);
+    TEST_ASSERT_FALSE(arbiter->user_override_non_cdc);
+
+    hal_can_native_clear_sent_frame();
+    psa_virtual_cdc_handle_hu_cmd(0x02, 0x01);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
+    TEST_ASSERT_TRUE(psa_virtual_cdc_is_switching_in_progress());
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_CDC, arbiter->target_source);
+}
+
+void test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression(void) {
+    /* Regression test for dump_2026-10-18_15-21-33.log:
+     * 1) When RD4 powers off / resets (165#00000000), transient 1A5#00 and 325#000000
+     *    must NOT set master_volume = 0 or latch play_status = 0x0C (Eject).
+     * 2) Subsequent 1A5#E9 restores volume = 9 cleanly. */
+    can_router_init();
+    psa_virtual_cdc_init();
+
+    /* 1. RD4 active on Internal CD with Volume = 9 (1A5#E9) and Track 3 playing */
+    can_frame_t frame_165_cd = {
+        .id = 0x165, .dlc = 4, .data = { 0xC8, 0xD0, 0x20, 0x00 }
+    };
+    can_frame_t frame_1a5_vol9 = {
+        .id = 0x1A5, .dlc = 1, .data = { 0xE9 }
+    };
+    can_frame_t frame_365 = {
+        .id = 0x365, .dlc = 5, .data = { 0x0C, 0x26, 0x02, 0x00, 0x00 }
+    };
+    can_frame_t frame_3a5 = {
+        .id = 0x3A5, .dlc = 6, .data = { 0x02, 0x01, 0x19, 0x00, 0x2E, 0x00 }
+    };
+    can_router_process_can(&frame_165_cd);
+    can_router_process_can(&frame_1a5_vol9);
+    can_router_process_can(&frame_365);
+    can_router_process_can(&frame_3a5);
+
+    const vehicle_state_t *st = can_router_get_state();
+    TEST_ASSERT_EQUAL_UINT8(9, st->audio.master_volume);
+    TEST_ASSERT_EQUAL_UINT8(0, st->audio.active_mode);
+    TEST_ASSERT_EQUAL_UINT8(0x02, st->media.cdc.play_status);
+
+    /* 2. RD4 powers off / warm resets (165#00000000) and emits zeroed burst (1A5#00, 325#000000) */
+    can_frame_t frame_165_off = {
+        .id = 0x165, .dlc = 4, .data = { 0x00, 0x00, 0x00, 0x00 }
+    };
+    can_frame_t frame_1a5_zero = {
+        .id = 0x1A5, .dlc = 1, .data = { 0x00 }
+    };
+    can_frame_t frame_325_zero = {
+        .id = 0x325, .dlc = 3, .data = { 0x00, 0x00, 0x00 }
+    };
+    can_router_process_can(&frame_165_off);
+    can_router_process_can(&frame_1a5_zero);
+    can_router_process_can(&frame_325_zero);
+
+    /* Volume MUST remain 9 (NOT overwritten by 0) and play_status MUST be 0x01 Pause (NOT 0x0C Eject) */
+    TEST_ASSERT_EQUAL_UINT8(9, st->audio.master_volume);
+    TEST_ASSERT_EQUAL_UINT8(0, st->audio.active_mode);
+    TEST_ASSERT_EQUAL_UINT8(0x01, st->media.cdc.play_status);
+}
+
 
 
 

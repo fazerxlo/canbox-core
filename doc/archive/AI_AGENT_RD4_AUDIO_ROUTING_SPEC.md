@@ -171,6 +171,7 @@ typedef struct {
   * Else: Continue seeking the new target without emitting intermediate `Cmd 0x84` packets.
 
 #### Rule F5 — Cmd 0x0F Station List Arbitration & Immediate Cached State Re-emission
+* **Exclusively Gated by Cmd 0x0F:** Station list refresh/request pulses on CAN `0x21F` are **only** generated upon explicit receipt of HU query `5A A5 01 0F 0F`. Switching source to Tuner (via `Cmd 0xAD` or physical front panel / stalk button) does **not** automatically trigger a station list scroll.
 * **Immediate 0x84 Emission:** When Android HU sends `Cmd 0x0F` (`5A A5 01 0F 0F`), firmware immediately emits the cached `Cmd 0x84` (current frequency, band, and RDS PS station name) to the serial bus without generating any CAN traffic. Even on cold boot if the protocol cache is uninitialized, the serializer falls back to canonical state cache or zeroed baseline to guarantee immediate response.
 * **Deferred 0x21F Rotary Scroll Queue:** In `psa_virtual_cdc_trigger_station_list()`:
   * If the source arbiter is currently busy (`sync_state != SRC_SYNC_IDLE`, e.g. pulsing `SOURCE` on CAN `0x21F` to satisfy a concurrent `Cmd 0xAD`), the thumbwheel scroll is **not** transmitted immediately. Instead, a flag `pending_station_list_trigger = true` is set.

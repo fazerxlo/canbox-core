@@ -37,7 +37,7 @@ done
 
 OUT=$("$PIO" test -e "$ENV" "${FILTER_ARGS[@]}" 2>&1) || {
     echo "FAILED!"
-    echo "$OUT" | grep -E "FAILED|ERROR|test_.*\[" | head -n 30
+    echo "$OUT" | grep -E "FAILED|FAIL:|ERROR:|error:" -B 1 -A 2 | head -n 40
     exit 1
 }
 

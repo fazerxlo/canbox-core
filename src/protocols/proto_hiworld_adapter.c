@@ -87,12 +87,19 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         hu_protocol_send_radio_presets(NULL);
         psa_virtual_cdc_trigger_station_list();
     } else if (packet->cmd == HIWORLD_CMD_RADIO_CONTROL) { /* 0xA1 */
-        /* When HU Tuner UI opens, it sends 5A A5 03 A1 00 01 FF A3 (or 00 01 1D C1)
-         * to query/sync current radio state and preset list. */
+        /* When HU Tuner UI opens or volume/source updates occur, it sends 5A A5 03 A1 00 01 ...
+         * to query/sync current radio state and preset list.
+         * Only reply with 0x84/0x85 when RD4 is powered ON in Tuner mode (< 0x20);
+         * replying while in CD/CDC/AUX or OFF causes a 0x84 <-> 0xA1 feedback loop. */
         if (packet->payload_len >= 2 && packet->payload[0] == 0x00 && packet->payload[1] == 0x01) {
-            hu_protocol_send_radio_state(NULL);
-            hu_protocol_send_radio_presets(NULL);
-            psa_virtual_cdc_trigger_station_list();
+            const vehicle_state_t *st = can_router_get_state();
+            bool radio_active_tuner = (st == NULL || !st->media.radio.present) ||
+                                      (st->media.radio.source_mode < 0x20 && st->media.radio.power_status != 0);
+            if (!psa_virtual_cdc_is_source_filtered() && radio_active_tuner) {
+                hu_protocol_send_radio_state(NULL);
+                hu_protocol_send_radio_presets(NULL);
+            }
+            /* Do NOT trigger rotary scroll on 0xA1; reserve that only for explicit 0x0F queries */
         }
     } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
         /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */

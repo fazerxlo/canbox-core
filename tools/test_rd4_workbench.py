@@ -16,6 +16,7 @@ Features:
    - Rapid mid-flight source retargeting stress test
    - CDC playback state toggling (Play 0x03 vs Pause 0x02 on CAN 0x162)
    - Physical stalk button override & debounce filter (Rule F3)
+   - Head Unit radio/volume report (0xA1) station refresh suppression
 6. Comprehensive timestamped logging for post-mortem debugging.
 
 Usage:
@@ -75,7 +76,9 @@ CMD_CDC_STANDBY     = bytes.fromhex("5AA502AD0200B0")
 CMD_SWITCH_TO_TUNER = bytes.fromhex("5AA502AD0301B3")
 CMD_SWITCH_TO_CD    = bytes.fromhex("5AA502AD0302B4")
 CMD_SWITCH_TO_AUX   = bytes.fromhex("5AA502AD0304B5")
-CMD_QUERY_STATIONS  = bytes.fromhex("5AA5010F0F")
+CMD_QUERY_STATIONS    = bytes.fromhex("5AA5010F0F")
+CMD_RADIO_VOLUME_SYNC = bytes.fromhex("5AA503A1000117BB")  # Master setting / volume report (source=Radio, vol=23)
+CMD_RADIO_VOLUME_MUTE = bytes.fromhex("5AA503A10001FFA3")  # Master setting / volume report (source=Radio, vol=-1)
 
 SOURCE_SWITCH_COMMANDS = {
     PSA_RD4_SRC_CDC:   CMD_SWITCH_TO_CDC,
@@ -178,9 +181,9 @@ class CanBus:
         with self.lock:
             return self.last_frames.get(can_id)
 
-    def wait_frame(self, can_id: int, match_fn=None, timeout: float = 2.0):
+    def wait_frame(self, can_id: int, match_fn=None, timeout: float = 2.0, start_time: float = None):
         deadline = time.time() + timeout
-        start_t = time.time()
+        start_t = time.time() if start_time is None else start_time
         while time.time() < deadline:
             with self.lock:
                 for t, cid, data in reversed(self.frame_history):
@@ -261,11 +264,10 @@ class HuUart:
 
     def _start_native_app(self):
         bin_path = os.path.abspath(".pio/build/native_test/program")
-        if not os.path.exists(bin_path):
-            self.logger.log("APP_INIT", "Compiling native OpenCanbox firmware...")
-            pio_path = os.path.expanduser("~/.platformio/penv/bin/pio")
-            pio_cmd = pio_path if os.path.exists(pio_path) else "pio"
-            subprocess.run([pio_cmd, "run", "-s", "-e", "native_test"], check=True)
+        self.logger.log("APP_INIT", "Compiling native OpenCanbox firmware...")
+        pio_path = os.path.expanduser("~/.platformio/penv/bin/pio")
+        pio_cmd = pio_path if os.path.exists(pio_path) else "pio"
+        subprocess.run([pio_cmd, "run", "-s", "-e", "native_test"], check=True)
 
         self.master_fd, self.slave_fd = pty.openpty()
         try:
@@ -336,16 +338,13 @@ class HuUart:
                                 pass
 
                 # 2. Read from physical Head Unit
+                # When run_app is True, drain physical HU RX so its buffer does not fill,
+                # but do NOT forward competing 0xAD/0x0F/0xA1 commands into master_fd while
+                # the automated workbench test runner is controlling the firmware!
                 if self.phys_ser is not None and self.phys_ser.fileno() in r:
                     chunk = self.phys_ser.read(self.phys_ser.in_waiting or 1)
-                    if chunk:
-                        if self.master_fd is not None:
-                            try:
-                                os.write(self.master_fd, chunk)
-                            except Exception:
-                                pass
-                        elif not self.run_app:
-                            buf.extend(chunk)
+                    if chunk and not self.run_app:
+                        buf.extend(chunk)
 
                 # Hiworld frame reassembly: 5A A5 <len> <cmd> <payload...> <cs>
                 while len(buf) >= 4:
@@ -386,9 +385,9 @@ class HuUart:
         except Exception as e:
             self.logger.log("HU_ERR", f"TX error: {e}")
 
-    def wait_packet(self, cmd: int, timeout: float = 2.0, match_fn=None):
+    def wait_packet(self, cmd: int, timeout: float = 2.0, match_fn=None, start_time: float = None):
         deadline = time.time() + timeout
-        start_t = time.time()
+        start_t = time.time() if start_time is None else start_time
         while time.time() < deadline:
             with self.lock:
                 for t, frame in reversed(self.rx_frames):
@@ -600,13 +599,14 @@ class Rd4WorkbenchRunner:
         # 3. Inject HU Station List Query: 5A A5 01 0F 0F
         # Allow 2.1s debounce window to elapse from prerequisite switch so rotary scroll executes
         time.sleep(2.1)
+        t_before_cmd = time.time()
         self.hu_uart.send(CMD_QUERY_STATIONS)
 
         # 4. Check that CAN Box emitted rotary pulses on 0x21F (scroll up, then restore down)
         pulse_found = False
         deadline = time.time() + 1.2
         while time.time() < deadline:
-            res = self.can_bus.wait_frame(CAN_ID_STALK_21F, timeout=0.1)
+            res = self.can_bus.wait_frame(CAN_ID_STALK_21F, timeout=0.1, start_time=t_before_cmd)
             if res:
                 _, pdata = res
                 if len(pdata) >= 2 and pdata[1] != 0:  # Rotary counter moved
@@ -617,7 +617,7 @@ class Rd4WorkbenchRunner:
         self.record_test("Station List: Rotary Pulse Injection", pulse_found, "Observed rotary step on CAN 0x21F" if pulse_found else "No rotary pulse on CAN 0x21F")
 
         # 5. Check UART Uplink for Cmd 0x84
-        uart_84 = self.hu_uart.wait_packet(0x84, timeout=1.5)
+        uart_84 = self.hu_uart.wait_packet(0x84, timeout=1.5, start_time=t_before_cmd)
         self.record_test("Station List: HU Uplink 0x84", (uart_84 is not None),
                          f"0x84={'OK' if uart_84 else 'MISSING'}")
 
@@ -628,6 +628,7 @@ class Rd4WorkbenchRunner:
             self.record_test("Station List: Frequency Preservation", False, "CAN 0x225 stopped broadcasting")
             return False
         _, data_225_after = frame_225_after
+        freq_raw_after = ((data_225_after[3] & 0x0F) << 8) | data_225_initial[4]
         freq_raw_after = ((data_225_after[3] & 0x0F) << 8) | data_225_after[4]
 
         freq_preserved = (freq_raw_initial == freq_raw_after)
@@ -731,6 +732,7 @@ class Rd4WorkbenchRunner:
         src_init, _, _ = self.get_current_rd4_source(timeout=0.5)
 
         # Simulate user pressing physical SOURCE button on stalk (CAN 0x21F press + release)
+        t_before_phys = time.time()
         self.logger.log("TEST_PHYSICAL", "Injecting simulated physical SRC button pulse on CAN 0x21F", console=True)
         self.can_bus.send(CAN_ID_STALK_21F, bytes.fromhex("020000"))
         time.sleep(0.06)
@@ -744,11 +746,108 @@ class Rd4WorkbenchRunner:
                          f"Stepped from {SOURCE_NAMES.get(src_init, 'UNK')} to {SOURCE_NAMES.get(src_stepped, 'UNK')}")
 
         # Wait for settle filter to expire, then check that CAN Box emitted 0x84 to HU
-        uart_84 = self.hu_uart.wait_packet(0x84, timeout=2.0)
+        uart_84 = self.hu_uart.wait_packet(0x84, timeout=2.0, start_time=t_before_phys)
         synced = (uart_84 is not None)
         self.record_test("Physical Button: HU Synchronized after Debounce", synced,
                          f"Received 0x84: {uart_84[1].hex() if uart_84 else 'NONE'}")
-        return stepped and synced
+
+        # Verify background 0xAD 02 01 poll from HU does NOT hijack physical source selection
+        t_before_poll = time.time()
+        self.hu_uart.send(CMD_SWITCH_TO_CDC)
+        hijack_pulse = self.can_bus.wait_frame(
+            CAN_ID_STALK_21F,
+            match_fn=lambda d: len(d) >= 1 and (d[0] & 0x02) != 0,
+            timeout=0.4,
+            start_time=t_before_poll
+        )
+        no_hijack = (hijack_pulse is None)
+        self.record_test("Physical Button: No 0xAD 02 01 Hijack", no_hijack,
+                         "Periodic 0xAD 02 01 ignored after physical override" if no_hijack else "FAILED: Hijacked back to CDC!")
+
+        # Clear override with CDC standby (0xAD 02 00)
+        self.hu_uart.send(CMD_CDC_STANDBY)
+        return stepped and synced and no_hijack
+
+    # --------------------------------------------------------------------------
+    # Test 7: Head Unit Radio / Volume Sync Does NOT Trigger Station Refresh
+    # --------------------------------------------------------------------------
+    def test_07_radio_volume_no_station_refresh(self) -> bool:
+        print("\n\033[94m[*] Test 7: Head Unit Radio / Volume Sync Does NOT Trigger Station Refresh\033[0m")
+        # 1. Switch to Tuner first if not already on Tuner
+        self.hu_uart.send(CMD_SWITCH_TO_TUNER)
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            src, _, _ = self.get_current_rd4_source(timeout=0.2)
+            if src == PSA_RD4_SRC_TUNER:
+                break
+            time.sleep(0.05)
+
+        src, _, _ = self.get_current_rd4_source(timeout=1.0)
+        if src != PSA_RD4_SRC_TUNER:
+            self.record_test("Radio/Volume: Prerequisite", False, f"Could not switch RD4 to Tuner (at {SOURCE_NAMES.get(src, 'UNK')})")
+            return False
+
+        # Allow 2.1s debounce window to elapse from prerequisite switch so rotary scroll state is idle
+        time.sleep(2.1)
+
+        # 2. Read initial Frequency from CAN 0x225
+        frame_225 = self.can_bus.wait_frame(CAN_ID_RD4_STATUS_225, timeout=1.5)
+        if not frame_225:
+            self.record_test("Radio/Volume: Read Frequency", False, "CAN 0x225 not broadcast by RD4")
+            return False
+        _, data_225_initial = frame_225
+        freq_raw_initial = ((data_225_initial[3] & 0x0F) << 8) | data_225_initial[4]
+        self.logger.log("TEST_VOLUME", f"Initial Tuner frequency raw: 0x{freq_raw_initial:04X} ({freq_raw_initial * 0.05 + 50.0:.1f} MHz)", console=True)
+
+        # 3. Inject HU Radio/Volume Master Setting frames: 5A A5 03 A1 00 01 17 BB, then 5A A5 03 A1 00 01 FF A3
+        t_before_cmd = time.time()
+        self.logger.log("TEST_VOLUME", "Injecting HU passive volume/source reports (0xA1)", console=True)
+        self.hu_uart.send(CMD_RADIO_VOLUME_SYNC)
+        time.sleep(0.05)
+        self.hu_uart.send(CMD_RADIO_VOLUME_MUTE)
+
+        # 4. Check UART responsiveness (universal ACK for 0xA1: 5A A5 01 FF A1 A0 or 0x84 state)
+        ack = self.hu_uart.wait_packet(0xFF, timeout=0.8, match_fn=lambda f: len(f) >= 5 and f[4] == 0xA1, start_time=t_before_cmd)
+        uart_84 = self.hu_uart.wait_packet(0x84, timeout=0.8, start_time=t_before_cmd)
+        uart_ok = (ack is not None or uart_84 is not None)
+        self.record_test("Radio/Volume: UART Responsiveness", uart_ok,
+                         f"ACK: {ack[1].hex() if ack else 'none'}, 0x84: {'OK' if uart_84 else 'none'}")
+
+        # 5. Verify CAN bus: Assert that CAN Box emitted ZERO rotary pulses on 0x21F
+        pulse_frame = self.can_bus.wait_frame(
+            CAN_ID_STALK_21F,
+            match_fn=lambda d: len(d) >= 2 and d[1] != 0,
+            timeout=1.5,
+            start_time=t_before_cmd
+        )
+        pulse_found = (pulse_frame is not None)
+        self.record_test("Radio/Volume: No Stalk Rotary Pulse (0x21F)", not pulse_found,
+                         "Zero rotary pulses on CAN 0x21F (clean suppression)" if not pulse_found else f"FAILED: Stalk pulse detected: {pulse_frame[1].hex()}")
+
+        # 6. Verify CAN bus: Assert that RD4 emitted ZERO station list frames on 0x125
+        list_frame = self.can_bus.wait_frame(
+            CAN_ID_RD4_LIST_125,
+            timeout=0.3,
+            start_time=t_before_cmd
+        )
+        list_found = (list_frame is not None)
+        self.record_test("Radio/Volume: No Station List (0x125)", not list_found,
+                         "Zero 0x125 station list frames provoked" if not list_found else f"FAILED: Station list burst detected: {list_frame[1].hex()}")
+
+        # 7. Verify RD4 Frequency remained completely unchanged
+        time.sleep(0.5)
+        frame_225_after = self.can_bus.wait_frame(CAN_ID_RD4_STATUS_225, timeout=1.5)
+        if not frame_225_after:
+            self.record_test("Radio/Volume: Frequency Preservation", False, "CAN 0x225 stopped broadcasting")
+            return False
+        _, data_225_after = frame_225_after
+        freq_raw_after = ((data_225_after[3] & 0x0F) << 8) | data_225_after[4]
+
+        freq_preserved = (freq_raw_initial == freq_raw_after)
+        self.record_test("Radio/Volume: Frequency Preservation", freq_preserved,
+                         f"Before: 0x{freq_raw_initial:04X}, After: 0x{freq_raw_after:04X} ({'IDENTICAL' if freq_preserved else 'DE-TUNED!'})")
+
+        return uart_ok and (not pulse_found) and (not list_found) and freq_preserved
 
     # --------------------------------------------------------------------------
     # Test Report Summary
@@ -848,6 +947,7 @@ def main():
             runner.test_04_rapid_retargeting_stress()
             runner.test_05_cdc_playback_state_toggling()
             runner.test_06_physical_button_override()
+            runner.test_07_radio_volume_no_station_refresh()
 
         success = runner.print_summary()
         sys.exit(0 if success else 1)
