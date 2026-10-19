@@ -83,7 +83,7 @@
 | `[-]` | `0x81` | Cruise Presets Setup | `0x0A` | `0x39B` | `CANBOX_SPEC_HIWORLD_407_06_TRIP_COMPUTER_TELEMETRY.md` | Speed memory slots 1..6 |
 | `[x]` | `0x85` | Alarm Replay Query | `0x02` | `0x39B` | `proto_hiworld_adapter.c` | Replays active alert journal |
 | `[x]` | `0x94` | Software Reset / Ping | `0x01` | N/A | `hiworld_connection.c` | Link liveness / reboot |
-| `[x]` | `0xAD` | Virtual CDC & RD4 Source | `0x03` | `0x162`, `0x1A2`, `0x1E2`, `0x1A0`, `0x0E2`, `0x531`, `0x21F` | `psa_virtual_cdc.c`, `can_router.c` | `CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md` |
+| `[x]` | `0xAD` | RD4 Audio Source Routing | `0x02`..`0x03` | `0x21F` | `psa_source_arbiter.c`, `can_router.c` | Line In 1 / AUX 1 routing (`0xAD 03 03` / `0xAD 02 01`) |
 | `[x]` | `0xCB` | GPS Date & Time Set | `0x07` | `0x228` | `hiworld_connection.c` | `CANBOX_SPEC_HIWORLD_407_10_BSI_SETTINGS_CLOCK_SYNC.md` |
 | `[-]` | `0xC2`/`0xE0` | MCU IAP Flash Transfer | Var | N/A | `hiworld_iap_nuc131.c`, `pack_hiworld_iap.py` | NUC131 FMC vector remap & 136B container |
 | `[x]` | **ALL** | Universal Downlink ACK | `0x02` | N/A | `proto_hiworld_adapter.c` | `5A A5 01 FF <RxCmd> <(RxCmd-1)&0xFF>` |

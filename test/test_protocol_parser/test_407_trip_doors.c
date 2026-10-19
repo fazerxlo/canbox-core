@@ -1,6 +1,5 @@
 #include "unity.h"
 #include "profiles/peugeot_407.h"
-#include "profiles/psa_virtual_cdc.h"
 #include "core/vehicle_profile.h"
 #include "protocols/hu_protocol.h"
 #include "protocols/hu_protocol_driver.h"

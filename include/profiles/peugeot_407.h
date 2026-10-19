@@ -56,13 +56,6 @@ extern "C" {
 #define PSA_CAN_ID_CD_DISC_INFO_365 0x365
 #define PSA_CAN_ID_CD_PLAY_3A5      0x3A5
 #define PSA_CAN_ID_CD_CHANGER       0x3A6
-#define PSA_CAN_ID_CDC_CMD_131      0x131
-#define PSA_CAN_ID_CDC_STATUS_162   0x162
-#define PSA_CAN_ID_CDC_TRACKS_1A2   0x1A2
-#define PSA_CAN_ID_CDC_TRACK_1E2    0x1E2
-#define PSA_CAN_ID_CDC_PLAYMODES_1A0 0x1A0
-#define PSA_CAN_ID_CDC_DISCNUM_0E2  0x0E2
-#define PSA_CAN_ID_CDC_HEARTBEAT_531 0x531
 
 /* --------------------------------------------------------------------------
  * 1.1 Steering Column Stalk & Buttons

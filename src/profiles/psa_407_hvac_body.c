@@ -1,5 +1,5 @@
 #include "profiles/peugeot_407.h"
-#include "profiles/psa_virtual_cdc.h"
+#include "profiles/psa_source_arbiter.h"
 #include "hal/hal_gpio.h"
 #include <string.h>
 
@@ -111,7 +111,7 @@ void psa_decode_stalk_0x21f_ex(psa_stalk_state_t *st, const uint8_t *data, uint8
     /* Rotary Encoder (molette) counter on Byte 1 */
     if (dlc >= 2) {
         uint8_t b1 = data[1];
-        psa_virtual_cdc_update_stalk_rotary(b1);
+        psa_source_arbiter_update_stalk_rotary(b1);
         if (st->rotary_init) {
             int8_t delta = (int8_t)(b1 - st->prev_rotary);
             if (delta > 0) {

@@ -3,7 +3,6 @@
 #include "core/vehicle_profile.h"
 #include "protocols/proto_hiworld.h"
 #include "protocols/hiworld_connection.h"
-#include "profiles/psa_virtual_cdc.h"
 #include "hal/hal_gpio.h"
 
 

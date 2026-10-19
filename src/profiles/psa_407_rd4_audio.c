@@ -1,5 +1,5 @@
 #include "profiles/peugeot_407.h"
-#include "profiles/psa_virtual_cdc.h"
+#include "profiles/psa_source_arbiter.h"
 #include <string.h>
 
 /* --------------------------------------------------------------------------
@@ -196,7 +196,7 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
     if (!radio_powered) {
         radio->source_mode = 0xFF;
         radio->power_status = 0x00;
-        psa_virtual_cdc_process_can_0x165(radio->source_mode, radio->power_status);
+        psa_source_arbiter_process_can_0x165(radio->source_mode, radio->power_status);
         return;
     }
 
@@ -219,7 +219,7 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
             radio->source_mode = 0x20;
             radio->power_status = 0x01;
             break;
-        case 0x3: /* Virtual CDC */
+        case 0x3: /* CDC */
             radio->source_mode = 0x31;
             radio->power_status = 0x01;
             break;
@@ -237,7 +237,7 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
             break;
     }
 
-    psa_virtual_cdc_process_can_0x165(radio->source_mode, radio->power_status);
+    psa_source_arbiter_process_can_0x165(radio->source_mode, radio->power_status);
 }
 
 void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {

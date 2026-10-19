@@ -9,7 +9,7 @@ set(srcs
     "profiles/psa_407_telemetry.c"
     "profiles/psa_407_rd4_audio.c"
     "profiles/psa_407_alerts.c"
-    "profiles/psa_virtual_cdc.c"
+    "profiles/psa_source_arbiter.c"
     "profiles/profile_vag.c"
     "protocols/canbox_parser.c"
     "protocols/hiworld_car_mapping.c"

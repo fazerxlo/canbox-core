@@ -6,7 +6,7 @@
 #include "protocols/hiworld_psa_builders.h"
 #include "core/can_router.h"
 #include "profiles/peugeot_407.h"
-#include "profiles/psa_virtual_cdc.h"
+#include "profiles/psa_source_arbiter.h"
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
 #include "core/canbox_version.h"
@@ -85,7 +85,7 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         /* Head Unit resume query forwardType(0x0F): immediate retransmit of radio state */
         hu_protocol_send_radio_state(NULL);
         hu_protocol_send_radio_presets(NULL);
-        psa_virtual_cdc_trigger_station_list();
+        psa_source_arbiter_trigger_station_list();
     } else if (packet->cmd == HIWORLD_CMD_RADIO_CONTROL) { /* 0xA1 */
         /* When HU Tuner UI opens or volume/source updates occur, it sends 5A A5 03 A1 00 01 ...
          * to query/sync current radio state and preset list.
@@ -95,7 +95,7 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
             const vehicle_state_t *st = can_router_get_state();
             bool radio_active_tuner = (st == NULL || !st->media.radio.present) ||
                                       (st->media.radio.source_mode < 0x20 && st->media.radio.power_status != 0);
-            if (!psa_virtual_cdc_is_source_filtered() && radio_active_tuner) {
+            if (!psa_source_arbiter_is_source_filtered() && radio_active_tuner) {
                 hu_protocol_send_radio_state(NULL);
                 hu_protocol_send_radio_presets(NULL);
             }
@@ -104,9 +104,9 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
         /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */
         hu_protocol_send_media_state(NULL);
-    } else if (packet->cmd == HIWORLD_CMD_VIRTUAL_CDC) {
+    } else if (packet->cmd == HIWORLD_CMD_AUDIO_SOURCE) {
         if (packet->payload_len >= 2) {
-            psa_virtual_cdc_handle_hu_cmd(packet->payload[0], packet->payload[1]);
+            psa_source_arbiter_handle_hu_cmd(packet->payload[0], packet->payload[1]);
         }
     } else if (packet->cmd == HIWORLD_CMD_UPGRADE_TRIGGER) {
         /* Head Unit requested firmware update (e.g. 5A A5 03 E0 00 00 E2) */

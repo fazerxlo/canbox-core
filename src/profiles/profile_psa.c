@@ -1,7 +1,6 @@
 #include "core/vehicle_profile.h"
 #include "core/can_router.h"
 #include "profiles/peugeot_407.h"
-#include "profiles/psa_virtual_cdc.h"
 #include <string.h>
 
 static inline uint16_t read_be16_local(const uint8_t *d) {
@@ -239,15 +238,8 @@ static void psa_decode_etat_autoradio_0x165_profile(const can_frame_t *frame, ve
     psa_update_derived_power_state(state);
 }
 
-static void psa_decode_cdc_cmd_0x131_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    (void)state;
-    if (!frame) return;
-    psa_virtual_cdc_process_can_0x131(frame->data, frame->dlc);
-}
-
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
-    { PSA_CAN_ID_CDC_CMD_131,        psa_decode_cdc_cmd_0x131_profile },
     { PSA_CAN_ID_TEXTE_RADIO,        psa_rd4_decode_frame },
     { PSA_CAN_ID_RADAR_0E1,          psa_radar_decode_frame },
     { 0x0F6,                         psa_decode_bsi_slow_0x0f6 },

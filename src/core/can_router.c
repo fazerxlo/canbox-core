@@ -1,6 +1,6 @@
 #include "core/can_router.h"
 #include "core/vehicle_profile.h"
-#include "profiles/psa_virtual_cdc.h"
+#include "profiles/psa_source_arbiter.h"
 #include "protocols/hu_protocol.h"
 #include "hal/hal_gpio.h"
 #include <string.h>
@@ -84,7 +84,7 @@ void can_router_init(void) {
     hal_gpio_write(GPIO_PIN_CAN_STBY, false);
     vehicle_profile_init();
     hu_protocol_init();
-    psa_virtual_cdc_init();
+    psa_source_arbiter_init();
     can_router_rebuild_filter();
 }
 
@@ -375,15 +375,15 @@ void can_router_process_can(const can_frame_t *frame) {
         }
 
         if (radio_changed) {
-            if (psa_virtual_cdc_is_source_filtered()) {
+            if (psa_source_arbiter_is_source_filtered()) {
                 /* Suppress intermediate 0x84 broadcast while RD4 source switch or debounce is in progress */
             } else {
                 uint8_t old_src = s_last_sent_state.media.radio.source_mode;
                 uint8_t new_src = s_current_state.media.radio.source_mode;
 
-                /* If transitioning away from CD (0x20/0x30) or CDC (0x31), notify HU that CD playback has stopped */
-                bool old_is_cd = (old_src == 0x20 || old_src == 0x30 || old_src == 0x31);
-                bool new_is_cd = (new_src == 0x20 || new_src == 0x30 || new_src == 0x31);
+                /* If transitioning away from CD (0x20/0x30), notify HU that CD playback has stopped */
+                bool old_is_cd = (old_src == 0x20 || old_src == 0x30);
+                bool new_is_cd = (new_src == 0x20 || new_src == 0x30);
                 if (old_is_cd && !new_is_cd) {
                     s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
                     hu_protocol_send_media_state(&s_current_state.media.cdc);
@@ -413,7 +413,7 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push radio preset list updates on change (only if currently in radio tuner mode)
     if (s_current_state.dirty.radio_preset) {
         s_current_state.dirty.radio_preset = false;
-        if (!psa_virtual_cdc_is_source_filtered() &&
+        if (!psa_source_arbiter_is_source_filtered() &&
             s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_presets(&s_current_state.media.radio);
         }
@@ -424,7 +424,7 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push dynamic RDS RadioText on change (only if currently in radio tuner mode)
     if (s_current_state.dirty.radio_text) {
         s_current_state.dirty.radio_text = false;
-        if (!psa_virtual_cdc_is_source_filtered() &&
+        if (!psa_source_arbiter_is_source_filtered() &&
             s_current_state.media.radio.source_mode < 0x20 && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
         }
@@ -432,14 +432,14 @@ void can_router_process_can(const can_frame_t *frame) {
         memcpy(s_last_sent_state.media.radio.radio_text, s_current_state.media.radio.radio_text, sizeof(s_last_sent_state.media.radio.radio_text));
     }
 
-    // Immediately push CD / CD Changer (CDC) updates on change (only when in CD/CDC mode)
+    // Immediately push CD / CD Changer (CDC) updates on change (only when in CD mode)
     if (s_current_state.dirty.cdc) {
         s_current_state.dirty.cdc = false;
         uint8_t src = s_current_state.media.radio.source_mode;
-        bool is_cd_source = (src == 0x20 || src == 0x30 || src == 0x31 ||
+        bool is_cd_source = (src == 0x20 || src == 0x30 ||
                              (!s_current_state.media.radio.present && s_current_state.media.cdc.active_disc != 0));
         if (is_cd_source && memcmp(&s_current_state.media.cdc, &s_last_sent_state.media.cdc, sizeof(vehicle_cdc_t)) != 0) {
-            if (psa_virtual_cdc_is_source_filtered()) {
+            if (psa_source_arbiter_is_source_filtered()) {
                 /* Suppress intermediate 0x97 broadcast while RD4 source switch or debounce is in progress */
             } else {
                 hu_protocol_send_media_state(&s_current_state.media.cdc);
@@ -451,16 +451,7 @@ void can_router_process_can(const can_frame_t *frame) {
 
 void can_router_push_radio_and_media_state(void) {
     if (!s_current_state.media.radio.present) {
-        if (psa_virtual_cdc_is_active() || psa_virtual_cdc_get_reported_source() == PSA_RD4_SRC_CDC) {
-            vehicle_radio_t cdc_radio;
-            memset(&cdc_radio, 0, sizeof(cdc_radio));
-            cdc_radio.source_mode = 0x31;
-            cdc_radio.power_status = 0x01;
-            hu_protocol_send_radio_state(&cdc_radio);
-            hu_protocol_send_media_state(&s_current_state.media.cdc);
-            return;
-        }
-        if (psa_virtual_cdc_get_reported_source() == PSA_RD4_SRC_AUX) {
+        if (psa_source_arbiter_get_reported_source() == PSA_RD4_SRC_AUX) {
             vehicle_radio_t aux_radio;
             memset(&aux_radio, 0, sizeof(aux_radio));
             aux_radio.source_mode = 0x40;
@@ -473,9 +464,9 @@ void can_router_push_radio_and_media_state(void) {
     uint8_t old_src = s_last_sent_state.media.radio.source_mode;
     uint8_t new_src = s_current_state.media.radio.source_mode;
 
-    /* If transitioning away from CD (0x20/0x30) or CDC (0x31), notify HU that CD playback has stopped */
-    bool old_is_cd = (old_src == 0x20 || old_src == 0x30 || old_src == 0x31);
-    bool new_is_cd = (new_src == 0x20 || new_src == 0x30 || new_src == 0x31);
+    /* If transitioning away from CD (0x20/0x30), notify HU that CD playback has stopped */
+    bool old_is_cd = (old_src == 0x20 || old_src == 0x30);
+    bool new_is_cd = (new_src == 0x20 || new_src == 0x30);
     if (old_is_cd && !new_is_cd) {
         s_current_state.media.cdc.play_status = 0x01; /* Pause/Stop */
         hu_protocol_send_media_state(&s_current_state.media.cdc);
@@ -493,8 +484,7 @@ void can_router_push_radio_and_media_state(void) {
             s_current_state.dirty.radio_text = false;
         }
     } else if (s_current_state.media.radio.source_mode == 0x20 ||
-               s_current_state.media.radio.source_mode == 0x30 ||
-               s_current_state.media.radio.source_mode == 0x31) {
+               s_current_state.media.radio.source_mode == 0x30) {
         hu_protocol_send_media_state(&s_current_state.media.cdc);
         s_last_sent_state.media.cdc = s_current_state.media.cdc;
     }
@@ -530,8 +520,8 @@ void can_router_periodic_100ms(void) {
         return;
     }
 
-    // Periodic Virtual CDC Emulation tick (100ms)
-    psa_virtual_cdc_tick_100ms();
+    // Periodic RD4 Source Arbiter tick (100ms)
+    psa_source_arbiter_tick_100ms();
 
     // Broadcast periodic states (Vehicle speed, RPM)
     if (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||
@@ -613,7 +603,7 @@ void can_router_periodic_100ms(void) {
     // Periodic slow resync for Radio & Media states (60 seconds / 600 ticks)
     if (++s_media_resync_timer >= 600) {
         s_media_resync_timer = 0;
-        if (!psa_virtual_cdc_is_source_filtered() && s_current_state.media.radio.power_status != 0) {
+        if (!psa_source_arbiter_is_source_filtered() && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_state(&s_current_state.media.radio);
             if (s_current_state.media.radio.source_mode < 0x20) {
                 hu_protocol_send_radio_presets(&s_current_state.media.radio);
@@ -621,8 +611,7 @@ void can_router_periodic_100ms(void) {
                     hu_protocol_send_radio_text(s_current_state.media.radio.radio_text, s_current_state.media.radio.radio_text_len);
                 }
             } else if (s_current_state.media.radio.source_mode == 0x20 ||
-                       s_current_state.media.radio.source_mode == 0x30 ||
-                       s_current_state.media.radio.source_mode == 0x31) {
+                       s_current_state.media.radio.source_mode == 0x30) {
                 hu_protocol_send_media_state(&s_current_state.media.cdc);
             }
         }

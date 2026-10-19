@@ -22,7 +22,7 @@ Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004
 | Layer | Files | Responsibility |
 | :--- | :--- | :--- |
 | **L1: HAL** | `include/hal/*.h`, `src/hal/` | Hardware abstraction (`hal_can`, `hal_uart`, `hal_gpio`, `hal_system`). Zero MCU headers outside `src/hal/`. |
-| **L2: Profile** | `src/profiles/profile_psa.c`<br>`src/profiles/psa_407_*.c`<br>`src/profiles/psa_virtual_cdc.c` | `s_psa_rules[]` routing table (`profile_psa.c`), CAN2004 decoders (`psa_407_rd4_audio.c`, `psa_407_hvac_body.c`, `psa_407_telemetry.c`, `psa_407_alerts.c`), Virtual CDC (`psa_virtual_cdc.c`). |
+| **L2: Profile** | `src/profiles/profile_psa.c`<br>`src/profiles/psa_407_*.c`<br>`src/profiles/psa_source_arbiter.c` | `s_psa_rules[]` routing table (`profile_psa.c`), CAN2004 decoders (`psa_407_rd4_audio.c`, `psa_407_hvac_body.c`, `psa_407_telemetry.c`, `psa_407_alerts.c`), Source Arbiter (`psa_source_arbiter.c`). |
 | **L3: Router** | `include/core/can_router.h`<br>`src/core/can_router.c` | $O(1)$ 256-byte CAN ID bitmask filter, `vehicle_state_t` cache, `dirty.*` + `memcmp` delta dispatch, 60s periodic full resync. |
 | **L4/L5: Proto** | `src/protocols/proto_hiworld*.c`<br>`src/protocols/hiworld_*.c` | Hiworld framing (`0x5A 0xA5 <len> <cmd> <payload...> <cs>`, `cs = ((len + cmd + sum) - 1) & 0xFF`), builders (`hiworld_psa_builders.c`), handshake (`hiworld_connection.c`). |
 

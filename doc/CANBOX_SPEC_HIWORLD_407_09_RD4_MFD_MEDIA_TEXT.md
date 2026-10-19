@@ -1105,15 +1105,28 @@ OriginalMediaPlayer: updateMedia: track=5/18, duration=02:35, workMode=Play
 
 ---
 
-## 11. Passive CD Monitoring vs. Active Virtual CDC Emulation
+## 11. RD4 Audio Source Routing & Head Unit Line In 1 (AUX 1) Integration
 
-This document specifies the **passive uplink monitoring** of the OEM Peugeot RD4 in-dash CD drive and factory CD Changer:
-- In-dash CD drive mechanism: CAN `0x325` (disc tray presence)
-- In-dash CD track count: CAN `0x365` (total tracks, MP3 flags)
-- In-dash CD playback progress: CAN `0x3A5` (track number, elapsed mm:ss, playback status)
-- Factory CDC telemetry: CAN `0x3A6` (6-disc slot statuses)
+Android Head Unit audio is routed directly into the vehicle audio system via RD4 **Line In 1 / AUX 1** (Quadlock Part B Pins 4, 10, 11 configured as `PSA_RD4_SRC_AUX`, `0x40`). Virtual CD Changer (CDC) CAN bus emulation is fully retired and disabled.
 
-When an aftermarket Android Head Unit wishes to **actively emulate a CD Changer** to route Android audio into the factory RD4 via Quadlock Connector Part B (Pins 4, 10, 11) without physical CDs, refer to the dedicated specification:
-👉 **[CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md](CANBOX_SPEC_HIWORLD_407_12_VIRTUAL_CDC.md)**
+### 11.1 Hiworld Audio Source Routing Downlink (`Cmd 0xAD`)
 
-The Virtual CDC engine acts as an active Blaupunkt CDC node transmitting CAN `0x162`, `0x1A2`, `0x1E2`, `0x1A0`, `0x0E2`, `0x531`, processing `0x131` from the RD4, handling downlink controls (`Cmd 0xAD`), and automatically pulsing the virtual COM2000 stalk (`0x21F`) to switch audio sources.
+The Android Head Unit controls RD4 audio source routing via Hiworld `Cmd 0xAD`:
+
+| SubCmd | Parameter | Command Name | Hiworld Wire Frame | Behavior / Action |
+|:---:|:---:|:---|:---|:---|
+| **`0x03`** | `0x01` | **Switch to FM/AM Tuner** | `5A A5 02 AD 03 01 B3` | Injects virtual COM2000 stalk `0x21F` pulses until RD4 `0x165` confirms Tuner (`< 0x20`). |
+| **`0x03`** | `0x02` | **Switch to Internal CD** | `5A A5 02 AD 03 02 B4` | Injects virtual COM2000 stalk `0x21F` pulses until RD4 `0x165` confirms CD (`0x20`). |
+| **`0x03`** | `0x03` | **Switch to Android HU Audio** | `5A A5 02 AD 03 03 B5` | Switches RD4 to **Line In 1 / AUX 1** (`0x40`). |
+| **`0x03`** | `0x04` | **Switch to AUX 1** | `5A A5 02 AD 03 04 B6` | Switches RD4 to **Line In 1 / AUX 1** (`0x40`). |
+| **`0x02`** | `0x01` | **Audio Play** | `5A A5 02 AD 02 01 B1` | Marks audio active; switches RD4 to Line In 1 / AUX 1 (`0x40`) if not overridden. |
+| **`0x02`** | `0x00` | **Audio Standby** | `5A A5 02 AD 02 00 B0` | Marks audio standby. |
+
+### 11.2 Closed-Loop Source Arbiter (`psa_source_arbiter.c`)
+
+1. **Closed-Loop Switching:** When a target source is requested, the arbiter pulses the virtual COM2000 stalk `0x21F` (`0x00 0x80 0x00`) with a 100 ms pulse width and a 200 ms inter-pulse interval. The source state machine inspects authoritative RD4 CAN `0x165` feedback to confirm that the requested source mode is reached.
+2. **Immediate Confirmation:** When target source is reached or already active, `canbox-core` emits Hiworld `Cmd 0x84` (`0x40` = Line In 1 / AUX 1) to inform the Head Unit.
+3. **Physical Override Anti-Hijack Policy (`user_override_non_hu`):** When the driver manually presses the physical RD4 `SOURCE` button (or steering wheel control) to switch away from AUX 1, the arbiter enters the 800 ms debounce state and sets `user_override_non_hu = true`. While overridden, repeated background `Cmd 0xAD 02 01` (Audio Play) packets are suppressed so the firmware never forcibly yanks the driver away from their chosen radio or CD source.
+4. **Override Clearance:** `user_override_non_hu` is cleared when:
+   - The driver physically cycles the RD4 back to Line In 1 / AUX 1 (`0x40`).
+   - The Head Unit explicitly requests a source change via `Cmd 0xAD SubCmd 0x03`.

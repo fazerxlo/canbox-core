@@ -71,21 +71,20 @@ SOURCE_NAMES = {
 }
 
 # Hiworld Downlink Commands
-CMD_SWITCH_TO_CDC     = bytes.fromhex("5AA502AD0303B4")  # SubCmd 0x03: Switch to CDC / HU Audio
-CMD_CDC_PLAY          = bytes.fromhex("5AA502AD0201B1")  # SubCmd 0x02: Audio Start (Play)
-CMD_CDC_STANDBY       = bytes.fromhex("5AA502AD0200B0")  # SubCmd 0x02: Audio Stop (Standby)
-CMD_SWITCH_TO_TUNER   = bytes.fromhex("5AA502AD0301B2")  # SubCmd 0x03: Switch to Tuner
-CMD_SWITCH_TO_CD      = bytes.fromhex("5AA502AD0302B3")  # SubCmd 0x03: Switch to Internal CD
-CMD_SWITCH_TO_AUX     = bytes.fromhex("5AA502AD0304B5")  # SubCmd 0x03: Switch to AUX
-CMD_QUERY_STATIONS    = bytes.fromhex("5AA5010F0F")
-CMD_RADIO_VOLUME_SYNC = bytes.fromhex("5AA503A1000117BB")  # Master setting / volume report (source=Radio, vol=23)
-CMD_RADIO_VOLUME_MUTE = bytes.fromhex("5AA503A10001FFA3")  # Master setting / volume report (source=Radio, vol=-1)
+CMD_SWITCH_TO_HU_AUDIO = bytes.fromhex("5AA502AD0303B5")  # SubCmd 0x03: Switch to Line In 1 / AUX 1
+CMD_AUDIO_PLAY         = bytes.fromhex("5AA502AD0201B1")  # SubCmd 0x02: Audio Start (Play)
+CMD_AUDIO_STANDBY      = bytes.fromhex("5AA502AD0200B0")  # SubCmd 0x02: Audio Stop (Standby)
+CMD_SWITCH_TO_TUNER    = bytes.fromhex("5AA502AD0301B3")  # SubCmd 0x03: Switch to Tuner
+CMD_SWITCH_TO_CD       = bytes.fromhex("5AA502AD0302B4")  # SubCmd 0x03: Switch to Internal CD
+CMD_SWITCH_TO_AUX      = bytes.fromhex("5AA502AD0304B6")  # SubCmd 0x03: Switch to AUX
+CMD_QUERY_STATIONS     = bytes.fromhex("5AA5010F0F")
+CMD_RADIO_VOLUME_SYNC  = bytes.fromhex("5AA503A1000117BB")  # Master setting / volume report (source=Radio, vol=23)
+CMD_RADIO_VOLUME_MUTE  = bytes.fromhex("5AA503A10001FFA3")  # Master setting / volume report (source=Radio, vol=-1)
 
 SOURCE_SWITCH_COMMANDS = {
-    PSA_RD4_SRC_CDC:   CMD_SWITCH_TO_CDC,
     PSA_RD4_SRC_TUNER: CMD_SWITCH_TO_TUNER,
     PSA_RD4_SRC_CD:    CMD_SWITCH_TO_CD,
-    PSA_RD4_SRC_AUX:   CMD_SWITCH_TO_AUX,
+    PSA_RD4_SRC_AUX:   CMD_SWITCH_TO_HU_AUDIO,
 }
 
 
@@ -505,7 +504,7 @@ class Rd4WorkbenchRunner:
     def test_02_random_source_switching(self, hops: int = 8) -> bool:
         print(f"\n\033[94m[*] Test 2: Random Source Switching ({hops} Hops, Closed-Loop Convergence & Overshoot Check)\033[0m")
         all_passed = True
-        target_pool = [PSA_RD4_SRC_TUNER, PSA_RD4_SRC_CD, PSA_RD4_SRC_CDC, PSA_RD4_SRC_AUX]
+        target_pool = [PSA_RD4_SRC_TUNER, PSA_RD4_SRC_CD, PSA_RD4_SRC_AUX]
 
         for hop in range(1, hops + 1):
             curr_src, _, _ = self.get_current_rd4_source(timeout=1.0)
@@ -651,18 +650,18 @@ class Rd4WorkbenchRunner:
                 break
             time.sleep(0.05)
 
-        # Fire Switch to CD, and 30 ms later Switch to CDC
-        self.logger.log("TEST_STRESS", "Sending Switch to CD followed immediately (30 ms) by Switch to CDC", console=True)
+        # Fire Switch to CD, and 30 ms later Switch to HU Audio (Line In 1)
+        self.logger.log("TEST_STRESS", "Sending Switch to CD followed immediately (30 ms) by Switch to HU Audio", console=True)
         self.hu_uart.send(CMD_SWITCH_TO_CD)
         time.sleep(0.03)
-        self.hu_uart.send(CMD_SWITCH_TO_CDC)
+        self.hu_uart.send(CMD_SWITCH_TO_HU_AUDIO)
 
-        # Wait for convergence to final requested target (CDC)
+        # Wait for convergence to final requested target (AUX 1)
         deadline = time.time() + 3.5
         converged = False
         while time.time() < deadline:
             src, _, _ = self.get_current_rd4_source(timeout=0.2)
-            if src == PSA_RD4_SRC_CDC:
+            if src == PSA_RD4_SRC_AUX:
                 converged = True
                 break
             time.sleep(0.02)
@@ -670,63 +669,64 @@ class Rd4WorkbenchRunner:
         time.sleep(0.5)
         # Check overshoot
         src_after, _, _ = self.get_current_rd4_source(timeout=0.5)
-        stable = (src_after == PSA_RD4_SRC_CDC)
+        stable = (src_after == PSA_RD4_SRC_AUX)
 
         passed = converged and stable
-        self.record_test("Stress: Rapid Retargeting to CDC", passed,
+        self.record_test("Stress: Rapid Retargeting to AUX 1", passed,
                          f"Converged={'YES' if converged else 'NO'}, Stable={'YES' if stable else 'NO'}")
         return passed
 
     # --------------------------------------------------------------------------
-    # Test 5: CDC Playback State (Active vs Standby Heartbeat on 0x162)
+    # --------------------------------------------------------------------------
+    # Test 5: Line In 1 / AUX 1 Source Routing (Cmd 0xAD 03 03 and 0xAD 02 01)
     # --------------------------------------------------------------------------
     def test_05_cdc_playback_state_toggling(self) -> bool:
-        print("\n\033[94m[*] Test 5: CDC Playback State Toggling (CAN 0x162 Status)\033[0m")
-        # 1. Switch to CDC
-        self.hu_uart.send(CMD_SWITCH_TO_CDC)
+        print("\n\033[94m[*] Test 5: Line In 1 / AUX 1 Routing (Cmd 0xAD 03 03 & 02 01)\033[0m")
+        # 1. Switch to AUX 1 via CMD_SWITCH_TO_HU_AUDIO (0xAD 03 03)
+        self.hu_uart.send(CMD_SWITCH_TO_HU_AUDIO)
         deadline = time.time() + 3.0
         while time.time() < deadline:
             src, _, _ = self.get_current_rd4_source(timeout=0.2)
-            if src == PSA_RD4_SRC_CDC:
+            if src == PSA_RD4_SRC_AUX:
                 break
             time.sleep(0.05)
 
-        # Check CAN 0x162 Byte 1: bit 1 set (0x02) and status_icon = 3 (Play) -> 0x03
-        f162_active = self.can_bus.wait_frame(CAN_ID_CDC_STATUS_162, timeout=1.5)
-        if not f162_active:
-            self.record_test("CDC State: Active 0x162", False, "CAN 0x162 not seen")
-            return False
-        _, d162_active = f162_active
-        b1_active = d162_active[1] & 0x07
-        is_playing = (b1_active == 3 or (d162_active[1] & 0x02) != 0)
-        self.record_test("CDC State: Play Active (Icon=3)", is_playing, f"0x162 Byte 1 = 0x{d162_active[1]:02X}")
+        src_aux, _, _ = self.get_current_rd4_source(timeout=0.5)
+        switched_aux = (src_aux == PSA_RD4_SRC_AUX)
+        self.record_test("HU Audio: Switch to Line In 1 via 0xAD 03 03", switched_aux,
+                         f"Source is {SOURCE_NAMES.get(src_aux, 'UNK')}")
 
-        # 2. Send CDC Standby: 5A A5 02 AD 02 00 B0
-        self.hu_uart.send(CMD_CDC_STANDBY)
-        time.sleep(0.5)
+        # 2. Switch to Tuner first
+        self.hu_uart.send(CMD_SWITCH_TO_TUNER)
+        time.sleep(0.8)
 
-        # Check CAN 0x162 Byte 1: bit 1 cleared, status_icon = 2 (Pause)
-        f162_pause = self.can_bus.wait_frame(CAN_ID_CDC_STATUS_162, timeout=1.5)
-        if not f162_pause:
-            self.record_test("CDC State: Standby 0x162", False, "CAN 0x162 not seen")
-            return False
-        _, d162_pause = f162_pause
-        b1_pause = d162_pause[1] & 0x07
-        is_paused = (b1_pause == 2)
-        self.record_test("CDC State: Standby/Pause (Icon=2)", is_paused, f"0x162 Byte 1 = 0x{d162_pause[1]:02X}")
-        return is_playing and is_paused
+        # 3. Switch to AUX 1 via CMD_AUDIO_PLAY (0xAD 02 01)
+        self.hu_uart.send(CMD_AUDIO_PLAY)
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            src, _, _ = self.get_current_rd4_source(timeout=0.2)
+            if src == PSA_RD4_SRC_AUX:
+                break
+            time.sleep(0.05)
+
+        src_play, _, _ = self.get_current_rd4_source(timeout=0.5)
+        switched_play = (src_play == PSA_RD4_SRC_AUX)
+        self.record_test("HU Audio: Switch to Line In 1 via 0xAD 02 01", switched_play,
+                         f"Source is {SOURCE_NAMES.get(src_play, 'UNK')}")
+
+        return switched_aux and switched_play
 
     # --------------------------------------------------------------------------
     # Test 6: Physical Stalk / Radio Button Override (Rule F3 Filter)
     # --------------------------------------------------------------------------
     def test_06_physical_button_override(self) -> bool:
         print("\n\033[94m[*] Test 6: Physical Button Override & 800ms Debounce Filter (Rule F3)\033[0m")
-        # Ensure we start on CDC
-        self.hu_uart.send(CMD_SWITCH_TO_CDC)
+        # Ensure we start on AUX 1
+        self.hu_uart.send(CMD_SWITCH_TO_HU_AUDIO)
         deadline = time.time() + 3.0
         while time.time() < deadline:
             src, _, _ = self.get_current_rd4_source(timeout=0.2)
-            if src == PSA_RD4_SRC_CDC:
+            if src == PSA_RD4_SRC_AUX:
                 break
             time.sleep(0.05)
 
@@ -740,7 +740,7 @@ class Rd4WorkbenchRunner:
         time.sleep(0.06)
         self.can_bus.send(CAN_ID_STALK_21F, bytes.fromhex("000000"))
 
-        # RD4 will step to next source (AUX or Tuner)
+        # RD4 will step to next source (Tuner or CD)
         time.sleep(0.4)
         src_stepped, _, _ = self.get_current_rd4_source(timeout=1.0)
         stepped = (src_stepped is not None and src_stepped != src_init)
@@ -755,7 +755,7 @@ class Rd4WorkbenchRunner:
 
         # Verify background 0xAD 02 01 poll from HU does NOT hijack physical source selection
         t_before_poll = time.time()
-        self.hu_uart.send(CMD_CDC_PLAY)
+        self.hu_uart.send(CMD_AUDIO_PLAY)
         hijack_pulse = self.can_bus.wait_frame(
             CAN_ID_STALK_21F,
             match_fn=lambda d: len(d) >= 1 and (d[0] & 0x02) != 0,
@@ -764,10 +764,10 @@ class Rd4WorkbenchRunner:
         )
         no_hijack = (hijack_pulse is None)
         self.record_test("Physical Button: No 0xAD 02 01 Hijack", no_hijack,
-                         "Periodic 0xAD 02 01 ignored after physical override" if no_hijack else "FAILED: Hijacked back to CDC!")
+                         "Periodic 0xAD 02 01 ignored after physical override" if no_hijack else "FAILED: Hijacked back to AUX 1!")
 
-        # Clear override with CDC standby (0xAD 02 00)
-        self.hu_uart.send(CMD_CDC_STANDBY)
+        # Clear override with standby (0xAD 02 00)
+        self.hu_uart.send(CMD_AUDIO_STANDBY)
         return stepped and synced and no_hijack
 
     # --------------------------------------------------------------------------

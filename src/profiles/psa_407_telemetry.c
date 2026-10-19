@@ -1,5 +1,4 @@
 #include "profiles/peugeot_407.h"
-#include "profiles/psa_virtual_cdc.h"
 #include "hal/hal_gpio.h"
 #include <string.h>
 

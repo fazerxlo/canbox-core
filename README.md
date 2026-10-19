@@ -58,7 +58,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `VEHICLE_PROFILE_PEUGEOT_407` | Peugeot 407 (2004–2011) | PSA CAN2004 @ 125 kbps | **Uplink:** SWC, HVAC, Doors, Speed/RPM, Trip, TPMS, Radar, RD4/CDC, SAS<br>
 
-<br>**Downlink:** HVAC control, Trip reset, BSI config |
+<br>**Downlink:** Audio source routing (Line In 1 / AUX 1), HVAC control, Trip reset, BSI config |
 | `VEHICLE_PROFILE_PSA_GENERIC` | Peugeot 307/308, Citroën C4/C5 | CAN2004 & CAN2010 | Extended PSA Comfort + Powertrain matrix (In Progress) |
 | `VEHICLE_PROFILE_VAG_PQ` | VW Golf 5/6, Passat B6, Octavia 2 | VAG PQ35/46 @ 100/500k | SWC, doors, ignition, unlock (In Progress) |
 
@@ -113,12 +113,12 @@ canbox-core/
 │   ├── bootloader/               # Hiworld IAP bootloader interfaces (hiworld_iap_nuc131.h)
 │   ├── core/                     # State cache & router (can_router.h, vehicle_profile.h)
 │   ├── hal/                      # Hardware contracts (hal_can.h, hal_uart.h, hal_gpio.h, hal_system.h)
-│   ├── profiles/                 # Vehicle CAN definitions (peugeot_407.h, psa_virtual_cdc.h)
+│   ├── profiles/                 # Vehicle CAN definitions (peugeot_407.h, psa_source_arbiter.h)
 │   └── protocols/                # Protocol vtable, parsers & builders (*_psa_builders.h, *_car_mapping.h)
 ├── src/
 │   ├── main.c / main_esp32.c     # Firmware entry points
 │   ├── core/                     # can_router.c, ring_buffer.c, vehicle_profile_manager.c
-│   ├── profiles/                 # Layer 2 decoders (profile_psa.c, peugeot_407.c, psa_virtual_cdc.c, profile_vag.c)
+│   ├── profiles/                 # Layer 2 decoders (profile_psa.c, peugeot_407.c, psa_source_arbiter.c, profile_vag.c)
 │   ├── protocols/                # Layer 5 adapters (proto_*_adapter.c) & builders (*_psa_builders.c)
 │   ├── hal/                      # MCU drivers (hal_native/, hal_stm32/, hal_esp32/, hal_nuc131/)
 │   └── nuc131_hiworld_bootloader/# NUC131 IAP bootloader & startup assembly
