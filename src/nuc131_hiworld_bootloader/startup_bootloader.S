@@ -150,7 +150,7 @@ Reset_Handler:
     bl main
 
 .L_hang:
-    b .L_hang
+    b Default_Handler
 
     /* Forwarding trampolines to application vector table (0x00002000) */
     .macro forward_vec name offset
@@ -159,7 +159,10 @@ Reset_Handler:
 \name:
     ldr r0, =(\offset)
     ldr r0, [r0]
-    bx  r0
+    adds r1, r0, #1
+    bne 1f
+    b   Default_Handler
+1:  bx  r0
     .endm
 
     forward_vec NMI_Handler        0x00002008
@@ -202,4 +205,14 @@ Reset_Handler:
     .globl Default_Handler
     .type Default_Handler, %function
 Default_Handler:
+    cpsid i
+    ldr r2, =0x50004088   /* GPIOC_DOUT: PC3=1 CAN Standby */
+    ldr r1, =0x000000CF
+    str r1, [r2]
+    ldr r2, =0x50004008   /* GPIOA_DOUT: PA8/9/12/13=0 OFF */
+    ldr r1, =0x00004CFF
+    str r1, [r2]
+    ldr r2, =0xE000ED0C   /* SCB->AIRCR: System Reset */
+    ldr r1, =0x05FA0004
+    str r1, [r2]
     b .

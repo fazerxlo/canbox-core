@@ -80,7 +80,8 @@ void iap_init_hardware(void) {
      * - Enable UART0 peripheral clock in APBCLK (bit 16)
      */
     CLK_PWRCON |= (1U << 2);
-    while (!(CLK_CLKSTATUS & (1U << 4)));
+    uint32_t clk_timeout = 200000UL;
+    while (!(CLK_CLKSTATUS & (1U << 4)) && --clk_timeout);
 
     CLK_CLKSEL1 = (CLK_CLKSEL1 & ~(3U << 24)) | (3U << 24);
     CLK_CLKDIV  &= ~(0xFU << 8);
@@ -137,7 +138,8 @@ static bool fmc_erase_page(uint32_t addr) {
     FMC_ISPCMD = 0x22; /* Page Erase */
     FMC_ISPTRG = 0x01;
     __asm volatile("isb");
-    while (FMC_ISPTRG & 0x01);
+    uint32_t timeout = 500000UL;
+    while ((FMC_ISPTRG & 0x01) && --timeout);
     return true;
 }
 
@@ -147,13 +149,15 @@ static bool fmc_program_word(uint32_t addr, uint32_t data) {
     FMC_ISPCMD = 0x21; /* Word Program */
     FMC_ISPTRG = 0x01;
     __asm volatile("isb");
-    while (FMC_ISPTRG & 0x01);
+    uint32_t timeout = 500000UL;
+    while ((FMC_ISPTRG & 0x01) && --timeout);
     return (*(volatile uint32_t *)addr == data);
 }
 
 /* --- UART0 Communication --- */
 static void uart_send_byte(uint8_t b) {
-    while (UART0_FSR & (1U << 23)); /* Wait if TX FIFO full */
+    uint32_t timeout = 100000UL;
+    while ((UART0_FSR & (1U << 23)) && --timeout); /* Wait if TX FIFO full */
     UART0_THR = b;
 }
 
@@ -236,6 +240,7 @@ void iap_run(void) {
         /* Phase 2: Send 'U' prompt with 100 ms retry cadence */
         uint8_t rx_pw[4];
         bool pw_matched = false;
+        uint32_t idle_prompts = 0;
 
         while (!pw_matched) {
             uart_send_byte(0x55); /* 'U' */
@@ -250,6 +255,7 @@ void iap_run(void) {
                         uart_recv_byte(&rx_pw[3], 80000)) {
                         if (memcmp(rx_pw, EXPECTED_PASSWORD, 4) == 0) {
                             pw_matched = true;
+                            GPIOA_DOUT |= (1U << 8); /* Ensure ACC ON once handshake succeeds */
                             break;
                         }
                     }
@@ -258,6 +264,20 @@ void iap_run(void) {
                     uint8_t dummy;
                     for (int k = 0; k < 6; k++) {
                         uart_recv_byte(&dummy, 5000);
+                    }
+                    idle_prompts = 0;
+                }
+            } else {
+                /* Battery Drain Safeguard: If no flasher responds after 300 prompts (~30s),
+                 * jump back to valid application or turn off Head Unit ACC (PA8=0) so the
+                 * Head Unit cannot stay powered indefinitely and drain the car battery. */
+                idle_prompts++;
+                if (idle_prompts >= 300) {
+                    idle_prompts = 300;
+                    if (app_valid) {
+                        jump_to_app();
+                    } else {
+                        GPIOA_DOUT &= ~(1U << 8); /* Cut PA8 ACC output to prevent battery drain */
                     }
                 }
             }
@@ -342,7 +362,8 @@ void iap_run(void) {
                 uart_send_byte(0x45); /* 'E' = Success */
 
                 /* Wait for UART0 TX FIFO to empty completely */
-                while (!(UART0_FSR & (1U << 28)));
+                uint32_t tx_wait = 100000UL;
+                while (!(UART0_FSR & (1U << 28)) && --tx_wait);
 
                 jump_to_app();
                 return;
@@ -353,6 +374,10 @@ void iap_run(void) {
         }
 
         fmc_lock();
+        app_sp    = *(volatile uint32_t *)(APP_BASE_ADDR + 0);
+        app_reset = *(volatile uint32_t *)(APP_BASE_ADDR + 4);
+        app_valid = (app_sp >= 0x20000400 && app_sp <= 0x20002000 &&
+                     (app_reset & 1) && app_reset >= APP_BASE_ADDR && app_reset < APP_MAX_ADDR);
         if (app_valid) {
             jump_to_app();
         }
@@ -369,7 +394,8 @@ static void jump_to_app(void) {
     }
 
     /* Wait for UART0 TX FIFO to fully empty */
-    while (!(UART0_FSR & (1U << 28)));
+    uint32_t tx_wait = 100000UL;
+    while (!(UART0_FSR & (1U << 28)) && --tx_wait);
 
     /* Disable interrupts and clear pending flags on Cortex-M0 (32 IRQs max) */
     *(volatile uint32_t *)0xE000E180 = 0xFFFFFFFF; /* NVIC->ICER[0] */
@@ -386,7 +412,8 @@ static void jump_to_app(void) {
     FMC_ISPADR  = APP_BASE_ADDR;          /* 0x00002000 */
     FMC_ISPTRG  = 0x01;
     __asm volatile("isb");
-    while (FMC_ISPTRG & 0x01);            /* Wait for hardware completion */
+    uint32_t fmc_wait = 500000UL;
+    while ((FMC_ISPTRG & 0x01) && --fmc_wait); /* Wait for hardware completion */
     FMC_ISPCON &= ~(1U << 0);
     SYS_REGWRPROT = 0x00;
 

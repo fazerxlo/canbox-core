@@ -36,9 +36,10 @@ int main(void) {
             activity = true;
         }
 
+        hal_watchdog_feed();
+
         if (can_router_is_bus_sleeping()) {
             hal_system_enter_deep_sleep();
-            can_router_notify_wake();
             last_heartbeat = hal_get_tick_ms();
         }
 

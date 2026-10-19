@@ -184,8 +184,12 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
     if (!radio || !data || dlc < 1) return;
 
     radio->present = true;
-    /* Bits [7:6] == 0 indicates radio is in deep sleep / standby (e.g. 0x08) */
-    radio->sleep = ((data[0] & 0xC0) == 0);
+    /* Bits [7:6] == 0 with non-zero status (e.g. 0x08 standby bit) indicates radio is in deep sleep / standby.
+     * A completely zeroed byte 0 (0x00 00 00 00) occurs during a transient warm reset of RD4 and must NOT
+     * force sleep = true if the radio was previously awake. */
+    if (data[0] != 0x00) {
+        radio->sleep = ((data[0] & 0xC0) == 0);
+    }
 
     /* Bit 7 of byte 0: radio audio power on/off */
     bool radio_powered = (data[0] & 0x80) != 0;

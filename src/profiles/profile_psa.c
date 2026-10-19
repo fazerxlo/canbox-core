@@ -1,4 +1,5 @@
 #include "core/vehicle_profile.h"
+#include "core/can_router.h"
 #include "profiles/peugeot_407.h"
 #include "profiles/psa_virtual_cdc.h"
 #include <string.h>
@@ -136,22 +137,35 @@ static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_
     }
 }
 
+static uint8_t s_radio_sleep_ign_active_cnt = 0;
+
 static inline void psa_update_derived_power_state(vehicle_state_t *state) {
     if (state->economy_mode) {
+        s_radio_sleep_ign_active_cnt = 0;
         state->ignition_state = VEHICLE_IGNITION_OFF;
     } else if (psa_rd4_is_connected(&state->media.radio)) {
         /* When factory radio is present:
          * If radio is in sleep / standby mode ((data[0] & 0xC0) == 0), ACC is OFF.
-         * If radio is active (knob turned on, bit 7), ACC is ON.
-         * Otherwise (shutting down / transition), follow ignition status. */
+         * However, if +APC ignition is already ON (`state->ignition_on` && `ignition_state == VEHICLE_IGNITION_ON`),
+         * debounce transient RD4 warm reboots (`0x48 -> 0x08 -> 0x00 -> 0xC8`, where `0x08` lasts ~300 ms / 3 frames)
+         * so PA8 (Head Unit ACC) never glitches LOW mid-drive. */
         if (state->media.radio.sleep) {
-            state->ignition_state = VEHICLE_IGNITION_OFF;
+            if (state->ignition_on && state->ignition_state == VEHICLE_IGNITION_ON &&
+                s_radio_sleep_ign_active_cnt < 15) {
+                s_radio_sleep_ign_active_cnt++;
+                state->ignition_state = VEHICLE_IGNITION_ON;
+            } else {
+                state->ignition_state = VEHICLE_IGNITION_OFF;
+            }
         } else if (psa_rd4_is_powered(&state->media.radio)) {
+            s_radio_sleep_ign_active_cnt = 0;
             state->ignition_state = state->ignition_on ? VEHICLE_IGNITION_ON : VEHICLE_IGNITION_ACC;
         } else {
+            s_radio_sleep_ign_active_cnt = 0;
             state->ignition_state = state->ignition_on ? VEHICLE_IGNITION_ON : VEHICLE_IGNITION_OFF;
         }
     } else {
+        s_radio_sleep_ign_active_cnt = 0;
         /* No factory radio detected on bus: ACC follows ignition switch */
         if (state->ignition_on) {
             state->ignition_state = VEHICLE_IGNITION_ON;
@@ -271,6 +285,7 @@ static const profile_can_rule_t s_psa_rules[] = {
 static void psa_init(void) {
     s_reverse_from_0f6 = false;
     s_reverse_from_036 = false;
+    s_radio_sleep_ign_active_cnt = 0;
     psa_stalk_init(NULL);
     psa_console_init(NULL);
     psa_journal_iso_tp_init(&s_journal_ctx);
@@ -278,10 +293,16 @@ static void psa_init(void) {
 }
 
 static bool psa_reset_trip(uint8_t trip_index) {
+    if (can_router_is_bus_sleeping()) {
+        return false;
+    }
     return psa_trip_send_reset(trip_index) == HAL_STATUS_OK;
 }
 
 static bool psa_query_alerts(void) {
+    if (can_router_is_bus_sleeping()) {
+        return false;
+    }
     can_frame_t frame;
     memset(&frame, 0, sizeof(frame));
     frame.id = PSA_CAN_ID_ALERT_QUERY;

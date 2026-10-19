@@ -24,3 +24,6 @@ void hal_system_reboot(void) {
 void hal_system_enter_deep_sleep(void) {
     vTaskDelay(pdMS_TO_TICKS(10));
 }
+
+void hal_watchdog_feed(void) {
+}

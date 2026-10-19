@@ -1,5 +1,6 @@
 #include "protocols/hiworld_connection.h"
 #include "protocols/hiworld_car_mapping.h"
+#include "core/can_router.h"
 #include "hal/hal_can.h"
 #include <string.h>
 
@@ -149,7 +150,7 @@ static void handle_parsed_command(hiworld_connection_ctx_t *ctx, uint8_t cmd_id,
 
         case HIWORLD_CMD_DATE_TIME_SET: {
             /* GPS Time received from Android: Year, Month, Day, Hour, Min, 24H */
-            if (len >= 6) {
+            if (len >= 6 && !can_router_is_bus_sleeping()) {
                 can_frame_t frame;
                 memset(&frame, 0, sizeof(frame));
                 frame.id = 0x228;

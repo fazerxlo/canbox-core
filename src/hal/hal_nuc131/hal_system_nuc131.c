@@ -1,10 +1,24 @@
 #include "hal/hal_system.h"
+#include "hal/hal_can.h"
+#include "hal/hal_uart.h"
+#include "core/can_router.h"
 #include "NUC131.h"
+
+#define HW_POLL_TIMEOUT 200000UL
 
 static volatile uint32_t s_ticks_ms = 0;
 
 void SysTick_Handler(void) {
     s_ticks_ms++;
+}
+
+void WDT_IRQHandler(void) {
+    WDT_CLEAR_TIMEOUT_INT_FLAG();
+    WDT_CLEAR_TIMEOUT_WAKEUP_FLAG();
+}
+
+void BOD_IRQHandler(void) {
+    SYS_CLEAR_BOD_INT_FLAG();
 }
 
 /* ISR Handlers for wake-up sources to clear flags and avoid Default_Handler hang */
@@ -28,19 +42,27 @@ hal_status_t hal_system_init(void) {
     // Unlock protected registers
     SYS_UnlockReg();
 
-    // Enable internal 22.1184 MHz high-speed oscillator (HIRC)
-    CLK_EnableXtalRC(CLK_PWRCON_OSC22M_EN_Msk);
-    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_OSC22M_STB_Msk));
+    // Enable Brown-Out Detector (BOD) at 2.7V with automatic hardware Reset
+    SYS_EnableBOD(SYS_BODCR_BOD_RST_EN, SYS_BODCR_BOD_VL_2_7V);
+
+    // Enable internal 22.1184 MHz high-speed oscillator (HIRC) and 10 kHz LIRC (for WDT)
+    CLK_EnableXtalRC(CLK_PWRCON_OSC22M_EN_Msk | CLK_PWRCON_OSC10K_EN_Msk);
+    uint32_t timeout = HW_POLL_TIMEOUT;
+    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_OSC22M_STB_Msk) && --timeout);
 
     // Set HCLK source to HIRC (22.1184 MHz) with divider 1
     CLK_SetHCLK(CLK_CLKSEL0_HCLK_S_HIRC, CLK_CLKDIV_HCLK(1));
 
     // Configure PLL to 48 MHz: FIN = HIRC, FOUT = 48 MHz
-    // Uses CLK_SetCoreClock() which internally sets up PLL
     CLK_SetCoreClock(48000000);
 
     // Update SystemCoreClock CMSIS global
     SystemCoreClock = 48000000;
+
+    // Enable WDT peripheral clock (10 kHz LIRC) and open WDT with 2^14 (~1.6s) timeout
+    CLK_EnableModuleClock(WDT_MODULE);
+    CLK_SetModuleClock(WDT_MODULE, CLK_CLKSEL1_WDT_S_LIRC, 0);
+    WDT_Open(WDT_TIMEOUT_2POW14, WDT_RESET_DELAY_130CLK, TRUE, FALSE);
 
     // Relock registers
     SYS_LockReg();
@@ -56,9 +78,17 @@ uint32_t hal_get_tick_ms(void) {
     return s_ticks_ms;
 }
 
+void hal_watchdog_feed(void) {
+    SYS_UnlockReg();
+    WDT_RESET_COUNTER();
+    SYS_LockReg();
+}
+
 void hal_delay_ms(uint32_t ms) {
     uint32_t start = s_ticks_ms;
-    while ((s_ticks_ms - start) < ms);
+    while ((s_ticks_ms - start) < ms) {
+        hal_watchdog_feed();
+    }
 }
 
 void hal_system_reboot(void) {
@@ -79,8 +109,9 @@ void hal_system_reboot(void) {
     PD->DOUT |= (1U << 7);
     PD->PMD = (PD->PMD & ~GPIO_PMD_PMD7_Msk) | (GPIO_PMD_OUTPUT << GPIO_PMD_PMD7_Pos);
 
-    /* Wait for UART0 TX FIFO and shift register to drain */
-    while (!(UART0->FSR & UART_FSR_TE_FLAG_Msk));
+    /* Wait for UART0 TX FIFO and shift register to drain (bounded timeout) */
+    uint32_t timeout = HW_POLL_TIMEOUT;
+    while (!(UART0->FSR & UART_FSR_TE_FLAG_Msk) && --timeout);
 
     /* Brief settling delay before asserting chip reset */
     for (volatile int i = 0; i < 50000; i++);
@@ -89,19 +120,28 @@ void hal_system_reboot(void) {
     while (1);
 }
 
-static void hal_system_on_wakeup(void) {
+static void hal_system_on_wakeup(bool woke_by_can) {
     SYS_UnlockReg();
 
     // Clear Power-Down flag
     CLK->PWRCON &= ~CLK_PWRCON_PWR_DOWN_EN_Msk;
 
-    // Restore PLL to 48 MHz and wait for oscillator stability
-    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_PLL_STB_Msk));
+    // Restore PLL to 48 MHz and wait for oscillator stability (bounded timeout)
+    uint32_t timeout = HW_POLL_TIMEOUT;
+    while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_PLL_STB_Msk) && --timeout);
+
+    // Re-enable WDT after waking from deep sleep
+    WDT_Open(WDT_TIMEOUT_2POW14, WDT_RESET_DELAY_130CLK, TRUE, FALSE);
 
     SYS_LockReg();
 
-    // Restore CAN transceiver active drive (PC3 = LOW)
-    PC->DOUT &= ~(1U << 3);
+    // Only wake CAN transceiver immediately if wakeup was triggered by CAN / Ignition;
+    // if woken by UART noise/traffic while car is asleep, keep CAN transceiver in standby
+    // until an actual CAN frame arrives.
+    if (woke_by_can) {
+        PC->DOUT &= ~(1U << 3);
+        can_router_notify_wake();
+    }
 
     // Re-arm SysTick for exact 1ms task scheduler
     CLK_EnableSysTick(CLK_CLKSEL0_STCLK_S_HCLK, SystemCoreClock / 1000);
@@ -122,8 +162,9 @@ void hal_system_enter_deep_sleep(void) {
     /* 1. Turn off all discrete vehicle outputs */
     PA->DOUT &= ~((1U << 8) | (1U << 9) | (1U << 12) | (1U << 13));
 
-    /* 2. Put CAN transceiver in Standby (PC3 = HIGH) */
+    /* 2. Put CAN transceiver in Standby (PC3 = HIGH) and abort any stuck CAN TX */
     PC->DOUT |= (1U << 3);
+    CAN0->CON |= CAN_CON_DAR_Msk;
 
     /* 3. Disable SysTick timer to prevent 1ms wakeups */
     SysTick->CTRL = 0;
@@ -131,6 +172,12 @@ void hal_system_enter_deep_sleep(void) {
 
     /* 4. Configure Wakeup Interrupt Sources */
     SYS_UnlockReg();
+
+    // Pause WDT during deep sleep so it does not reset the sleeping MCU every 1.6s
+    WDT_Close();
+
+    // Enable Brown-Out Detector Low-Power Mode during deep sleep
+    SYS_SET_BOD_LPM();
 
     // Enable hardware CAN Wake-up on CAN0 Rx edge
     CAN_ENABLE_WAKEUP(CAN0);
@@ -172,5 +219,35 @@ void hal_system_enter_deep_sleep(void) {
     /*   MCU WAKES UP HERE IMMEDIATELY UPON BUS/KEY TRANSITION   */
     /* ========================================================= */
 
-    hal_system_on_wakeup();
+    /* Check if CAN RX (PD6 low) or Ignition (PA0 high) or CAN0 wakeup triggered */
+    bool woke_by_can = ((PD->PIN & (1U << 6)) == 0) ||
+                       ((PA->PIN & (1U << 0)) != 0) ||
+                       ((CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk) != 0);
+
+    CAN0->CON &= ~CAN_CON_DAR_Msk;
+    SYS_UnlockReg();
+    SYS_CLEAR_BOD_LPM();
+    SYS_LockReg();
+
+    hal_system_on_wakeup(woke_by_can);
+
+    /* If woken by UART RX (PB0), wait up to 50 ms for any incoming UART command
+     * (such as 0xE0 firmware upgrade trigger) before re-entering deep sleep */
+    if (!woke_by_can) {
+        uint32_t wake_listen_start = s_ticks_ms;
+        while ((s_ticks_ms - wake_listen_start) < 50) {
+            uint8_t b;
+            while (hal_uart_read_byte(&b) == HAL_STATUS_OK) {
+                can_router_process_uart_byte(b);
+                wake_listen_start = s_ticks_ms; /* Extend window while active packet streams */
+            }
+            can_frame_t rx_can;
+            if (hal_can_receive(&rx_can) == HAL_STATUS_OK) {
+                PC->DOUT &= ~(1U << 3);
+                can_router_process_can(&rx_can);
+                break;
+            }
+            hal_watchdog_feed();
+        }
+    }
 }

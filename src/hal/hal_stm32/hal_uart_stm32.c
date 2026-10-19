@@ -66,15 +66,18 @@ hal_status_t hal_uart_write(const uint8_t *data, size_t len) {
     if (!data || len == 0) return HAL_STATUS_ERROR;
 
     for (size_t i = 0; i < len; i++) {
-        while (!LL_USART_IsActiveFlag_TXE(USART1));
+        uint32_t timeout = 100000UL;
+        while (!LL_USART_IsActiveFlag_TXE(USART1) && --timeout);
         LL_USART_TransmitData8(USART1, data[i]);
     }
-    while (!LL_USART_IsActiveFlag_TC(USART1));
+    uint32_t timeout = 100000UL;
+    while (!LL_USART_IsActiveFlag_TC(USART1) && --timeout);
     return HAL_STATUS_OK;
 }
 
 hal_status_t hal_uart_flush_tx(void) {
-    while (!LL_USART_IsActiveFlag_TC(USART1));
+    uint32_t timeout = 100000UL;
+    while (!LL_USART_IsActiveFlag_TC(USART1) && --timeout);
     return HAL_STATUS_OK;
 }
 

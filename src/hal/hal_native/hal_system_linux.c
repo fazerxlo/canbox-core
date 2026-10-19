@@ -41,3 +41,6 @@ void hal_system_reboot(void) {
 void hal_system_enter_deep_sleep(void) {
     hal_delay_ms(10);
 }
+
+void hal_watchdog_feed(void) {
+}

@@ -94,6 +94,7 @@ void test_integration_bagoo_hu_uart_to_canbox_version_query(void);
 void test_scenario_ignition_off_after_power_on(void);
 void test_scenario_ignition_silence_watchdog_forces_sleep_from_on(void);
 void test_scenario_ignition_economy_mode_forces_radio_off(void);
+void test_scenario_sleeping_bus_blocks_can_tx_on_uart_activity(void);
 void test_scenario_lights_off_side_light_on_headlights_on(void);
 
 int main(void) {
@@ -148,6 +149,7 @@ int main(void) {
     RUN_TEST(test_scenario_ignition_off_after_power_on);
     RUN_TEST(test_scenario_ignition_silence_watchdog_forces_sleep_from_on);
     RUN_TEST(test_scenario_ignition_economy_mode_forces_radio_off);
+    RUN_TEST(test_scenario_sleeping_bus_blocks_can_tx_on_uart_activity);
     RUN_TEST(test_scenario_lights_off_side_light_on_headlights_on);
 
     return UNITY_END();

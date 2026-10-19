@@ -46,6 +46,11 @@ void hal_system_reboot(void);
  */
 void hal_system_enter_deep_sleep(void);
 
+/**
+ * @brief Reset/feed the hardware watchdog timer.
+ */
+void hal_watchdog_feed(void);
+
 #ifdef __cplusplus
 }
 #endif

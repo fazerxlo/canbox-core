@@ -71,11 +71,12 @@ SOURCE_NAMES = {
 }
 
 # Hiworld Downlink Commands
-CMD_SWITCH_TO_CDC   = bytes.fromhex("5AA502AD0201B1")
-CMD_CDC_STANDBY     = bytes.fromhex("5AA502AD0200B0")
-CMD_SWITCH_TO_TUNER = bytes.fromhex("5AA502AD0301B3")
-CMD_SWITCH_TO_CD    = bytes.fromhex("5AA502AD0302B4")
-CMD_SWITCH_TO_AUX   = bytes.fromhex("5AA502AD0304B5")
+CMD_SWITCH_TO_CDC     = bytes.fromhex("5AA502AD0303B4")  # SubCmd 0x03: Switch to CDC / HU Audio
+CMD_CDC_PLAY          = bytes.fromhex("5AA502AD0201B1")  # SubCmd 0x02: Audio Start (Play)
+CMD_CDC_STANDBY       = bytes.fromhex("5AA502AD0200B0")  # SubCmd 0x02: Audio Stop (Standby)
+CMD_SWITCH_TO_TUNER   = bytes.fromhex("5AA502AD0301B2")  # SubCmd 0x03: Switch to Tuner
+CMD_SWITCH_TO_CD      = bytes.fromhex("5AA502AD0302B3")  # SubCmd 0x03: Switch to Internal CD
+CMD_SWITCH_TO_AUX     = bytes.fromhex("5AA502AD0304B5")  # SubCmd 0x03: Switch to AUX
 CMD_QUERY_STATIONS    = bytes.fromhex("5AA5010F0F")
 CMD_RADIO_VOLUME_SYNC = bytes.fromhex("5AA503A1000117BB")  # Master setting / volume report (source=Radio, vol=23)
 CMD_RADIO_VOLUME_MUTE = bytes.fromhex("5AA503A10001FFA3")  # Master setting / volume report (source=Radio, vol=-1)
@@ -729,6 +730,7 @@ class Rd4WorkbenchRunner:
                 break
             time.sleep(0.05)
 
+        time.sleep(0.4)
         src_init, _, _ = self.get_current_rd4_source(timeout=0.5)
 
         # Simulate user pressing physical SOURCE button on stalk (CAN 0x21F press + release)
@@ -753,7 +755,7 @@ class Rd4WorkbenchRunner:
 
         # Verify background 0xAD 02 01 poll from HU does NOT hijack physical source selection
         t_before_poll = time.time()
-        self.hu_uart.send(CMD_SWITCH_TO_CDC)
+        self.hu_uart.send(CMD_CDC_PLAY)
         hijack_pulse = self.can_bus.wait_frame(
             CAN_ID_STALK_21F,
             match_fn=lambda d: len(d) >= 1 and (d[0] & 0x02) != 0,

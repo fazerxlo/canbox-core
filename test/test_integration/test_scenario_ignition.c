@@ -2,6 +2,8 @@
 #include "can_log_player.h"
 #include "core/can_router.h"
 #include "profiles/peugeot_407.h"
+#include "protocols/hu_protocol.h"
+#include "protocols/hu_protocol_driver.h"
 #include "hal/hal_gpio.h"
 
 static const char *LOG_PATH = "test/test_integration/data/ignition_off_after_power_on.csv";
@@ -259,4 +261,49 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     TEST_ASSERT_FALSE(state->media.radio.sleep);
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
     TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+}
+
+bool hal_can_native_get_last_sent_frame(can_frame_t *out_frame);
+void hal_can_native_clear_sent_frame(void);
+
+void test_scenario_sleeping_bus_blocks_can_tx_on_uart_activity(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+
+    // Advance 30 ticks (3.0s) of CAN silence so bus enters sleep mode
+    for (int i = 0; i < 30; i++) {
+        can_router_periodic_100ms();
+    }
+    TEST_ASSERT_TRUE(can_router_is_bus_sleeping());
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_CAN_STBY));
+
+    hal_can_native_clear_sent_frame();
+
+    // 1. Late HU sends Date/Time Set (0xC6): 5A A5 06 C6 1A 0A 12 14 15 01 1A
+    const uint8_t pkt_time[] = { 0x5A, 0xA5, 0x06, 0xC6, 0x1A, 0x0A, 0x12, 0x14, 0x15, 0x01, 0x2B };
+    for (size_t i = 0; i < sizeof(pkt_time); i++) {
+        can_router_process_uart_byte(pkt_time[i]);
+    }
+
+    // 2. Late HU sends Virtual CDC switch command (0xAD 02 01): 5A A5 02 AD 02 01 B1
+    const uint8_t pkt_cdc[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x02, 0x01, 0xB1 };
+    for (size_t i = 0; i < sizeof(pkt_cdc); i++) {
+        can_router_process_uart_byte(pkt_cdc[i]);
+    }
+
+    // 3. Late HU sends Diagnostic Query (0x2F): 5A A5 02 2F 00 00 D4
+    const uint8_t pkt_diag[] = { 0x5A, 0xA5, 0x02, 0x2F, 0x00, 0x00, 0xD4 };
+    for (size_t i = 0; i < sizeof(pkt_diag); i++) {
+        can_router_process_uart_byte(pkt_diag[i]);
+    }
+
+    // 4. Periodic 100ms ticks while sleeping
+    can_router_periodic_100ms();
+
+    // Verify CAN bus remains asleep, transceiver stays in standby, and ZERO CAN frames were sent
+    can_frame_t sent_frame;
+    TEST_ASSERT_TRUE(can_router_is_bus_sleeping());
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_CAN_STBY));
+    TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
+                              "No CAN frames may be transmitted while Comfort CAN bus is sleeping");
 }
