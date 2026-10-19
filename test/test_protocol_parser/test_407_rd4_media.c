@@ -790,3 +790,65 @@ void test_peugeot_407_rd4_preset_memory_list(void) {
     TEST_ASSERT_EQUAL_HEX8((uint8_t)((sum - 1) & 0xFF), out[53]);
 }
 
+void test_peugeot_407_rd4_source_transition_mute(void) {
+    vehicle_media_t media;
+    psa_isotp_rx_ctx_t isotp;
+    psa_rd4_media_init(&media, &isotp);
+
+    /* 1. CD active (C8 C0 20 00) */
+    const uint8_t can_cd_active[] = { 0xC8, 0xC0, 0x20, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_cd_active, sizeof(can_cd_active));
+    TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status);
+    TEST_ASSERT_FALSE(media.radio.sleep);
+
+    /* 2. Source transition mute initiates (48 C0 00 00) */
+    const uint8_t can_mute_trans[] = { 0x48, 0xC0, 0x00, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_mute_trans, sizeof(can_mute_trans));
+    TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode); /* Retained */
+    TEST_ASSERT_EQUAL_UINT8(3, media.radio.power_status);  /* Muted */
+    TEST_ASSERT_FALSE(media.radio.sleep);
+
+    /* 3. Waiting handshake / deck spinup (48 D0 00 00) */
+    const uint8_t can_mute_handshake[] = { 0x48, 0xD0, 0x00, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_mute_handshake, sizeof(can_mute_handshake));
+    TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode); /* Retained */
+    TEST_ASSERT_EQUAL_UINT8(3, media.radio.power_status);  /* Muted */
+    TEST_ASSERT_FALSE(media.radio.sleep);
+
+    /* 4. Transition completes into Tuner (C8 C0 10 00) */
+    const uint8_t can_tuner_active[] = { 0xC8, 0xC0, 0x10, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_tuner_active, sizeof(can_tuner_active));
+    TEST_ASSERT_EQUAL_HEX8(media.radio.band, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status);
+    TEST_ASSERT_FALSE(media.radio.sleep);
+
+    /* 5. Radio turns off (48 C8 00 00) */
+    const uint8_t can_turn_off[] = { 0x48, 0xC8, 0x00, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_turn_off, sizeof(can_turn_off));
+    TEST_ASSERT_EQUAL_HEX8(0xFF, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_UINT8(0, media.radio.power_status);
+
+    /* 6. Radio enters deep sleep (08 00 00 00) */
+    const uint8_t can_sleep[] = { 0x08, 0x00, 0x00, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_sleep, sizeof(can_sleep));
+    TEST_ASSERT_TRUE(media.radio.sleep);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_UINT8(0, media.radio.power_status);
+
+    /* 7. RD4 transient reboot frame test:
+     * Radio wakes up into CD, then receives 0x00 0x00 0x00 0x00 reset frame:
+     * State must NOT drop to sleep or unpowered during 0x00 frames */
+    psa_rd4_process_can_0x165(&media.radio, can_cd_active, sizeof(can_cd_active));
+    TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode);
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status);
+
+    const uint8_t can_watchdog_reset[] = { 0x00, 0x00, 0x00, 0x00 };
+    for (int i = 0; i < 5; i++) {
+        psa_rd4_process_can_0x165(&media.radio, can_watchdog_reset, sizeof(can_watchdog_reset));
+        TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode);
+        TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status); /* Preserved during 0x00 reboot */
+    }
+}
+
+

@@ -130,6 +130,7 @@ void test_peugeot_407_rd4_post_target_settle_guard(void);
 void test_peugeot_407_rd4_physical_override_blocks_periodic_0xad_02_01(void);
 void test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression(void);
 void test_peugeot_407_rd4_cmd_0xad_switches_to_line_in_1(void);
+void test_peugeot_407_rd4_source_transition_mute(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -281,6 +282,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_rd4_physical_override_blocks_periodic_0xad_02_01);
     RUN_TEST(test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression);
     RUN_TEST(test_peugeot_407_rd4_cmd_0xad_switches_to_line_in_1);
+    RUN_TEST(test_peugeot_407_rd4_source_transition_mute);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

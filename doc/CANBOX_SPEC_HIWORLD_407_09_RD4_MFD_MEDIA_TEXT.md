@@ -23,15 +23,22 @@ The CAN Box intercepts these CAN frames, caches the radio/media state, and trans
 ### 2.1 Audio Source / Input Status (`0x165` — `ETAT_AUTORADIO`)
 * **Period:** 50 ms  
 * **DLC:** 4 bytes  
-* **Payload:** `[0xCC, 0x54, (INPUT_SOURCE << 4) | SubStatus, 0x02]`
+* **Payload:** `[Power_Byte, Mute_Status, (INPUT_SOURCE << 4) | SubStatus, 0x02]`
 
 | Byte | Bit(s) | Signal | Value / Meaning |
 |:---:|:---:|---|---|
-| **0** | 7:0 | Constant | `0xCC` |
-| **1** | 7:0 | Constant | `0x54` |
-| **2** | 7:4 | **INPUT_SOURCE** | `0x1` = Tuner (FM/AM)<br>`0x2` = Internal CD Drive<br>`0x3` = CD Changer (CDC)<br>`0x4` = AUX 1 (Line-In)<br>`0x5` = AUX 2<br>`0x6` = USB Media<br>`0x7` = Bluetooth Audio |
+| **0** | 7 | **AUDIO_POWER** | `1` = Factory radio audio output active; `0` = Audio muted or radio powered off |
+| **0** | 6 | **DISPLAY_ACTIVE** | `1` = Radio display interface active (`0xC8`/`0x48`) |
+| **0** | 5:0 | **STATUS** | `0x08` = Standby / sleep mode bit |
+| **1** | 7:0 | **TRANSITION / MUTE** | `0xC0` / `0xD0` = Audio muted for source switching transition;<br>`0x80` = Muted / internal DSP reset;<br>`0x00` = Normal unmuted |
+| **2** | 7:4 | **INPUT_SOURCE** | `0x1` = Tuner (FM/AM)<br>`0x2` = Internal CD Drive (`0x20`)<br>`0x3` = CD Changer (CDC) (`0x31`)<br>`0x4` = AUX 1 (Line-In) (`0x40`)<br>`0x5` = AUX 2 (`0x41`)<br>`0x6` = USB Media<br>`0x7` = Bluetooth Audio<br>`0x0` = Transitioning / reset |
 | **2** | 3:0 | Sub-status | `0x00` or `0x01` |
-| **3** | 7:0 | Constant | `0x02` |
+| **3** | 7:0 | Constant | `0x02` or `0x00` |
+
+#### Source Transition & Transient Reset Absorption
+* **Transition Mute (`48 C0` / `48 D0`):** During source changes (e.g. Tuner $\to$ CD $\to$ AUX), RD4 clears bit 7 (`0x48`) while byte 1 indicates transition status (`0xC0` or `0xD0`). The firmware flags this as `power_status = 3` (transition in progress) and retains the current media source rather than declaring the radio powered off.
+* **Transient Brownout / Watchdog Reboot (`00 00 00 00`):** When mechanical components spin up (e.g. CD deck motor), transient voltage dips may trigger an RD4 internal watchdog reset (`CAN 0x5E0`). During the ~500 ms reboot, RD4 emits `00 00 00 00`. The firmware safely ignores `0x00` boot frames, preventing state desynchronization.
+* **Power-Down Suppression:** `can_router.c` suppresses serial `0x84 FF` broadcast when `power_status == 3`, preventing the Android Head Unit from killing the media player app.
 
 ---
 

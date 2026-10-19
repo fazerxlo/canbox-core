@@ -183,16 +183,25 @@ void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp) {
 void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 1) return;
 
-    radio->present = true;
-    /* Bits [7:6] == 0 with non-zero status (e.g. 0x08 standby bit) indicates radio is in deep sleep / standby.
-     * A completely zeroed byte 0 (0x00 00 00 00) occurs during a transient warm reset of RD4 and must NOT
-     * force sleep = true if the radio was previously awake. */
-    if (data[0] != 0x00) {
-        radio->sleep = ((data[0] & 0xC0) == 0);
+    /* A completely zeroed frame (0x00 00 00 00) occurs during a transient warm reset of RD4
+     * MCU and must be ignored while radio is initializing. */
+    if (data[0] == 0x00) {
+        return;
     }
 
-    /* Bit 7 of byte 0: radio audio power on/off */
-    bool radio_powered = (data[0] & 0x80) != 0;
+    radio->present = true;
+    /* Bits [7:6] == 0 with non-zero status (e.g. 0x08 standby bit) indicates radio is in deep sleep / standby. */
+    radio->sleep = ((data[0] & 0xC0) == 0);
+
+    /* Check for source transition mute:
+     * When RD4 is switching sources (e.g. Tuner -> CD -> AUX), it temporarily mutes audio
+     * by clearing bit 7 (data[0] == 0x48) while byte 1 indicates transition status (0xC0 or 0xD0).
+     * During this transient mute, RD4 is NOT turned off. */
+    bool is_source_transition_mute = ((data[0] & 0xC0) == 0x40) && (dlc >= 2) &&
+                                     (data[1] == 0xC0 || data[1] == 0xD0);
+
+    /* Bit 7 of byte 0: radio audio power on/off (or source transition mute) */
+    bool radio_powered = ((data[0] & 0x80) != 0) || is_source_transition_mute;
     if (!radio_powered) {
         radio->source_mode = 0xFF;
         radio->power_status = 0x00;
@@ -202,34 +211,46 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
 
     if (dlc < 3) {
         if (radio->power_status == 0) {
-            radio->power_status = 0x01;
+            radio->power_status = is_source_transition_mute ? 3 : 1;
         }
         return;
     }
 
+    uint8_t power = is_source_transition_mute ? 3 : 1;
     uint8_t rd4_src_nibble = (data[2] >> 4) & 0x0F;
     switch (rd4_src_nibble) {
         case 0x1: /* Tuner */
             radio->source_mode = radio->band;
-            if (radio->power_status != 0x02) {
-                radio->power_status = 0x01;
+            if (power != 3 && radio->power_status == 0x02) {
+                /* Preserve seeking status */
+            } else {
+                radio->power_status = power;
             }
             break;
         case 0x2: /* Internal CD */
             radio->source_mode = 0x20;
-            radio->power_status = 0x01;
+            radio->power_status = power;
             break;
         case 0x3: /* CDC */
             radio->source_mode = 0x31;
-            radio->power_status = 0x01;
+            radio->power_status = power;
             break;
         case 0x4: /* AUX 1 (Input 1) */
             radio->source_mode = 0x40;
-            radio->power_status = 0x01;
+            radio->power_status = power;
             break;
         case 0x5: /* AUX 2 (Input 2) */
             radio->source_mode = 0x41;
-            radio->power_status = 0x01;
+            radio->power_status = power;
+            break;
+        case 0x0: /* Transitioning / Unassigned */
+            if (is_source_transition_mute) {
+                /* Retain current source_mode during source transition mute */
+                radio->power_status = 3;
+            } else {
+                radio->source_mode = 0xFF;
+                radio->power_status = 0x00;
+            }
             break;
         default:
             radio->source_mode = 0xFF;

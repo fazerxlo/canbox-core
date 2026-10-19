@@ -375,8 +375,8 @@ void can_router_process_can(const can_frame_t *frame) {
         }
 
         if (radio_changed) {
-            if (psa_source_arbiter_is_source_filtered()) {
-                /* Suppress intermediate 0x84 broadcast while RD4 source switch or debounce is in progress */
+            if (psa_source_arbiter_is_source_filtered() || s_current_state.media.radio.power_status == 3) {
+                /* Suppress intermediate 0x84 broadcast while RD4 source switch, debounce, or mute/transition is in progress */
             } else {
                 uint8_t old_src = s_last_sent_state.media.radio.source_mode;
                 uint8_t new_src = s_current_state.media.radio.source_mode;
