@@ -8,12 +8,14 @@ Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004
 
 1. **Silent Builds (`-s`):** Always pass `-s` to PlatformIO builds: `~/.platformio/penv/bin/pio run -s -e stm32_cbox`.
 2. **Surgical Line-Range Reads & Batching:** Use `grep -n` first and read only the target function range (80–200 lines) in `view_file` rather than loading entire 700-line files. Batch independent `view_file`, `replace_file_content`, and command calls in parallel in a single turn.
-3. **Grep Line Discovery:** Use `grep -n` to locate line numbers before reading/editing; check `grep -rn "typedef struct <Name> include/"` before guessing headers.
-4. **Scripted Mass Edits:** Use Python/shell one-liners via `run_command` when refactoring across 3+ files or pruning >30% of a file.
-5. **Test Fast, Gate Once:** Iterate with `./tools/test_fast.sh` (or `./tools/test_fast.sh -e integration_test`). **NEVER execute `.pio/build/native_test/program` directly** (it is an infinite-loop SocketCAN daemon that hangs; unit tests live in `native_test_runner`). Run `./tools/verify_all.sh` **strictly once** at task completion. Never re-run C builds after editing `*.md` docs.
-6. **Single-Call Log Triage:** Run `./tools/triage_canbox_log.py <dump.log>` once (it includes CAN state transitions, `[APP_UART_RX]` downlinks, `[APP_UART_TX]` uplinks, and causal timelines). Avoid writing ad-hoc Python log parsers unless inspecting an unlisted CAN ID. Note: `[APP_UART_TX]` in logs reflects the binary flashed at capture time, not necessarily current local source.
-7. **ESP-IDF Registration:** Always register new `src/**/*.c` files in `src/CMakeLists.txt` in the same turn.
-8. **Spec Implementation Fast Path:** Treat user specs (`doc/CANBOX_SPEC_*.md`) as pre-verified ground truth. Do not run exploratory greps or subagent audits on documented bitfields/formulas. Read headers/sources/tests in parallel (Turn 1), batch all code edits (Turn 2), and batch test + doc updates (Turn 3).
+3. **Capped Greps & Output Paging:** Always cap search outputs with line limits (`grep -n ... | head -n 20`, `-m 20`, or `-c`). Never run unconstrained broad greps over `.log` or build files that risk flooding context.
+4. **Silent Daemons & No Status Polling:** Launch background processes (e.g., OpenOCD, loggers) quietly (`-d0` or redirecting stdout/stderr to a log file). Never poll `manage_task status` on high-throughput daemons; wait for events or inspect bounded tail snippets (`tail -n 30`).
+5. **Targeted Log Slicing:** When analyzing multi-megabyte captures, never view or cat raw files. Use `tools/triage_canbox_log.py`, `candump` timestamp ranges, or focused one-line Python parsers bounded to $\pm 1\text{ s}$ around the event.
+6. **Scripted Mass Edits:** Use Python/shell one-liners via `run_command` when refactoring across 3+ files or pruning >30% of a file.
+7. **Test Fast, Gate Once:** Iterate with `./tools/test_fast.sh` (or `./tools/test_fast.sh -e integration_test`). **NEVER execute `.pio/build/native_test/program` directly** (it is an infinite-loop SocketCAN daemon that hangs; unit tests live in `native_test_runner`). Run `./tools/verify_all.sh` **strictly once** at task completion. Never re-run C builds after editing `*.md` docs.
+8. **Single-Call Log Triage:** Run `./tools/triage_canbox_log.py <dump.log>` once (it includes CAN state transitions, `[APP_UART_RX]` downlinks, `[APP_UART_TX]` uplinks, and causal timelines). Avoid writing ad-hoc Python log parsers unless inspecting an unlisted CAN ID. Note: `[APP_UART_TX]` in logs reflects the binary flashed at capture time, not necessarily current local source.
+9. **ESP-IDF Registration:** Always register new `src/**/*.c` files in `src/CMakeLists.txt` in the same turn.
+10. **Spec Implementation Fast Path:** Treat user specs (`doc/CANBOX_SPEC_*.md`) as pre-verified ground truth. Do not run exploratory greps or subagent audits on documented bitfields/formulas. Read headers/sources/tests in parallel (Turn 1), batch all code edits (Turn 2), and batch test + doc updates (Turn 3).
 
 ---
 
