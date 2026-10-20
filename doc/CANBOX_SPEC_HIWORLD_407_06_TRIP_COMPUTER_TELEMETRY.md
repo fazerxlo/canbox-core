@@ -47,9 +47,11 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 ### 2.3 Trip Computer Instantaneous Frame (`0x221`)
 - **CAN ID:** `0x221` (DLC: 7, Period: 1000 ms)
 - `Byte 0`: Bit 7 = Hide Fuel, Bit 6 = Hide Dist, Bit 3 = Com Stalk Right, Bit 0 = Com Stalk Left.
-- `Bytes 1..2`: Instantaneous Fuel Consumption ($0.1\text{ L/100km}$, Big-Endian uint16).
-- `Bytes 3..4`: Cruising Range / Autonomy (km, Big-Endian uint16).
-- `Bytes 5..6`: Instantaneous Distance ($0.1\text{ km}$, Big-Endian uint16).
+- `Bytes 1..2`: Instantaneous Fuel Consumption ($0.1\text{ L/100km}$, Big-Endian uint16, `0xFFFF` = stationary / `--.-`).
+- `Bytes 3..4`: Cruising Range / Autonomy (km, Big-Endian uint16, `0xFFFF` = undefined / `--.-`).
+- `Bytes 5..6`: Instantaneous Distance ($0.1\text{ km}$, Big-Endian uint16, `0xFFFF` = undefined / `--.-`).
+> [!NOTE]
+> When the vehicle is stationary (speed < 30 km/h or stopped), PSA CAN 0x221 broadcasts `0xFFFF` in fuel and/or range. This is a valid display state and MUST NOT be dropped; commercial canbox units forward `5A A5 0A 13 FF FF FF FF FF FF 00 00 00 00 16` so the Head Unit displays `--.-`.
 
 ### 2.4 Trip Computer Historical Records 1 & 2 (`0x2A1` & `0x261`)
 - **CAN IDs:** `0x2A1` (Trip 1), `0x261` (Trip 2) (DLC: 7, Period: 1000 ms)

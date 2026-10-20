@@ -81,6 +81,42 @@ void test_integration_hiworld_door_status_pipeline(void) {
     can_router_process_can(&bsi_frame_221);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len); // No bogus door status frame emitted
+
+    // 4. Test PSA 0x220 all closed frame: DATA: 04 00 (bit 0x04 must NOT be treated as hood open)
+    can_frame_t frame_220_closed = {
+        .id = 0x220,
+        .dlc = 2,
+        .data = { 0x04, 0x00 }
+    };
+    can_router_process_can(&frame_220_closed);
+
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_220_closed[] = {
+        0x5A, 0xA5, 0x0A, 0x12, 0x00, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x26
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_220_closed), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_220_closed, rx_buf, sizeof(expected_220_closed));
+
+    // Verify doors are all closed in router state
+    const vehicle_state_t *st = can_router_get_state();
+    TEST_ASSERT_FALSE(st->doors.door_driver);
+    TEST_ASSERT_FALSE(st->doors.door_passenger);
+    TEST_ASSERT_FALSE(st->doors.door_rear_left);
+    TEST_ASSERT_FALSE(st->doors.door_rear_right);
+    TEST_ASSERT_FALSE(st->doors.trunk);
+    TEST_ASSERT_FALSE(st->doors.hood);
+
+    // Verify that periodic 100ms ticks do NOT retransmit 0x12 when all doors are closed
+    for (int i = 0; i < 15; i++) {
+        can_router_periodic_100ms();
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    // Must only have heartbeat 0xFF frames, ZERO 0x12 door frames
+    for (size_t i = 0; i < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && i + 3 < rx_len) {
+            TEST_ASSERT_NOT_EQUAL(HIWORLD_CMD_DOOR_WINDOW_STATE, rx_buf[i + 3]);
+        }
+    }
 }
 
 void test_integration_hiworld_telemetry_periodic_pipeline(void) {
@@ -314,20 +350,20 @@ void test_integration_hiworld_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_dump_2a1), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_2a1, rx_buf, sizeof(expected_dump_2a1));
 
-    // CAN 0x261: DATA: 23 03 99 00 4f 03 99 -> Dist: 921 km (0x0399), Fuel: 7.9 (0x004F), Speed: 35 km/h (0x23)
+    // CAN 0x261: DATA: 24 03 99 00 4f 03 99 -> Dist: 921 km (0x0399), Fuel: 7.9 (0x004F), Speed: 36 km/h (0x24)
     can_frame_t dump_261 = {
         .id = 0x261,
         .dlc = 7,
-        .data = { 0x23, 0x03, 0x99, 0x00, 0x4F, 0x03, 0x99 }
+        .data = { 0x24, 0x03, 0x99, 0x00, 0x4F, 0x03, 0x99 }
     };
     can_router_process_can(&dump_261);
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    const uint8_t expected_dump_261[] = { 0x5A, 0xA5, 0x0A, 0x15, 0x00, 0x4F, 0x00, 0x23, 0x03, 0x99, 0x00, 0x00, 0x00, 0x00, 0x2C };
+    const uint8_t expected_dump_261[] = { 0x5A, 0xA5, 0x0A, 0x15, 0x00, 0x4F, 0x00, 0x24, 0x03, 0x99, 0x00, 0x00, 0x00, 0x00, 0x2D };
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_dump_261), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_261, rx_buf, sizeof(expected_dump_261));
 
-    // 5. Verify masked / uninitialized frames produce no output
+    // 5. Verify masked frame produces no output
     can_frame_t masked_221 = {
         .id = 0x221,
         .dlc = 7,
@@ -337,12 +373,28 @@ void test_integration_hiworld_trip_pipeline(void) {
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 
-    can_frame_t uninit_221 = {
+    // 6. Stationary sentinel frame with 0xFFFF (dump_2026-10-20_13-33-42.log) must emit 0x13
+    can_frame_t stationary_221 = {
         .id = 0x221,
         .dlc = 7,
-        .data = { 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00 }
+        .data = { 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }
     };
-    can_router_process_can(&uninit_221);
+    can_router_process_can(&stationary_221);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_stationary_221[] = { 0x5A, 0xA5, 0x0A, 0x13, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x16 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stationary_221), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stationary_221, rx_buf, sizeof(expected_stationary_221));
+
+    // 7. Verify rate limiting / deduplication: re-injecting unchanged trip frames produces ZERO UART transmissions
+    can_router_process_can(&stationary_221);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    can_router_process_can(&dump_2a1);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+
+    can_router_process_can(&dump_261);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 }

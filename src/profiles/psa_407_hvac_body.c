@@ -513,7 +513,7 @@ void psa_decode_doors_0x220(const uint8_t *data, uint8_t dlc, psa_doors_body_t *
     doors->rear_left_door  = (data[0] & 0x20) != 0;
     doors->rear_right_door = (data[0] & 0x10) != 0;
     doors->trunk           = (data[0] & 0x08) != 0;
-    doors->hood            = (data[0] & 0x04) != 0;
+    doors->hood            = false; /* PSA CAN 0x220 bit 0x04 is body bus idle active flag, NOT hood */
     doors->rear_window     = (data[0] & 0x02) != 0;
     doors->fuel_flap       = (data[0] & 0x01) != 0;
 
@@ -538,7 +538,7 @@ void psa_doors_process_can_0x220(vehicle_doors_t *doors, bool *handbrake, const 
     doors->door_rear_left  = (b0 & 0x20) ? true : false;
     doors->door_rear_right = (b0 & 0x10) ? true : false;
     doors->trunk           = (b0 & 0x08) ? true : false;
-    doors->hood            = (b0 & 0x04) ? true : false;
+    doors->hood            = false; /* PSA CAN 0x220 bit 0x04 is body bus idle active flag, NOT hood */
 
     if (dlc >= 2 && handbrake) {
         *handbrake = (data[1] & 0x01) ? true : false;

@@ -29,6 +29,17 @@ The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cm
 - **CAN ID:** `0x220` / `0x221` (Standard 11-bit Identifier)
 - **DLC:** 2 bytes
 - **Transmission Cycle:** Event-driven on state transition
+- **Payload Layout (Byte 0):**
+  - `Bit 7` (`0x80`): Driver Front Door ($1 = \text{Open}$)
+  - `Bit 6` (`0x40`): Passenger Front Door ($1 = \text{Open}$)
+  - `Bit 5` (`0x20`): Rear Left Door ($1 = \text{Open}$)
+  - `Bit 4` (`0x10`): Rear Right Door ($1 = \text{Open}$)
+  - `Bit 3` (`0x08`): Boot / Trunk ($1 = \text{Open}$)
+  - `Bit 2` (`0x04`): PSA Comfort CAN body bus active / idle flag (Always `1` in nominal closed state `04 00`; **MUST NOT** be mapped to hood)
+  - `Bit 1` (`0x02`): Rear window microswitch
+  - `Bit 0` (`0x01`): Fuel flap microswitch
+- **Payload Layout (Byte 1):**
+  - `Bit 0` (`0x01`): Handbrake Status ($1 = \text{Engaged}$)
 
 ---
 
@@ -146,7 +157,7 @@ static inline void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8
     ctx->state.door_rear_left   = (b0 & 0x20) ? true : false;
     ctx->state.door_rear_right  = (b0 & 0x10) ? true : false;
     ctx->state.trunk_open       = (b0 & 0x08) ? true : false;
-    ctx->state.hood_open        = (b0 & 0x04) ? true : false;
+    ctx->state.hood_open        = false; /* Bit 2 is body bus idle active flag, NOT hood */
 
     if (dlc >= 2) {
         ctx->state.handbrake_pulled = (data[1] & 0x01) ? true : false;

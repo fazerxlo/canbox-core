@@ -53,15 +53,13 @@ bool psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8
     if (!trip || !data || dlc < 7) return false;
 
     /* Byte 0 Bit 7: Fuel info hidden/invalid.
-     * Also guard against uninitialized/BSI status frames where all data is 0xFF.
+     * Note: 0xFFFF sentinels in fuel/range represent valid PSA stationary/undefined
+     * indicators ('--.-') and must NOT be suppressed so the HU displays '--.-'.
      */
     if ((data[0] & 0x80) != 0) return false;
-    uint16_t fuel = read_be16(&data[1]);
-    uint16_t range = read_be16(&data[3]);
-    if (fuel == 0xFFFF && range == 0xFFFF) return false;
 
-    trip->instant_fuel_deci = fuel;
-    trip->range_km          = range;
+    trip->instant_fuel_deci = read_be16(&data[1]);
+    trip->range_km          = read_be16(&data[3]);
     trip->dest_dist_km      = read_be16(&data[5]);
     trip->instant_valid     = true;
     return true;
