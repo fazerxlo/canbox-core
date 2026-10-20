@@ -849,6 +849,24 @@ void test_peugeot_407_rd4_source_transition_mute(void) {
         TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode);
         TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status); /* Preserved during 0x00 reboot */
     }
+
+    /* 8. Cold wake from standby with source nibble 0 (C8 80 00 00):
+     * Must immediately set power_status = 1 and psa_rd4_is_powered() = true */
+    psa_rd4_process_can_0x165(&media.radio, can_sleep, sizeof(can_sleep));
+    TEST_ASSERT_TRUE(media.radio.sleep);
+    TEST_ASSERT_EQUAL_UINT8(0, media.radio.power_status);
+
+    const uint8_t can_wake_initializing[] = { 0xC8, 0x80, 0x00, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_wake_initializing, sizeof(can_wake_initializing));
+    TEST_ASSERT_FALSE(media.radio.sleep);
+    TEST_ASSERT_TRUE(media.radio.present);
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status);
+    TEST_ASSERT_TRUE(psa_rd4_is_powered(&media.radio));
+
+    /* Source initializes to Tuner shortly after */
+    psa_rd4_process_can_0x165(&media.radio, can_tuner_active, sizeof(can_tuner_active));
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status);
+    TEST_ASSERT_EQUAL_HEX8(media.radio.band, media.radio.source_mode);
 }
 
 

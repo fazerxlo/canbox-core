@@ -87,9 +87,17 @@ static void psa_decode_console_0x3e5_profile(const can_frame_t *frame, vehicle_s
 
 static bool s_reverse_from_0f6 = false;
 static bool s_reverse_from_036 = false;
+static bool s_have_0f6 = false;
+static bool s_ignition_from_0f6 = false;
+
+static inline void psa_update_derived_power_state(vehicle_state_t *state);
 
 static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc >= 8) {
+        s_have_0f6 = true;
+        s_ignition_from_0f6 = (frame->data[0] & (1 << 3)) != 0;
+        state->ignition_on = s_ignition_from_0f6;
+
         s_reverse_from_0f6 = (frame->data[7] & (1 << 7)) != 0;
         state->reverse_gear = s_reverse_from_0f6 || s_reverse_from_036;
 
@@ -97,6 +105,8 @@ static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t 
         if (frame->data[5] != 0xFF) {
             state->climate.outdoor_temp_raw = frame->data[5];
         }
+
+        psa_update_derived_power_state(state);
     }
 }
 
@@ -136,42 +146,50 @@ static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_
     }
 }
 
-static uint8_t s_radio_sleep_ign_active_cnt = 0;
+static bool s_prev_ignition_on = false;
+static bool s_rd4_prev_powered = false;
+static bool s_rd4_manual_acc   = false;
 
 static inline void psa_update_derived_power_state(vehicle_state_t *state) {
+    bool rd4_present = psa_rd4_is_connected(&state->media.radio);
+    bool rd4_powered = rd4_present && psa_rd4_is_powered(&state->media.radio) && !state->media.radio.sleep;
+
+    // 1. Economy Mode has absolute authority -> Force OFF immediately
     if (state->economy_mode) {
-        s_radio_sleep_ign_active_cnt = 0;
+        s_rd4_manual_acc = false;
         state->ignition_state = VEHICLE_IGNITION_OFF;
-    } else if (psa_rd4_is_connected(&state->media.radio)) {
-        /* When factory radio is present:
-         * If radio is in sleep / standby mode ((data[0] & 0xC0) == 0), ACC is OFF.
-         * However, if +APC ignition is already ON (`state->ignition_on` && `ignition_state == VEHICLE_IGNITION_ON`),
-         * debounce transient RD4 warm reboots (`0x48 -> 0x08 -> 0x00 -> 0xC8`, where `0x08` lasts ~300 ms / 3 frames)
-         * so PA8 (Head Unit ACC) never glitches LOW mid-drive. */
-        if (state->media.radio.sleep) {
-            if (state->ignition_on && state->ignition_state == VEHICLE_IGNITION_ON &&
-                s_radio_sleep_ign_active_cnt < 15) {
-                s_radio_sleep_ign_active_cnt++;
-                state->ignition_state = VEHICLE_IGNITION_ON;
-            } else {
-                state->ignition_state = VEHICLE_IGNITION_OFF;
-            }
-        } else if (psa_rd4_is_powered(&state->media.radio)) {
-            s_radio_sleep_ign_active_cnt = 0;
-            state->ignition_state = state->ignition_on ? VEHICLE_IGNITION_ON : VEHICLE_IGNITION_ACC;
-        } else {
-            s_radio_sleep_ign_active_cnt = 0;
-            state->ignition_state = state->ignition_on ? VEHICLE_IGNITION_ON : VEHICLE_IGNITION_OFF;
-        }
-    } else {
-        s_radio_sleep_ign_active_cnt = 0;
-        /* No factory radio detected on bus: ACC follows ignition switch */
-        if (state->ignition_on) {
-            state->ignition_state = VEHICLE_IGNITION_ON;
-        } else {
-            state->ignition_state = VEHICLE_IGNITION_OFF;
-        }
     }
+    // 2. Ignition is ON (+APC) -> Force ON immediately
+    // RD4 sleep, restart, silence, or absence is completely ignored.
+    else if (state->ignition_on) {
+        s_rd4_manual_acc = false;
+        state->ignition_state = VEHICLE_IGNITION_ON;
+    }
+    // 3. Ignition is OFF
+    else {
+        // Falling edge: If ignition just turned OFF, cut HU power immediately
+        if (s_prev_ignition_on) {
+            s_rd4_manual_acc = false;
+        }
+
+        // RD4 accessory handling while parked
+        if (rd4_present) {
+            if (!s_rd4_prev_powered && rd4_powered) {
+                // Rising edge: User explicitly pushed RD4 power knob while key is OFF
+                s_rd4_manual_acc = true;
+            } else if (!rd4_powered) {
+                // User pushed RD4 power knob to turn off, or RD4 entered sleep
+                s_rd4_manual_acc = false;
+            }
+        } else {
+            s_rd4_manual_acc = false;
+        }
+
+        state->ignition_state = s_rd4_manual_acc ? VEHICLE_IGNITION_ACC : VEHICLE_IGNITION_OFF;
+    }
+
+    s_prev_ignition_on = state->ignition_on;
+    s_rd4_prev_powered = rd4_powered;
 }
 
 static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_state_t *state) {
@@ -192,8 +210,17 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
 
     if (frame->dlc >= 5) {
         uint8_t phase_vie = frame->data[4] & 0x07;
-        /* 0x01: Run (+APC), 0x03: Wakeup / Key turn pulse */
-        state->ignition_on = (phase_vie == 0x01 || phase_vie == 0x03);
+        if (phase_vie == 0x00 || phase_vie == 0x02) {
+            /* 0x00: Deep sleep, 0x02: Shutdown countdown -> Ignition is definitively OFF */
+            state->ignition_on = false;
+            s_ignition_from_0f6 = false;
+        } else if (s_have_0f6) {
+            /* 0x0F6 Byte 0 Bit 3 is the authoritative vehicle ground truth for +APC */
+            state->ignition_on = s_ignition_from_0f6;
+        } else {
+            /* Fallback for standalone/synthetic test environments without 0x0F6 */
+            state->ignition_on = (phase_vie == 0x01 || phase_vie == 0x03);
+        }
     }
 
     psa_update_derived_power_state(state);
@@ -277,7 +304,11 @@ static const profile_can_rule_t s_psa_rules[] = {
 static void psa_init(void) {
     s_reverse_from_0f6 = false;
     s_reverse_from_036 = false;
-    s_radio_sleep_ign_active_cnt = 0;
+    s_have_0f6         = false;
+    s_ignition_from_0f6 = false;
+    s_prev_ignition_on = false;
+    s_rd4_prev_powered = false;
+    s_rd4_manual_acc   = false;
     psa_stalk_init(NULL);
     psa_console_init(NULL);
     psa_journal_iso_tp_init(&s_journal_ctx);

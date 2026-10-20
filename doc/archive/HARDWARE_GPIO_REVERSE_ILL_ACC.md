@@ -168,7 +168,7 @@ if (economy_mode) {
     ACC = ignition_on ? ON : OFF;
 }
 ```
-- **`ignition_on`:** CAN `0x036` Byte 4 (`0x01` Run `+APC` or `0x03` Crank pulse).
+- **`ignition_on`:** CAN `0x0F6` Byte 0 Bit 3 (`0x88` Run `+APC` / Contact ON, `0x80` Contact OFF).
 - **`radio_present`:** Becomes `true` upon receiving CAN `0x165`.
 - **`radio_on`:** CAN `0x165` Byte 0 Bit 7 (`0x80` RD4 factory radio audio active).
 - **`radio_sleep`:** CAN `0x165` Byte 0 Bits [7:6] == `0x00` (`(data[0] & 0xC0) == 0`, e.g. `0x08`, factory radio in deep sleep / standby).
@@ -177,11 +177,12 @@ if (economy_mode) {
 #### Vehicle CAN Sources & Wakeup Triggers
 | CAN ID / Source | Byte Index | Value / Mask | Signal Name | Logic Definition |
 |:---|:---:|:---:|:---|:---|
-| **`0x036`** | Byte 4 Bits [2:0] | `0x01` | `PHASE_VIE`: Ignition ON (Run `+APC`) | `true` = `ignition_on` (ACC ON if radio not in sleep) |
-| **`0x036`** | Byte 4 Bits [2:0] | `0x02` | `PHASE_VIE`: Ignition OFF (Going to sleep) | `false` = `ignition_on` (Shutdown / ACC OFF unless radio) |
-| **`0x036`** | Byte 4 Bits [2:0] | `0x03` | `PHASE_VIE`: Wakeup Transition (~40 ms) | `true` = `ignition_on` (Key turn transition pulse) |
+| **`0x0F6`** | Byte 0 Bit 3 | `0x08` (`0x88` vs `0x80`) | BSI Contact (+APC) State | `1` = `ignition_on` (Authoritative vehicle key position) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x01` / `0x03` | `PHASE_VIE`: Network Active | Bus awake (Ignition ON, door open, or radio wakeup) |
+| **`0x036`** | Byte 4 Bits [2:0] | `0x02` | `PHASE_VIE`: Network Shutdown | `false` = `ignition_on` (Countdown before sleep) |
 | **`0x036`** | Byte 4 Bits [2:0] | `0x00` | `PHASE_VIE`: Deep Sleep / Standby | `false` = `ignition_on` (Deep Sleep / ACC OFF) |
 | **`0x036`** | Byte 2 Bit 7 | `0x80` | `MODE_ECO`: Economy Mode | `1` = `economy_mode` (Blocks radio ACC to protect battery) |
+| **`0x420`** | Bytes [0:1] | `0x00 0x00` | RD4 NM Wakeup Request | Transmitted by RD4 when knob is pressed while bus asleep |
 | **`0x165`** | Byte 0 Bit 7 | `0x80` | RD4 Factory Radio Power State | `1` = `radio_on` (Powers ACC when ignition OFF & eco OFF) |
 | **`0x165`** | Byte 0 Bits [7:6] | `0x00` | RD4 Deep Sleep / Standby State | `(data[0] & 0xC0) == 0` = `radio_sleep` (Forces ACC OFF) |
 | **Physical Pin `PB12`** | — | High Level | Hardware Ignition Wire Sense | Fallback if CAN is asleep |
@@ -189,15 +190,16 @@ if (economy_mode) {
 #### Real-World Operational Scenarios (CAN Log Ground Truth)
 1. **Battery Reconnect Initial Wake (`dump_connect_battery_only.log`):**
    - When $+12\text{V}$ battery power is physically connected without ignition key, the PSA BSI initializes and transmits `0x036` Byte 4 = `0x02` (`PHASE_VIE = 0x02`, Ignition OFF) for approximately $14\text{ seconds}$.
-   - Because the ignition key is absent, the radio and physical ACC wire stay strictly at $0\text{V}$ (OFF).
+   - Because the ignition key is absent (`0x0F6` Byte 0 Bit 3 = `0`), the radio and physical ACC wire stay strictly at $0\text{V}$ (OFF).
    - At $t = 1791462266.040\text{ s}$, `0x036` Byte 4 transitions to `0x00` (`Deep Sleep / Standby`).
    - Immediately following this drop, all periodic CAN frames cease, and the vehicle comfort bus enters silent sleep. The 3.0-second bus inactivity watchdog asserts transceiver standby mode (`GPIO_PIN_CAN_STBY = true`) and completely silences UART comms.
-2. **Key OFF + RD4 Radio Knob Power-On (`dump_ign_off_rd4_on_off.log`):**
-   - With the vehicle key removed (`IGN OFF`), pressing the power knob on the factory RD4 radio wakes the comfort CAN bus.
-   - The BSI transmits `0x036` Byte 4 = `0x01` (`VEHICLE_IGNITION_ON`), and the RD4 radio transmits `0x165` with `data[0] = 0xC8` (`Bit 7 = 1` radio active, `Bit 6 = 1` display active).
+2. **Key OFF + RD4 Radio Knob Power-On (`radio_on_off_when_ign_off.csv`):**
+   - With the vehicle key removed (`IGN OFF`), pressing the power knob on the factory RD4 radio transmits `0x420` (`00 00`), requesting the BSI to wake the comfort CAN bus.
+   - The BSI wakes the network: broadcasting `0x036` Byte 4 = `0x01` (bus awake) and `0x0F6` Byte 0 = `0x80` (`Bit 3 = 0`, confirming ignition key is OFF).
+   - The RD4 radio initializes and transmits `0x165` with `data[0] = 0xC8` (`Bit 7 = 1` radio active, `Bit 6 = 1` display active).
    - The decoder promotes this state to `VEHICLE_IGNITION_ACC`, immediately asserting `GPIO_PIN_HEADUNIT_POWER = true` (+12V switched ACC) so that the aftermarket Android Head Unit powers up alongside the OEM audio system.
-   - When the user presses the RD4 knob again to turn off the radio, `0x165` transitions to `0x48` then `0x08` (`(data[0] & 0xC0) == 0`), display frame `0x1E0` zeros out, and comfort bus frames stop.
-   - The 3.0-second bus silence watchdog drops `GPIO_PIN_HEADUNIT_POWER` to `false` and places the CAN transceiver into standby.
+   - When the user presses the RD4 knob again to turn off the radio, `0x165` transitions to `0x48` then `0x08` (`(data[0] & 0xC0) == 0`).
+   - The decoder detects radio power-off while ignition is OFF, immediately cutting `GPIO_PIN_HEADUNIT_POWER` to `false` (ACC OFF) without waiting for the BSI 60s bus silence watchdog.
 3. **Economy Mode Battery Protection (`MODE_ECO`):**
    - When BSI senses battery charge dropping below threshold, it sets `0x036` Byte 2 Bit 7 (`0x80`).
    - Firmware immediately forces `ignition_state = VEHICLE_IGNITION_OFF`, dropping `GPIO_PIN_HEADUNIT_POWER` to $0\text{V}$ and preventing RD4 knob power-up from drawing current until the engine is started.

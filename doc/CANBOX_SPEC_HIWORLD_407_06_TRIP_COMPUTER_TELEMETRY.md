@@ -13,9 +13,9 @@
 
 In Peugeot 407 (PSA CAN2004 architecture), engine telemetry, odometer readings, ambient temperatures, and trip metrics are broadcast across the following core frames:
 - **`0x0B6` (Fast Dynamic Data, 50 ms):** Engine RPM (bits 15..3 = RPM $\times 8$) and vehicle speed (uint16 scaled by 100 in km/h).
-- **`0x0F6` (BSI Slow Data, 500 ms):** Engine coolant temperature ($\text{Raw} - 40^\circ\text{C}$), external ambient air temperature ($\text{Raw} \times 0.5 - 40^\circ\text{C}$), reverse gear status (Byte 7 Bit 7), wipers, and turn signals (blinkers).
+- **`0x0F6` (BSI Slow Data, 500 ms):** Ignition contact state (+APC: Byte 0 Bit 3, `0x88`=ON, `0x80`=OFF), engine coolant temperature ($\text{Raw} - 40^\circ\text{C}$), external ambient air temperature ($\text{Raw} \times 0.5 - 40^\circ\text{C}$), reverse gear status (Byte 7 Bit 7), wipers, and turn signals (blinkers).
 - **`0x161` (BSI Gauges, 500 ms):** Oil temperature ($\text{Raw} - 40^\circ\text{C}$), fuel level percentage (Byte 3), and oil level (Byte 6).
-- **`0x036` (Ignition & Illumination, 100 ms):** Power state (`Byte 4: 0x01=IGN, 0x03=ACC`), dashboard illumination enabled (Byte 3 Bit 5), and luminosity level.
+- **`0x036` (Network State & Illumination, 100 ms):** Comfort bus network lifecycle / Phase de vie (`Byte 4: 0x00=Sleep, 0x01=Awake, 0x02=Shutdown countdown, 0x03=Wakeup transition`), dashboard illumination enabled (Byte 3 Bit 5), and luminosity level.
 - **`0x221` (Instantaneous Trip, 1000 ms):** Instantaneous fuel consumption ($0.1\text{ L/100km}$), cruising range / autonomy (km), distance ($0.1\text{ km}$), and stalk com button flags.
 - **`0x2A1` (Trip 1 Historical, 1000 ms):** Mean speed (uint8 / uint16 km/h), distance (km), and average consumption ($0.1\text{ L/100km}$).
 - **`0x261` (Trip 2 Historical, 1000 ms):** Same format as Trip 1.

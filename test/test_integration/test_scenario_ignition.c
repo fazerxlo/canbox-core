@@ -245,15 +245,15 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Radio in sleep mode must keep ACC OFF");
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
-    // Even if 0x036 arrives with ignition ON while radio is in sleep mode, ACC stays OFF
+    // Ignition ON (+APC) overrides sleeping radio: Head Unit turns ON
     can_frame_t frame_ign_with_radio_sleep = {
         .id = 0x036,
         .dlc = 8,
         .data = { 0x0E, 0x00, 0x00, 0x0F, 0x01, 0x00, 0x00, 0xA0 }
     };
     can_router_process_can(&frame_ign_with_radio_sleep);
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Radio in sleep mode overrides stale ignition 0x01");
-    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_ON, state->ignition_state, "Ignition ON must power HU even if radio is sleeping");
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
     // 9. When radio powers back ON (0xC8), ACC turns ON
     can_router_process_can(&frame_radio_on);
@@ -306,4 +306,131 @@ void test_scenario_sleeping_bus_blocks_can_tx_on_uart_activity(void) {
     TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_CAN_STBY));
     TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
                               "No CAN frames may be transmitted while Comfort CAN bus is sleeping");
+}
+
+void test_scenario_acc_power_lifecycle(void) {
+    can_router_init();
+    vehicle_state_t *state = can_router_get_state();
+
+    const can_frame_t f_ign_off = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x0F, 0x02, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_ign_on = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x0F, 0x01, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_eco_on = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x80, 0x0F, 0x02, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_rd4_on = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0xC8, 0x00, 0x11, 0x00 }
+    };
+    const can_frame_t f_rd4_off = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0x48, 0xA0, 0x00, 0x00 }
+    };
+    const can_frame_t f_rd4_sleep = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0x08, 0x80, 0x00, 0x00 }
+    };
+    const can_frame_t f_rd4_reboot_00 = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0x00, 0x00, 0x00, 0x00 }
+    };
+
+    const can_frame_t f_0f6_ign_on = {
+        .id = 0x0F6, .dlc = 8,
+        .data = { 0x88, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20 }
+    };
+    const can_frame_t f_0f6_ign_off = {
+        .id = 0x0F6, .dlc = 8,
+        .data = { 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20 }
+    };
+
+    // --- Scenario 1: Initial state without RD4 on bus ---
+    can_router_process_can(&f_ign_off);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Turn ON ignition without RD4: HU powers ON
+    can_router_process_can(&f_0f6_ign_on);
+    can_router_process_can(&f_ign_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Turn OFF ignition without RD4: HU powers OFF
+    can_router_process_can(&f_0f6_ign_off);
+    can_router_process_can(&f_ign_off);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // --- Scenario 2: RD4 present in car ---
+    // Start vehicle: IGN ON + RD4 ON
+    can_router_process_can(&f_0f6_ign_on);
+    can_router_process_can(&f_ign_on);
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Mid-drive RD4 restart/silence resilience:
+    // RD4 sends 00 00 00 00 (reboot) or 08 80 (standby glitch)
+    can_router_process_can(&f_rd4_reboot_00);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    can_router_process_can(&f_rd4_sleep);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Radio recovers
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+
+    // --- Scenario 3: Key turned OFF while driving (IGN goes OFF) ---
+    // HU MUST turn OFF immediately even if RD4 has not powered down yet
+    can_router_process_can(&f_0f6_ign_off);
+    can_router_process_can(&f_ign_off);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "HU must turn OFF when IGN goes OFF");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Subsequent late RD4 frames from shutdown do NOT re-trigger ACC
+    can_router_process_can(&f_rd4_on); // Stale/trailing frame
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // RD4 finishes shutting down
+    can_router_process_can(&f_rd4_off);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // --- Scenario 4: Parked, IGN is OFF, user explicitly switches ON RD4 ---
+    // Vehicle ground truth: BSI wakes up comfort network (0x036 Phase=0x01) but 0x0F6 is IGN OFF (0x80)
+    can_router_process_can(&f_0f6_ign_off);
+    can_router_process_can(&f_ign_on); // 0x036 awake
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_ACC, state->ignition_state, "HU must turn ON in ACC when RD4 switched ON with key OFF");
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // User switches OFF RD4 while parked (BSI 0x036 still broadcasting awake Phase=0x01!)
+    can_router_process_can(&f_rd4_off);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "HU must turn OFF when RD4 switched OFF even if 0x036 is awake");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Periodic 0x036 (Phase=0x01) keeper frames must NOT turn ACC back ON while RD4 is OFF
+    can_router_process_can(&f_ign_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // User turns RD4 back ON while parked
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ACC, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // --- Scenario 5: Economy mode triggers while in ACC ---
+    can_router_process_can(&f_eco_on);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Economy mode must cut HU power");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 }

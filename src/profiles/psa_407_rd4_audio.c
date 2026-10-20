@@ -248,13 +248,15 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
                 /* Retain current source_mode during source transition mute */
                 radio->power_status = 3;
             } else {
-                radio->source_mode = 0xFF;
-                radio->power_status = 0x00;
+                if (radio->source_mode < 0x20) {
+                    radio->source_mode = 0xFF;
+                }
+                radio->power_status = power;
             }
             break;
         default:
             radio->source_mode = 0xFF;
-            radio->power_status = 0x00;
+            radio->power_status = power;
             break;
     }
 

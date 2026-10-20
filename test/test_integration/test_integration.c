@@ -95,6 +95,7 @@ void test_scenario_ignition_silence_watchdog_forces_sleep_from_on(void);
 void test_scenario_ignition_economy_mode_forces_radio_off(void);
 void test_scenario_sleeping_bus_blocks_can_tx_on_uart_activity(void);
 void test_scenario_lights_off_side_light_on_headlights_on(void);
+void test_scenario_acc_power_lifecycle(void);
 
 int main(void) {
     UNITY_BEGIN();
@@ -149,6 +150,7 @@ int main(void) {
     RUN_TEST(test_scenario_ignition_economy_mode_forces_radio_off);
     RUN_TEST(test_scenario_sleeping_bus_blocks_can_tx_on_uart_activity);
     RUN_TEST(test_scenario_lights_off_side_light_on_headlights_on);
+    RUN_TEST(test_scenario_acc_power_lifecycle);
 
     return UNITY_END();
 }
