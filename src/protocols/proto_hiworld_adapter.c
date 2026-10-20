@@ -380,19 +380,24 @@ static void hiworld_send_trip_instant(const vehicle_trip_t *trip) {
 static void hiworld_send_trip1(const vehicle_trip_t *trip) {
     if (!trip || !trip->trip1_valid) return;
 
-    /* Hiworld Trip 1 Telemetry (Cmd 0x14): 6 payload bytes
+    /* Hiworld Trip 1 Telemetry (Cmd 0x14): 10 payload bytes
      * Byte 0..1: Average Fuel Consumption (0.1 L/100km, Big-Endian)
      * Byte 2: Reserved (0x00)
      * Byte 3: Average Speed (km/h)
      * Byte 4..5: Distance Traveled (km, Big-Endian)
+     * Byte 6..9: Reserved / Padding (0x00 0x00 0x00 0x00)
      */
-    uint8_t payload[6];
+    uint8_t payload[10];
     payload[0] = (uint8_t)(trip->trip1_avg_fuel >> 8);
     payload[1] = (uint8_t)(trip->trip1_avg_fuel & 0xFF);
     payload[2] = 0x00;
     payload[3] = trip->trip1_avg_speed;
     payload[4] = (uint8_t)(trip->trip1_distance_km >> 8);
     payload[5] = (uint8_t)(trip->trip1_distance_km & 0xFF);
+    payload[6] = 0x00;
+    payload[7] = 0x00;
+    payload[8] = 0x00;
+    payload[9] = 0x00;
 
     uint8_t tx_buf[16];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P1, payload, sizeof(payload),
@@ -405,19 +410,24 @@ static void hiworld_send_trip1(const vehicle_trip_t *trip) {
 static void hiworld_send_trip2(const vehicle_trip_t *trip) {
     if (!trip || !trip->trip2_valid) return;
 
-    /* Hiworld Trip 2 Telemetry (Cmd 0x15): 6 payload bytes
+    /* Hiworld Trip 2 Telemetry (Cmd 0x15): 10 payload bytes
      * Byte 0..1: Average Fuel Consumption (0.1 L/100km, Big-Endian)
      * Byte 2: Reserved (0x00)
      * Byte 3: Average Speed (km/h)
      * Byte 4..5: Distance Traveled (km, Big-Endian)
+     * Byte 6..9: Reserved / Padding (0x00 0x00 0x00 0x00)
      */
-    uint8_t payload[6];
+    uint8_t payload[10];
     payload[0] = (uint8_t)(trip->trip2_avg_fuel >> 8);
     payload[1] = (uint8_t)(trip->trip2_avg_fuel & 0xFF);
     payload[2] = 0x00;
     payload[3] = trip->trip2_avg_speed;
     payload[4] = (uint8_t)(trip->trip2_distance_km >> 8);
     payload[5] = (uint8_t)(trip->trip2_distance_km & 0xFF);
+    payload[6] = 0x00;
+    payload[7] = 0x00;
+    payload[8] = 0x00;
+    payload[9] = 0x00;
 
     uint8_t tx_buf[16];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P2, payload, sizeof(payload),

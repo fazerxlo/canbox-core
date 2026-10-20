@@ -72,7 +72,7 @@ bool psa_trip_process_can_0x2a1(vehicle_trip_t *trip, const uint8_t *data, uint8
 
     trip->trip1_distance_km = read_be16(&data[1]);
     trip->trip1_avg_fuel    = read_be16(&data[3]);
-    trip->trip1_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
+    trip->trip1_avg_speed   = data[0];
     trip->trip1_valid       = true;
     return true;
 }
@@ -82,7 +82,7 @@ bool psa_trip_process_can_0x261(vehicle_trip_t *trip, const uint8_t *data, uint8
 
     trip->trip2_distance_km = read_be16(&data[1]);
     trip->trip2_avg_fuel    = read_be16(&data[3]);
-    trip->trip2_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)read_be16(&data[5]) : data[0];
+    trip->trip2_avg_speed   = data[0];
     trip->trip2_valid       = true;
     return true;
 }

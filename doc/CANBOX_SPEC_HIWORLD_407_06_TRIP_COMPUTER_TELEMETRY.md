@@ -56,7 +56,7 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 - `Byte 0`: Mean Speed ($\text{km/h}$, uint8).
 - `Bytes 1..2`: Distance Traveled (km, Big-Endian uint16).
 - `Bytes 3..4`: Average Consumption ($0.1\text{ L/100km}$, Big-Endian uint16).
-- `Bytes 5..6`: Average Speed ($\text{km/h}$, Big-Endian uint16).
+- `Bytes 5..6`: Driving Duration / Trip Elapsed Time (minutes, Big-Endian uint16).
 
 ---
 
@@ -76,25 +76,29 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 
 ### 3.2 Hiworld Trip 1 Telemetry (`Cmd 0x14` / `Handle.EcuInfoPage2`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length ($L$):** `0x06` (6 payload bytes)
+- **Length ($L$):** `0x0A` (10 payload bytes)
 - **Command ID:** `0x14` (`20` decimal / `Handle.EcuInfoPage2`)
-- **Payload Layout (6 Bytes):**
+- **Payload Layout (10 Bytes - Big Endian):**
   - `Byte 0..1`: Average Fuel Consumption ($0.1\text{ L/100km}$)
   - `Byte 2`: Reserved (`0x00`)
   - `Byte 3`: Average Speed ($\text{km/h}$, `0xFF` = 0)
   - `Byte 4..5`: Trip Distance Traveled ($\text{km}$)
+  - `Byte 6..9`: Reserved / Padding (`0x00 0x00 0x00 0x00`)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
+- **Wire Frame:** `5A A5 0A 14 [10 Bytes] Checksum`
 
 ### 3.3 Hiworld Trip 2 Telemetry (`Cmd 0x15` / `Handle.EcuInfoPage3`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length ($L$):** `0x06` (6 payload bytes)
+- **Length ($L$):** `0x0A` (10 payload bytes)
 - **Command ID:** `0x15` (`21` decimal / `Handle.EcuInfoPage3`)
-- **Payload Layout (6 Bytes):**
+- **Payload Layout (10 Bytes - Big Endian):**
   - `Byte 0..1`: Average Fuel Consumption ($0.1\text{ L/100km}$)
   - `Byte 2`: Reserved (`0x00`)
   - `Byte 3`: Average Speed ($\text{km/h}$, `0xFF` = 0)
   - `Byte 4..5`: Trip Distance Traveled ($\text{km}$)
+  - `Byte 6..9`: Reserved / Padding (`0x00 0x00 0x00 0x00`)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
+- **Wire Frame:** `5A A5 0A 15 [10 Bytes] Checksum`
 
 ### 3.4 Hiworld Downlink Trip Reset & Navigation (`Cmd 0x1B` / `Command.ForwardEcuSetting`)
 - **Sync Header:** `0x5A 0xA5`
@@ -196,10 +200,10 @@ static inline void psa_trip_send_instant(psa_trip_ctx_t *ctx) {
 static inline void psa_trip_send_trip1(psa_trip_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[11];
+    uint8_t p[15];
     p[0] = HIWORLD_SOF1;
     p[1] = HIWORLD_SOF2;
-    p[2] = 0x06;               /* Length: 6 Payload bytes */
+    p[2] = 0x0A;               /* Length: 10 Payload bytes */
     p[3] = HIWORLD_CMD_ECU_P1; /* Cmd 0x14 */
     p[4] = (uint8_t)(ctx->state.trip1_avg_fuel >> 8);
     p[5] = (uint8_t)(ctx->state.trip1_avg_fuel & 0xFF);
@@ -207,24 +211,28 @@ static inline void psa_trip_send_trip1(psa_trip_ctx_t *ctx) {
     p[7] = ctx->state.trip1_avg_speed;
     p[8] = (uint8_t)(ctx->state.trip1_distance_km >> 8);
     p[9] = (uint8_t)(ctx->state.trip1_distance_km & 0xFF);
+    p[10] = 0x00;
+    p[11] = 0x00;
+    p[12] = 0x00;
+    p[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum += p[i];
     }
-    p[10] = (uint8_t)((sum - 1) & 0xFF);
+    p[14] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 11);
+    ctx->uart_tx(p, 15);
 }
 
 /* Transmit Hiworld Trip 2 Telemetry (Cmd 0x15) */
 static inline void psa_trip_send_trip2(psa_trip_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[11];
+    uint8_t p[15];
     p[0] = HIWORLD_SOF1;
     p[1] = HIWORLD_SOF2;
-    p[2] = 0x06;               /* Length: 6 Payload bytes */
+    p[2] = 0x0A;               /* Length: 10 Payload bytes */
     p[3] = HIWORLD_CMD_ECU_P2; /* Cmd 0x15 */
     p[4] = (uint8_t)(ctx->state.trip2_avg_fuel >> 8);
     p[5] = (uint8_t)(ctx->state.trip2_avg_fuel & 0xFF);
@@ -232,14 +240,18 @@ static inline void psa_trip_send_trip2(psa_trip_ctx_t *ctx) {
     p[7] = ctx->state.trip2_avg_speed;
     p[8] = (uint8_t)(ctx->state.trip2_distance_km >> 8);
     p[9] = (uint8_t)(ctx->state.trip2_distance_km & 0xFF);
+    p[10] = 0x00;
+    p[11] = 0x00;
+    p[12] = 0x00;
+    p[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum += p[i];
     }
-    p[10] = (uint8_t)((sum - 1) & 0xFF);
+    p[14] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 11);
+    ctx->uart_tx(p, 15);
 }
 
 /* Process PSA CAN 0x0B6 (RPM & Speed) */
@@ -269,7 +281,7 @@ static inline void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t
 
     ctx->state.trip1_distance_km = ((uint16_t)data[1] << 8) | data[2];
     ctx->state.trip1_avg_fuel    = ((uint16_t)data[3] << 8) | data[4];
-    ctx->state.trip1_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)(((uint16_t)data[5] << 8) | data[6]) : data[0];
+    ctx->state.trip1_avg_speed   = data[0];
 
     psa_trip_send_trip1(ctx);
 }
@@ -280,7 +292,7 @@ static inline void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t
 
     ctx->state.trip2_distance_km = ((uint16_t)data[1] << 8) | data[2];
     ctx->state.trip2_avg_fuel    = ((uint16_t)data[3] << 8) | data[4];
-    ctx->state.trip2_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)(((uint16_t)data[5] << 8) | data[6]) : data[0];
+    ctx->state.trip2_avg_speed   = data[0];
 
     psa_trip_send_trip2(ctx);
 }
@@ -315,20 +327,20 @@ static inline void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t
 ### Vector 2: Trip 1 Historical (Distance 569 km, Fuel 7.3 L/100km, Mean Speed 37 km/h)
 - **CAN ID `0x2A1` Injection:**
   ```bash
-  cansend vcan0 2A1#25023900490025
+  cansend vcan0 2A1#25023900490399
   ```
 - **Expected UART Output (Hiworld `0x14`):**
-  - Frame: `5A A5 06 14 00 49 00 25 02 39 C2`
-  - Checksum Calculation: `(0x06 + 0x14 + 0x00 + 0x49 + 0x00 + 0x25 + 0x02 + 0x39 - 1) & 0xFF = (0xC3 - 1) & 0xFF = 0xC2`
+  - Frame: `5A A5 0A 14 00 49 00 25 02 39 00 00 00 00 C6`
+  - Checksum Calculation: `(0x0A + 0x14 + 0x00 + 0x49 + 0x00 + 0x25 + 0x02 + 0x39 - 1) & 0xFF = (0xC7 - 1) & 0xFF = 0xC6`
 
 ### Vector 3: Trip 2 Historical (Distance 921 km, Fuel 7.9 L/100km, Mean Speed 35 km/h)
 - **CAN ID `0x261` Injection:**
   ```bash
-  cansend vcan0 261#230399004F0023
+  cansend vcan0 261#230399004F0399
   ```
 - **Expected UART Output (Hiworld `0x15`):**
-  - Frame: `5A A5 06 15 00 4F 00 23 03 99 28`
-  - Checksum Calculation: `(0x06 + 0x15 + 0x00 + 0x4F + 0x00 + 0x23 + 0x03 + 0x99 - 1) & 0xFF = (0x129 - 1) & 0xFF = 0x28`
+  - Frame: `5A A5 0A 15 00 4F 00 23 03 99 00 00 00 00 2C`
+  - Checksum Calculation: `(0x0A + 0x15 + 0x00 + 0x4F + 0x00 + 0x23 + 0x03 + 0x99 - 1) & 0xFF = (0x12D - 1) & 0xFF = 0x2C`
 
 ### Vector 4: Fast Dynamics RPM & Speed (800 RPM, 10 km/h)
 - **CAN ID `0x0B6` Injection:**

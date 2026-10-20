@@ -142,19 +142,19 @@ void test_peugeot_407_trip_hiworld_vector_2_trip1_historical(void) {
     memset(&trip, 0, sizeof(trip));
 
     // Vector 2: Trip 1 Historical (Distance 569 km, Fuel 7.3 L/100km, Mean Speed 37 km/h)
-    // CAN ID 0x2A1 injection: cansend vcan0 2A1#25023900490025
-    const uint8_t can_2a1[] = { 0x25, 0x02, 0x39, 0x00, 0x49, 0x00, 0x25 };
+    // CAN ID 0x2A1 injection from vehicle capture: cansend vcan0 2A1#25023900490399
+    const uint8_t can_2a1[] = { 0x25, 0x02, 0x39, 0x00, 0x49, 0x03, 0x99 };
     psa_trip_process_can_0x2a1(&trip, can_2a1, sizeof(can_2a1));
 
     TEST_ASSERT_EQUAL_UINT16(569, trip.trip1_distance_km);
     TEST_ASSERT_EQUAL_UINT16(73, trip.trip1_avg_fuel);
     TEST_ASSERT_EQUAL_UINT8(37, trip.trip1_avg_speed);
 
-    // Expected UART Output: 5A A5 06 14 00 49 00 25 02 39 C2
-    const uint8_t expected[] = { 0x5A, 0xA5, 0x06, 0x14, 0x00, 0x49, 0x00, 0x25, 0x02, 0x39, 0xC2 };
+    // Expected UART Output: 5A A5 0A 14 00 49 00 25 02 39 00 00 00 00 C6
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x14, 0x00, 0x49, 0x00, 0x25, 0x02, 0x39, 0x00, 0x00, 0x00, 0x00, 0xC6 };
     uint8_t out[16];
     size_t len = build_hiworld_trip1(&trip, out, sizeof(out));
-    TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_UINT32(15, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
@@ -163,19 +163,19 @@ void test_peugeot_407_trip_hiworld_vector_3_trip2_historical(void) {
     memset(&trip, 0, sizeof(trip));
 
     // Vector 3: Trip 2 Historical (Distance 921 km, Fuel 7.9 L/100km, Mean Speed 35 km/h)
-    // CAN ID 0x261 injection: cansend vcan0 261#230399004F0023
-    const uint8_t can_261[] = { 0x23, 0x03, 0x99, 0x00, 0x4F, 0x00, 0x23 };
+    // CAN ID 0x261 injection: cansend vcan0 261#230399004F0399
+    const uint8_t can_261[] = { 0x23, 0x03, 0x99, 0x00, 0x4F, 0x03, 0x99 };
     psa_trip_process_can_0x261(&trip, can_261, sizeof(can_261));
 
     TEST_ASSERT_EQUAL_UINT16(921, trip.trip2_distance_km);
     TEST_ASSERT_EQUAL_UINT16(79, trip.trip2_avg_fuel);
     TEST_ASSERT_EQUAL_UINT8(35, trip.trip2_avg_speed);
 
-    // Expected UART Output: 5A A5 06 15 00 4F 00 23 03 99 28
-    const uint8_t expected[] = { 0x5A, 0xA5, 0x06, 0x15, 0x00, 0x4F, 0x00, 0x23, 0x03, 0x99, 0x28 };
+    // Expected UART Output: 5A A5 0A 15 00 4F 00 23 03 99 00 00 00 00 2C
+    const uint8_t expected[] = { 0x5A, 0xA5, 0x0A, 0x15, 0x00, 0x4F, 0x00, 0x23, 0x03, 0x99, 0x00, 0x00, 0x00, 0x00, 0x2C };
     uint8_t out[16];
     size_t len = build_hiworld_trip2(&trip, out, sizeof(out));
-    TEST_ASSERT_EQUAL_UINT32(11, len);
+    TEST_ASSERT_EQUAL_UINT32(15, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
@@ -273,11 +273,11 @@ void test_peugeot_407_trip_hiworld_boundary_and_null_safety(void) {
 
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip1(NULL, out, sizeof(out)));
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip1(&st, NULL, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip1(&st, out, 10));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip1(&st, out, 14));
 
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip2(NULL, out, sizeof(out)));
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip2(&st, NULL, sizeof(out)));
-    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip2(&st, out, 10));
+    TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_trip2(&st, out, 14));
 }
 
 /* --------------------------------------------------------------------------

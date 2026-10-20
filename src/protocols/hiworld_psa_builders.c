@@ -65,12 +65,12 @@ size_t build_hiworld_trip_instant(const vehicle_trip_t *trip, uint8_t *out, size
 }
 
 size_t build_hiworld_trip1(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
-    if (!trip || !out || max_len < 11) {
+    if (!trip || !out || max_len < 15) {
         return 0;
     }
     out[0] = HIWORLD_SYNC_1;
     out[1] = HIWORLD_SYNC_2;
-    out[2] = 0x06;               /* Length: 6 Payload bytes */
+    out[2] = 0x0A;               /* Length: 10 Payload bytes */
     out[3] = HIWORLD_CMD_ECU_P1; /* Cmd 0x14 */
     out[4] = (uint8_t)(trip->trip1_avg_fuel >> 8);
     out[5] = (uint8_t)(trip->trip1_avg_fuel & 0xFF);
@@ -78,22 +78,26 @@ size_t build_hiworld_trip1(const vehicle_trip_t *trip, uint8_t *out, size_t max_
     out[7] = trip->trip1_avg_speed;
     out[8] = (uint8_t)(trip->trip1_distance_km >> 8);
     out[9] = (uint8_t)(trip->trip1_distance_km & 0xFF);
+    out[10] = 0x00;
+    out[11] = 0x00;
+    out[12] = 0x00;
+    out[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum = (uint8_t)(sum + out[i]);
     }
-    out[10] = (uint8_t)((sum - 1) & 0xFF);
-    return 11;
+    out[14] = (uint8_t)((sum - 1) & 0xFF);
+    return 15;
 }
 
 size_t build_hiworld_trip2(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
-    if (!trip || !out || max_len < 11) {
+    if (!trip || !out || max_len < 15) {
         return 0;
     }
     out[0] = HIWORLD_SYNC_1;
     out[1] = HIWORLD_SYNC_2;
-    out[2] = 0x06;               /* Length: 6 Payload bytes */
+    out[2] = 0x0A;               /* Length: 10 Payload bytes */
     out[3] = HIWORLD_CMD_ECU_P2; /* Cmd 0x15 */
     out[4] = (uint8_t)(trip->trip2_avg_fuel >> 8);
     out[5] = (uint8_t)(trip->trip2_avg_fuel & 0xFF);
@@ -101,13 +105,17 @@ size_t build_hiworld_trip2(const vehicle_trip_t *trip, uint8_t *out, size_t max_
     out[7] = trip->trip2_avg_speed;
     out[8] = (uint8_t)(trip->trip2_distance_km >> 8);
     out[9] = (uint8_t)(trip->trip2_distance_km & 0xFF);
+    out[10] = 0x00;
+    out[11] = 0x00;
+    out[12] = 0x00;
+    out[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum = (uint8_t)(sum + out[i]);
     }
-    out[10] = (uint8_t)((sum - 1) & 0xFF);
-    return 11;
+    out[14] = (uint8_t)((sum - 1) & 0xFF);
+    return 15;
 }
 
 size_t build_hiworld_doors(const psa_doors_body_t *doors, uint8_t *out, size_t max_len) {
