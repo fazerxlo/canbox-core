@@ -29,7 +29,11 @@ hal_status_t hal_system_init(void) {
         LL_RCC_HSI_Enable();
         timeout = STM32_HW_TIMEOUT;
         while (!LL_RCC_HSI_IsReady() && --timeout);
+#if defined(LL_RCC_PLL_MUL_16)
         LL_RCC_PLL_ConfigDomain_SYS(LL_RCC_PLLSOURCE_HSI_DIV_2, LL_RCC_PLL_MUL_16);
+#else
+        LL_RCC_PLL_ConfigDomain_SYS(LL_RCC_PLLSOURCE_HSI_DIV_2, LL_RCC_PLL_MUL_9);
+#endif
     }
 
     LL_RCC_PLL_Enable();
