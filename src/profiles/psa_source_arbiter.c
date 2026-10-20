@@ -12,12 +12,33 @@ static uint8_t s_stalk_rotary_cnt = 0;
 static uint32_t s_target_reached_tick_ms = 0;
 static uint32_t s_last_station_list_scroll_ms = 0;
 
+typedef enum {
+    STATION_LIST_SCROLL_IDLE = 0,
+    STATION_LIST_SCROLL_WAIT_NEXT,     /* Sent forward scroll (+1), waiting for RD4 to move to station 2 */
+    STATION_LIST_SCROLL_SETTLE_RETURN, /* Confirmed station 2, brief settle before issuing return (-1) */
+    STATION_LIST_SCROLL_WAIT_RETURN    /* Sent return scroll (-1), waiting for RD4 to return to original station */
+} psa_station_scroll_state_t;
+
+#define PSA_STATION_SCROLL_TIMEOUT_MS   500
+#define PSA_STATION_SCROLL_SETTLE_MS    60
+
+static psa_station_scroll_state_t s_scroll_state = STATION_LIST_SCROLL_IDLE;
+static uint8_t  s_scroll_initial_preset = 0;
+static uint16_t s_scroll_initial_freq   = 0;
+static uint8_t  s_scroll_retry_count    = 0;
+static uint32_t s_scroll_timer_ms       = 0;
+
 void psa_source_arbiter_init(void) {
     memset(&s_arbiter, 0, sizeof(s_arbiter));
     s_arbiter.sync_state = SRC_SYNC_IDLE;
     s_stalk_rotary_cnt = 0;
     s_target_reached_tick_ms = 0;
     s_last_station_list_scroll_ms = 0;
+    s_scroll_state = STATION_LIST_SCROLL_IDLE;
+    s_scroll_initial_preset = 0;
+    s_scroll_initial_freq   = 0;
+    s_scroll_retry_count    = 0;
+    s_scroll_timer_ms       = 0;
 }
 
 const psa_source_arbiter_t *psa_source_arbiter_get_context(void) {
@@ -87,17 +108,15 @@ static void psa_source_arbiter_pulse_source(void) {
     hal_can_send(&frame_release);
 }
 
-static void psa_source_arbiter_execute_station_list_scroll(void) {
-    if (can_router_is_bus_sleeping()) {
-        return;
-    }
-    uint32_t now = hal_get_tick_ms();
-    if (s_last_station_list_scroll_ms != 0 && (now - s_last_station_list_scroll_ms) < 2000) {
-        return;
-    }
-    s_last_station_list_scroll_ms = (now != 0) ? now : 1;
+static void psa_source_arbiter_send_rotary_step(int8_t step) {
+    if (can_router_is_bus_sleeping()) return;
 
-    s_stalk_rotary_cnt = (uint8_t)(s_stalk_rotary_cnt + 1);
+    if (step > 0) {
+        s_stalk_rotary_cnt = (uint8_t)(s_stalk_rotary_cnt + 1);
+    } else if (step < 0) {
+        s_stalk_rotary_cnt = (uint8_t)(s_stalk_rotary_cnt - 1);
+    }
+
     can_frame_t frame;
     memset(&frame, 0, sizeof(frame));
     frame.id = PSA_CAN_ID_STALK_21F;
@@ -106,14 +125,70 @@ static void psa_source_arbiter_execute_station_list_scroll(void) {
     frame.data[1] = s_stalk_rotary_cnt;
     frame.data[2] = 0x00;
     hal_can_send(&frame);
+}
 
-    hal_delay_ms(80);
+static void psa_source_arbiter_execute_station_list_scroll(void) {
+    if (can_router_is_bus_sleeping()) {
+        return;
+    }
+    if (s_scroll_state != STATION_LIST_SCROLL_IDLE) {
+        return;
+    }
+    uint32_t now = hal_get_tick_ms();
+    if (s_last_station_list_scroll_ms != 0 && (now - s_last_station_list_scroll_ms) < 2000) {
+        return;
+    }
+    s_last_station_list_scroll_ms = (now != 0) ? now : 1;
 
-    s_stalk_rotary_cnt = (uint8_t)(s_stalk_rotary_cnt - 1);
-    frame.data[1] = s_stalk_rotary_cnt;
-    hal_can_send(&frame);
+    const vehicle_state_t *st = can_router_get_state();
+    if (st != NULL) {
+        s_scroll_initial_preset = st->media.radio.preset_slot;
+        s_scroll_initial_freq   = st->media.radio.freq_0_1mhz;
+    } else {
+        s_scroll_initial_preset = 0;
+        s_scroll_initial_freq   = 0;
+    }
 
-    hal_delay_ms(80);
+    s_scroll_retry_count = 0;
+    s_scroll_timer_ms = now;
+    s_scroll_state = STATION_LIST_SCROLL_WAIT_NEXT;
+
+    psa_source_arbiter_send_rotary_step(+1);
+}
+
+void psa_source_arbiter_process_can_0x225(uint8_t preset_slot, uint16_t freq_0_1mhz) {
+    uint32_t now = hal_get_tick_ms();
+    if (s_scroll_state == STATION_LIST_SCROLL_WAIT_NEXT) {
+        bool moved = false;
+        if (s_scroll_initial_preset != 0) {
+            moved = (preset_slot != s_scroll_initial_preset);
+        } else {
+            moved = (freq_0_1mhz != s_scroll_initial_freq || preset_slot != 0);
+        }
+
+        if (moved) {
+            /* Confirmed RD4 moved to station 2; settle briefly before return */
+            s_scroll_state = STATION_LIST_SCROLL_SETTLE_RETURN;
+            s_scroll_timer_ms = now;
+        }
+    } else if (s_scroll_state == STATION_LIST_SCROLL_WAIT_RETURN) {
+        bool returned = false;
+        if (s_scroll_initial_preset != 0) {
+            returned = (preset_slot == s_scroll_initial_preset);
+        } else {
+            returned = (freq_0_1mhz == s_scroll_initial_freq && preset_slot == 0);
+        }
+
+        if (returned) {
+            /* Confirmed RD4 returned to original station */
+            s_scroll_state = STATION_LIST_SCROLL_IDLE;
+            s_last_station_list_scroll_ms = now;
+        }
+    }
+}
+
+bool psa_source_arbiter_is_station_scroll_in_progress(void) {
+    return (s_scroll_state != STATION_LIST_SCROLL_IDLE);
 }
 
 static void psa_source_arbiter_check_pending_station_list(void) {
@@ -138,6 +213,7 @@ void psa_source_arbiter_process_can_0x165(uint8_t source_mode, uint8_t power_sta
             s_arbiter.reported_hu_source = 0;
         }
         s_arbiter.pending_station_list_trigger = false;
+        s_scroll_state = STATION_LIST_SCROLL_IDLE;
         s_arbiter.user_override_non_hu = false;
         s_target_reached_tick_ms = 0;
         return;
@@ -145,6 +221,9 @@ void psa_source_arbiter_process_can_0x165(uint8_t source_mode, uint8_t power_sta
 
     uint8_t new_source = psa_source_mode_to_arbiter(source_mode);
     if (new_source == 0) return;
+    if (new_source != PSA_RD4_SRC_TUNER) {
+        s_scroll_state = STATION_LIST_SCROLL_IDLE;
+    }
 
     if (s_arbiter.reported_hu_source == 0 && s_arbiter.sync_state == SRC_SYNC_IDLE) {
         s_arbiter.actual_rd4_source = new_source;
@@ -328,6 +407,35 @@ void psa_source_arbiter_tick_100ms(void) {
                     s_arbiter.state_timer_ms = hal_get_tick_ms();
                 }
             }
+        }
+    }
+
+    /* Station List Scroll Closed-Loop State Machine */
+    if (s_scroll_state == STATION_LIST_SCROLL_WAIT_NEXT) {
+        if ((now - s_scroll_timer_ms) >= PSA_STATION_SCROLL_TIMEOUT_MS) {
+            if (s_scroll_retry_count == 0) {
+                /* Timeout waiting for RD4 to move to station 2: repeat once */
+                s_scroll_retry_count = 1;
+                s_scroll_timer_ms = now;
+                psa_source_arbiter_send_rotary_step(+1);
+            } else {
+                /* Timeout elapsed on second attempt: abort cleanly without moving back (-1) */
+                s_scroll_state = STATION_LIST_SCROLL_IDLE;
+                s_last_station_list_scroll_ms = now;
+            }
+        }
+    } else if (s_scroll_state == STATION_LIST_SCROLL_SETTLE_RETURN) {
+        if ((now - s_scroll_timer_ms) >= PSA_STATION_SCROLL_SETTLE_MS) {
+            /* Settle duration elapsed: send return scroll (-1) back to station 1 */
+            psa_source_arbiter_send_rotary_step(-1);
+            s_scroll_state = STATION_LIST_SCROLL_WAIT_RETURN;
+            s_scroll_timer_ms = now;
+        }
+    } else if (s_scroll_state == STATION_LIST_SCROLL_WAIT_RETURN) {
+        if ((now - s_scroll_timer_ms) >= PSA_STATION_SCROLL_TIMEOUT_MS) {
+            /* Timed out waiting for return confirmation: return to idle */
+            s_scroll_state = STATION_LIST_SCROLL_IDLE;
+            s_last_station_list_scroll_ms = now;
         }
     }
 }

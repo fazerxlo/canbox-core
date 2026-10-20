@@ -54,6 +54,8 @@ uint8_t psa_source_arbiter_get_target_source(void);
 uint8_t psa_source_arbiter_get_reported_source(void);
 bool psa_source_arbiter_is_target_source_reached(const struct vehicle_radio *radio);
 uint8_t psa_source_mode_to_arbiter(uint8_t source_mode);
+void psa_source_arbiter_process_can_0x225(uint8_t preset_slot, uint16_t freq_0_1mhz);
+bool psa_source_arbiter_is_station_scroll_in_progress(void);
 
 #ifdef __cplusplus
 }

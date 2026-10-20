@@ -343,6 +343,8 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
     if (radio->source_mode < 0x20) {
         radio->source_mode = radio->band;
     }
+
+    psa_source_arbiter_process_can_0x225(radio->preset_slot, radio->freq_0_1mhz);
 }
 
 void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {

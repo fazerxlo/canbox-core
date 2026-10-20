@@ -246,8 +246,11 @@ $$\text{Hiworld\_Freq} = f_{\text{MHz}} \times 10 = (R \times 0.5) + 500 = \frac
 
 ## 4. Headunit Query & Handshake Resync Handling
 
-When the Android Head Unit boots up, or when either `OriginalTuner` or `OriginalMediaPlayer` resumes (`onResume()`), the APK queries the CAN Box using `forwardType`:
-* **Tuner Resume Query (`forwardType(0x0F)`):** Head Unit requests immediate radio state. The CAN Box must immediately retransmit cached **`Cmd 0x84`** and **`Cmd 0x86`**.
+* **Tuner Resume Query (`forwardType(0x0F)`):** Head Unit requests immediate radio state. The CAN Box immediately retransmits cached **`Cmd 0x84`** and **`Cmd 0x86`**, and triggers a closed-loop station list refresh scroll sequence:
+  1. **Forward Step (+1):** Injects a forward rotary step on `0x21F` (Station 1 $\rightarrow$ 2) and starts a 500 ms timeout timer.
+  2. **RD4 Movement Verification:** Waits for RD4 confirmation on CAN `0x225` (`preset_slot` or `freq_0_1mhz` changed).
+  3. **Return Step (-1):** Upon confirming transition to Station 2, settles for 60 ms and injects a return rotary step on `0x21F` (Station 2 $\rightarrow$ 1).
+  4. **Timeout & Safe Abort Guard:** If RD4 does not move within 500 ms, the forward step (+1) is repeated once. If the second attempt also times out, the sequence is aborted immediately without sending the return step (-1), preventing a circular wrap from Station 1 backwards to Station 6.
 * **Media Resume Queries (`forwardType(0x11)` / `forwardType(0x12)`):** Head Unit requests CD changer playback state. The CAN Box must immediately retransmit cached **`Cmd 0x97`**.
 * **Periodic Resync:** To protect against unannounced Head Unit reboots, the CAN Box retransmits all cached state frames at a slow 60-second periodic interval.
 

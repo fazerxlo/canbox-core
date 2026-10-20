@@ -124,9 +124,16 @@ void test_peugeot_407_rd4_station_list_trigger(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
     TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
     TEST_ASSERT_EQUAL_UINT8(3, frame_sent.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x00, frame_sent.data[0]); /* Rotary only sends 0x00 byte 0 */
-    /* Net rotary change must be 0 after Up then Down */
+    /* Forward rotary change is +1 */
+    TEST_ASSERT_EQUAL_UINT8(0x11, psa_source_arbiter_get_stalk_rotary());
+
+    /* Complete closed-loop sequence: RD4 confirms station 2, settle, return pulse */
+    psa_source_arbiter_process_can_0x225(2, 960);
+    hal_delay_ms(70);
+    psa_source_arbiter_tick_100ms();
+    /* Net rotary change is 0 after Up then Down */
     TEST_ASSERT_EQUAL_UINT8(0x10, psa_source_arbiter_get_stalk_rotary());
+    psa_source_arbiter_process_can_0x225(1, 960);
 
     /* 3. Non-tuner mode (CD mode 0x20): trigger must be suppressed to avoid disturbing CD playback */
     st->media.radio.source_mode = 0x20;
@@ -533,4 +540,98 @@ void test_peugeot_407_rd4_cmd_0xad_switches_to_line_in_1(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_pulse));
     TEST_ASSERT_EQUAL_HEX32(0x21F, frame_pulse.id);
     TEST_ASSERT_EQUAL_UINT8(PSA_RD4_SRC_AUX, psa_source_arbiter_get_target_source());
+}
+
+void test_peugeot_407_station_list_scroll_closed_loop_success(void) {
+    can_router_init();
+    psa_source_arbiter_init();
+
+    /* Put radio on Tuner with Preset 1 */
+    can_frame_t frame_165_tuner = {
+        .id = 0x165, .dlc = 4, .data = { 0xC8, 0xD0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_165_tuner);
+    can_frame_t frame_225_p1 = {
+        .id = 0x225, .dlc = 5, .data = { 0x20, 0x10, 0x10, 0x03, 0x98 }
+    };
+    can_router_process_can(&frame_225_p1);
+
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_trigger_station_list();
+    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
+
+    /* Verify first forward pulse (+1) sent */
+    can_frame_t frame_sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+    uint8_t forward_cnt = frame_sent.data[1];
+
+    /* Advance time without RD4 station change: should remain in WAIT_NEXT */
+    hal_delay_ms(200);
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_tick_100ms();
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
+
+    /* RD4 confirms move to Station / Preset 2 via CAN 0x225 */
+    can_frame_t frame_225_p2 = {
+        .id = 0x225, .dlc = 5, .data = { 0x29, 0x20, 0x10, 0x03, 0x98 }
+    };
+    can_router_process_can(&frame_225_p2);
+
+    /* Settle for 70 ms (>= PSA_STATION_SCROLL_SETTLE_MS) */
+    hal_delay_ms(70);
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_tick_100ms();
+
+    /* Verify return pulse (-1) sent back to station 1 */
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)(forward_cnt - 1), frame_sent.data[1]);
+
+    /* RD4 confirms return to Station / Preset 1 via CAN 0x225 */
+    can_router_process_can(&frame_225_p1);
+    TEST_ASSERT_FALSE(psa_source_arbiter_is_station_scroll_in_progress());
+}
+
+void test_peugeot_407_station_list_scroll_timeout_retry_and_abort(void) {
+    can_router_init();
+    psa_source_arbiter_init();
+
+    /* Put radio on Tuner with Preset 1 */
+    can_frame_t frame_165_tuner = {
+        .id = 0x165, .dlc = 4, .data = { 0xC8, 0xD0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_165_tuner);
+    can_frame_t frame_225_p1 = {
+        .id = 0x225, .dlc = 5, .data = { 0x20, 0x10, 0x10, 0x03, 0x98 }
+    };
+    can_router_process_can(&frame_225_p1);
+
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_trigger_station_list();
+    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
+
+    can_frame_t frame_sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+
+    /* Timeout attempt 1: wait 510 ms without RD4 moving to station 2 */
+    hal_delay_ms(510);
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_tick_100ms();
+
+    /* Requirement: repeated once upon timeout! */
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
+    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
+
+    /* Timeout attempt 2: wait another 510 ms without RD4 moving */
+    hal_delay_ms(510);
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_tick_100ms();
+
+    /* Requirement: abort and do NOT send return pulse (-1) to avoid wrap to station 6! */
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
+    TEST_ASSERT_FALSE(psa_source_arbiter_is_station_scroll_in_progress());
 }
