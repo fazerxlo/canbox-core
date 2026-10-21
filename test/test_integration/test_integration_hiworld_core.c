@@ -188,18 +188,22 @@ void test_integration_hiworld_tpms_pipeline(void) {
     uint8_t drain[128];
     while (read_uart_output(drain, sizeof(drain)) > 0);
 
-    // Inject CAN ID 0x361 from real vehicle log dump_2026-09-28_16-32-16.log:
-    // DATA: 80 00 40 0F 00 1E 00 16
+    // Inject CAN ID 0x1E1 and 0x3A1 for TPMS:
     // FL: 0.0 Bar, puncture (state 2)
     // FR: 1.5 Bar, low (state 1)
     // RR: 3.0 Bar, ok (state 0)
     // RL: 2.2 Bar, ok (state 0)
-    can_frame_t frame_361 = {
-        .id = 0x361,
-        .dlc = 8,
-        .data = { 0x80, 0x00, 0x40, 0x0F, 0x00, 0x1E, 0x00, 0x16 }
+    // Inject CAN ID 0x3A1 for direct numeric TPMS:
+    // FL: 0.0 Bar
+    // FR: 1.5 Bar
+    // RR: 3.0 Bar
+    // RL: 2.2 Bar
+    can_frame_t frame_3a1 = {
+        .id = 0x3A1,
+        .dlc = 4,
+        .data = { 0, 30, 60, 44 }
     };
-    can_router_process_can(&frame_361);
+    can_router_process_can(&frame_3a1);
 
     uint8_t rx_buf[64];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
@@ -207,25 +211,25 @@ void test_integration_hiworld_tpms_pipeline(void) {
     // Expected UART Output:
     // 1. Numeric TPMS (Cmd 0x66): Mode(0x01), FL(0=0x00), FR(15=0x0F), RL(22=0x16), RR(30=0x1E), Unit(0x00), CS(0xAF)
     //    Wire: 5A A5 06 66 01 00 0F 16 1E 00 AF
-    // 2. Discrete TPMS (Cmd 0x18): FL(2), FR(1), RL(0), RR(0), CS(0x1E)
-    //    Wire: 5A A5 04 18 02 01 00 00 1E
+    // 2. Discrete TPMS (Cmd 0x18): FL(0), FR(0), RL(0), RR(0), CS(0x1B)
+    //    Wire: 5A A5 04 18 00 00 00 00 1B
     const uint8_t expected[] = {
         0x5A, 0xA5, 0x06, 0x66, 0x01, 0x00, 0x0F, 0x16, 0x1E, 0x00, 0xAF,
-        0x5A, 0xA5, 0x04, 0x18, 0x02, 0x01, 0x00, 0x00, 0x1E
+        0x5A, 0xA5, 0x04, 0x18, 0x00, 0x00, 0x00, 0x00, 0x1B
     };
 
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, rx_buf, sizeof(expected));
 
     // 1. Re-inject identical frame -> No UART TPMS frames should be sent
-    can_router_process_can(&frame_361);
+    can_router_process_can(&frame_3a1);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 
     // 2. Inject frame with pressure change ONLY (alarms unchanged):
-    // Change RL pressure from 2.2 Bar (0x16) to 2.4 Bar (0x18). Alarms remain identical.
-    frame_361.data[7] = 0x18;
-    can_router_process_can(&frame_361);
+    // Change RL pressure from 2.2 Bar (44) to 2.4 Bar (48). Alarms remain identical.
+    frame_3a1.data[3] = 48;
+    can_router_process_can(&frame_3a1);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
 
     // Only Numeric TPMS (Cmd 0x66) should be emitted! Discrete 0x18 must NOT be emitted.

@@ -293,7 +293,6 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_TRIP1_ODB,          psa_trip_decode_frame },
     { PSA_CAN_ID_NOM_STATION,        psa_rd4_decode_frame },
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_tpms_decode_frame },
-    { PSA_CAN_ID_TPMS_DIRECT_361,    psa_tpms_decode_frame },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_tpms_decode_frame },
     { PSA_CAN_ID_CD_TRAY_325,        psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_DISC_INFO_365,   psa_rd4_decode_frame },

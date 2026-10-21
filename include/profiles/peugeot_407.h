@@ -49,8 +49,8 @@ extern "C" {
 #define PSA_CAN_ID_TRIP2            0x2A5
 #define PSA_CAN_ID_NOM_STATION      0x2A5
 #define PSA_CAN_ID_TPMS_STATUS_1E1  0x1E1
-#define PSA_CAN_ID_TPMS_DIRECT_361  0x361
 #define PSA_CAN_ID_TPMS_PRESSURES_3A1 0x3A1
+#define PSA_CAN_ID_BSI_PERSO_361    0x361
 #define PSA_CAN_ID_RDS_NAME         0x396
 #define PSA_CAN_ID_CD_TRAY_325      0x325
 #define PSA_CAN_ID_CD_DISC_INFO_365 0x365
@@ -341,7 +341,6 @@ bool psa_rd4_process_can_0x3a6(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
 typedef vehicle_tpms_t psa_tpms_state_t;
 
 void psa_tpms_init(vehicle_tpms_t *tpms);
-void psa_tpms_process_can_0x361(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc);
 void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc);
 void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc);
 void psa_tpms_decode_frame(const can_frame_t *frame, vehicle_state_t *state);

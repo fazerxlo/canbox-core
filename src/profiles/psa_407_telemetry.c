@@ -212,43 +212,11 @@ static uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw_byte, uint8_t nominal_dec
     }
 }
 
-void psa_tpms_process_can_0x361(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
-    if (!tpms || !data || dlc < 8) return;
-
-    s_has_direct_pressures = true;
-
-    uint16_t fl_raw = read_be16(&data[0]);
-    uint16_t fr_raw = read_be16(&data[2]);
-    uint16_t rr_raw = read_be16(&data[4]);
-    uint16_t rl_raw = read_be16(&data[6]);
-
-    tpms->alarm_state[0] = (uint8_t)((fl_raw >> 14) & 0x03);
-    tpms->alarm_state[1] = (uint8_t)((fr_raw >> 14) & 0x03);
-    tpms->alarm_state[2] = (uint8_t)((rl_raw >> 14) & 0x03);
-    tpms->alarm_state[3] = (uint8_t)((rr_raw >> 14) & 0x03);
-
-    if (tpms->alarm_state[0] != 3 && (fl_raw & 0x3FFF) != 0x3FFF) {
-        tpms->pressure_bar_deci[0] = (uint8_t)(fl_raw & 0x3FFF);
-    } else {
-        tpms->pressure_bar_deci[0] = 0;
+static inline uint8_t psa_tpms_scale_0x3a1_raw(uint8_t raw) {
+    if (raw == 0xFF) {
+        return 0; /* Invalid / Offline / Default */
     }
-    if (tpms->alarm_state[1] != 3 && (fr_raw & 0x3FFF) != 0x3FFF) {
-        tpms->pressure_bar_deci[1] = (uint8_t)(fr_raw & 0x3FFF);
-    } else {
-        tpms->pressure_bar_deci[1] = 0;
-    }
-    if (tpms->alarm_state[2] != 3 && (rl_raw & 0x3FFF) != 0x3FFF) {
-        tpms->pressure_bar_deci[2] = (uint8_t)(rl_raw & 0x3FFF);
-    } else {
-        tpms->pressure_bar_deci[2] = 0;
-    }
-    if (tpms->alarm_state[3] != 3 && (rr_raw & 0x3FFF) != 0x3FFF) {
-        tpms->pressure_bar_deci[3] = (uint8_t)(rr_raw & 0x3FFF);
-    } else {
-        tpms->pressure_bar_deci[3] = 0;
-    }
-
-    tpms->valid = true;
+    return (uint8_t)((raw * 5 + 5) / 10);
 }
 
 void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
@@ -256,10 +224,10 @@ void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
 
     s_has_direct_pressures = true;
 
-    tpms->pressure_bar_deci[0] = (uint8_t)((data[0] * 5 + 5) / 10);
-    tpms->pressure_bar_deci[1] = (uint8_t)((data[1] * 5 + 5) / 10);
-    tpms->pressure_bar_deci[2] = (uint8_t)((data[3] * 5 + 5) / 10); /* RL */
-    tpms->pressure_bar_deci[3] = (uint8_t)((data[2] * 5 + 5) / 10); /* RR */
+    tpms->pressure_bar_deci[0] = psa_tpms_scale_0x3a1_raw(data[0]);        /* FL */
+    tpms->pressure_bar_deci[1] = psa_tpms_scale_0x3a1_raw(data[1]);        /* FR */
+    tpms->pressure_bar_deci[2] = psa_tpms_scale_0x3a1_raw(data[3]);        /* RL (CAN Byte 3) */
+    tpms->pressure_bar_deci[3] = psa_tpms_scale_0x3a1_raw(data[2]);        /* RR (CAN Byte 2) */
     tpms->valid = true;
 }
 
@@ -282,7 +250,7 @@ void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
     tpms->alarm_state[2] = psa_tpms_decode_0x1e1_wheel(data[3], 22, &synth_rl); /* RL */
     tpms->alarm_state[3] = psa_tpms_decode_0x1e1_wheel(data[2], 22, &synth_rr); /* RR */
 
-    /* If no direct numeric pressures (0x361 DLC 8 / 0x3A1) have been received,
+    /* If no direct numeric pressures (0x3A1) have been received,
      * populate synthetic pressures so Hiworld Cmd 0x66 matches the discrete states. */
     if (!s_has_direct_pressures) {
         tpms->pressure_bar_deci[0] = synth_fl;
@@ -297,9 +265,6 @@ void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
 void psa_tpms_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     switch (frame->id) {
-        case PSA_CAN_ID_TPMS_DIRECT_361:
-            psa_tpms_process_can_0x361(&state->tpms, frame->data, frame->dlc);
-            break;
         case PSA_CAN_ID_TPMS_PRESSURES_3A1:
             psa_tpms_process_can_0x3a1(&state->tpms, frame->data, frame->dlc);
             break;

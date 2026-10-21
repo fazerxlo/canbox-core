@@ -78,9 +78,11 @@ void test_peugeot_407_tpms_hiworld_vector_1_nominal(void) {
     vehicle_tpms_t tpms;
     psa_tpms_init(&tpms);
 
-    // Vector 1: CAN 0x361 FL=2.4, FR=2.4, RR=2.2, RL=2.2 Bar (0018001800160016)
-    const uint8_t can_361_v1[] = { 0x00, 0x18, 0x00, 0x18, 0x00, 0x16, 0x00, 0x16 };
-    psa_tpms_process_can_0x361(&tpms, can_361_v1, sizeof(can_361_v1));
+    // Vector 1: CAN 0x3A1 FL=2.4, FR=2.4, RR=2.2, RL=2.2 Bar (48, 48, 44, 44)
+    const uint8_t can_3a1_v1[] = { 48, 48, 44, 44 };
+    psa_tpms_process_can_0x3a1(&tpms, can_3a1_v1, sizeof(can_3a1_v1));
+    const uint8_t can_1e1_v1[] = { 0x00, 0x00, 0x00, 0x00 };
+    psa_tpms_process_can_0x1e1(&tpms, can_1e1_v1, sizeof(can_1e1_v1));
 
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[1]);
@@ -109,9 +111,11 @@ void test_peugeot_407_tpms_hiworld_vector_2_asymmetric_low(void) {
     vehicle_tpms_t tpms;
     psa_tpms_init(&tpms);
 
-    // Vector 2: FL=2.4, FR=2.3, RR=2.1, RL=1.2 (Underinflated 0x4000) -> 001800170015400C
-    const uint8_t can_361_v2[] = { 0x00, 0x18, 0x00, 0x17, 0x00, 0x15, 0x40, 0x0C };
-    psa_tpms_process_can_0x361(&tpms, can_361_v2, sizeof(can_361_v2));
+    // Vector 2: FL=2.4, FR=2.3, RR=2.1, RL=1.2 -> 0x3A1: [48, 46, 42, 24], 0x1E1: RL Low (0x08)
+    const uint8_t can_3a1_v2[] = { 48, 46, 42, 24 };
+    psa_tpms_process_can_0x3a1(&tpms, can_3a1_v2, sizeof(can_3a1_v2));
+    const uint8_t can_1e1_v2[] = { 0x00, 0x00, 0x00, 0x08 };
+    psa_tpms_process_can_0x1e1(&tpms, can_1e1_v2, sizeof(can_1e1_v2));
 
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
     TEST_ASSERT_EQUAL_UINT8(23, tpms.pressure_bar_deci[1]);
@@ -140,9 +144,11 @@ void test_peugeot_407_tpms_hiworld_vector_3_puncture(void) {
     vehicle_tpms_t tpms;
     psa_tpms_init(&tpms);
 
-    // Vector 3: FL=2.4, FR=0.4 (Puncture 0x8000), RR=2.4, RL=2.4 -> 0018800400180018
-    const uint8_t can_361_v3[] = { 0x00, 0x18, 0x80, 0x04, 0x00, 0x18, 0x00, 0x18 };
-    psa_tpms_process_can_0x361(&tpms, can_361_v3, sizeof(can_361_v3));
+    // Vector 3: FL=2.4, FR=0.4 (Puncture), RR=2.4, RL=2.4 -> 0x3A1: [48, 8, 48, 48], 0x1E1: FR Puncture (0x10)
+    const uint8_t can_3a1_v3[] = { 48, 8, 48, 48 };
+    psa_tpms_process_can_0x3a1(&tpms, can_3a1_v3, sizeof(can_3a1_v3));
+    const uint8_t can_1e1_v3[] = { 0x00, 0x10, 0x00, 0x00 };
+    psa_tpms_process_can_0x1e1(&tpms, can_1e1_v3, sizeof(can_1e1_v3));
 
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
     TEST_ASSERT_EQUAL_UINT8(4, tpms.pressure_bar_deci[1]);
@@ -173,7 +179,7 @@ void test_peugeot_407_tpms_hiworld_0x3a1_pressures(void) {
 
     // CAN 0x3A1: 0.05 Bar resolution
     // FL: 48 (2.4 Bar), FR: 46 (2.3 Bar), RR: 42 (2.1 Bar), RL: 24 (1.2 Bar)
-    const uint8_t can_3a1[] = { 48, 46, 42, 24 };
+    const uint8_t can_3a1[] = { 48, 46, 42, 24, 0x00, 0x00, 0x00, 0x00 };
     psa_tpms_process_can_0x3a1(&tpms, can_3a1, sizeof(can_3a1));
 
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
@@ -186,6 +192,14 @@ void test_peugeot_407_tpms_hiworld_0x3a1_pressures(void) {
     size_t len = build_hiworld_tpms_numeric(&tpms, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(11, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, out, sizeof(exp_numeric));
+
+    // Test 0xFF sentinel (invalid / offline sensor): RL = 0xFF -> 0 deci-bar
+    const uint8_t can_3a1_invalid[] = { 48, 48, 44, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    psa_tpms_process_can_0x3a1(&tpms, can_3a1_invalid, sizeof(can_3a1_invalid));
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(0,  tpms.pressure_bar_deci[2]); // RL 0xFF -> 0
+    TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[3]); // RR 44 -> 22
 }
 
 void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void) {
@@ -309,10 +323,10 @@ void test_peugeot_407_tpms_two_tier_hybrid(void) {
     TEST_ASSERT_EQUAL_UINT32(9, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_v4_discrete, out, sizeof(exp_v4_discrete));
 
-    // 2. Direct Numeric Frame arrives (0x361 DLC 8)
-    // FL: 0x0017 (2.3 Bar, OK), FR: 0x0018 (2.4 Bar, OK), RR: 0x0016 (2.2 Bar, OK), RL: 0x0016 (2.2 Bar, OK)
-    const uint8_t can_361[] = { 0x00, 0x17, 0x00, 0x18, 0x00, 0x16, 0x00, 0x16 };
-    psa_tpms_process_can_0x361(&tpms, can_361, sizeof(can_361));
+    // 2. Direct Numeric Frame arrives (0x3A1)
+    // FL: 46 (2.3 Bar), FR: 48 (2.4 Bar), RR: 44 (2.2 Bar), RL: 44 (2.2 Bar)
+    const uint8_t can_3a1[] = { 46, 48, 44, 44 };
+    psa_tpms_process_can_0x3a1(&tpms, can_3a1, sizeof(can_3a1));
     TEST_ASSERT_EQUAL_UINT8(23, tpms.pressure_bar_deci[0]); // Real 2.3 Bar
 
     // 3. Subsequent 0x1E1 frames must NOT overwrite real pressure readings!
@@ -351,10 +365,6 @@ void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void) {
 
     // CAN process boundary checks
     uint8_t dummy_can[8] = { 0 };
-    psa_tpms_process_can_0x361(NULL, dummy_can, 8);
-    psa_tpms_process_can_0x361(&tpms, NULL, 8);
-    psa_tpms_process_can_0x361(&tpms, dummy_can, 7); // dlc < 8
-
     psa_tpms_process_can_0x3a1(NULL, dummy_can, 4);
     psa_tpms_process_can_0x3a1(&tpms, NULL, 4);
     psa_tpms_process_can_0x3a1(&tpms, dummy_can, 3); // dlc < 4
@@ -362,21 +372,6 @@ void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void) {
     psa_tpms_process_can_0x1e1(NULL, dummy_can, 4);
     psa_tpms_process_can_0x1e1(&tpms, NULL, 4);
     psa_tpms_process_can_0x1e1(&tpms, dummy_can, 3); // dlc < 4
-
-    // Missing sensor (0x3FFF) / fault handling in 0x361
-    const uint8_t can_missing[8] = { 0xFF, 0xFF, 0xC0, 0x18, 0x3F, 0xFF, 0x00, 0x18 };
-    // FL: 0xFFFF (state 3, raw 0x3FFF) -> state 3, press 0
-    // FR: 0xC018 (state 3, raw 0x0018) -> state 3, press 0
-    // RR: 0x3FFF (state 0, raw 0x3FFF) -> state 0, press 0 (missing raw)
-    // RL: 0x0018 (state 0, raw 0x0018) -> state 0, press 24
-    psa_tpms_process_can_0x361(&tpms, can_missing, 8);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[0]);
-    TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[1]);
-    TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[1]);
-    TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[2]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[2]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[3]);
     TEST_ASSERT_EQUAL_UINT8(0, tpms.alarm_state[3]);
 
     psa_tpms_init(NULL);
