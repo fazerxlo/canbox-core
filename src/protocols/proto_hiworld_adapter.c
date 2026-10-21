@@ -108,6 +108,15 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         if (packet->payload_len >= 2) {
             psa_source_arbiter_handle_hu_cmd(packet->payload[0], packet->payload[1]);
         }
+    } else if (packet->cmd == HIWORLD_CMD_CENTRAL_SETTING1 || /* 0x7B */
+               packet->cmd == HIWORLD_CMD_CENTRAL_SETTING2 || /* 0x7D */
+               packet->cmd == HIWORLD_CMD_AC_SETTING_SET)      /* 0x3B */
+    {
+        if (packet->payload_len >= 2) {
+            uint8_t setting_id = packet->payload[0];
+            uint8_t val        = packet->payload[1];
+            can_router_set_car_config(packet->cmd, setting_id, val);
+        }
     } else if (packet->cmd == HIWORLD_CMD_UPGRADE_TRIGGER) {
         /* Head Unit requested firmware update (e.g. 5A A5 03 E0 00 00 E2) */
         /* Write persistent magic token to reserved SRAM */
@@ -734,6 +743,24 @@ static void hiworld_send_radio_presets(const vehicle_radio_t *radio) {
     }
 }
 
+static void hiworld_send_central_state1(const vehicle_config_t *config) {
+    if (!config) return;
+    uint8_t tx_buf[16];
+    size_t tx_len = build_hiworld_central_state1(config, tx_buf, sizeof(tx_buf));
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
+static void hiworld_send_central_state2(const vehicle_config_t *config, const vehicle_state_t *state) {
+    if (!config) return;
+    uint8_t tx_buf[16];
+    size_t tx_len = build_hiworld_central_state2(config, state, tx_buf, sizeof(tx_buf));
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -760,5 +787,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_radio_text = hiworld_send_radio_text,
     .send_radio_presets = hiworld_send_radio_presets,
     .send_media_state = hiworld_send_media_state,
+    .send_central_state1 = hiworld_send_central_state1,
+    .send_central_state2 = hiworld_send_central_state2,
     .send_heartbeat = hiworld_send_heartbeat,
 };

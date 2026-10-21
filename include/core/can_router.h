@@ -223,7 +223,23 @@ typedef struct {
     bool    radio_text;
     bool    cdc;
     uint8_t trip_page;          /* 0: none, 1: instant (0x13), 2: trip1 (0x14), 3: trip2 (0x15) */
+    bool    config;
 } vehicle_dirty_flags_t;
+
+typedef struct {
+    bool    follow_me_home;         /* 0x361 B0.7 */
+    uint8_t follow_me_home_sec;     /* 0, 15, 30, 60 (from 0x361 B1[3:0]) */
+    bool    drl_enabled;            /* 0x361 B0.6 */
+    bool    rear_wiper_reverse;     /* 0x361 B0.5 */
+    bool    auto_door_lock;         /* 0x361 B0.3 */
+    bool    selective_boot_unlock;  /* 0x361 B0.2 */
+    bool    directional_headlights; /* 0x361 B0.1 */
+    bool    motorized_tailgate;     /* 0x361 B0.0 */
+    uint8_t ambient_lighting_level; /* 0x361 B2[3:0]: 0..15 */
+    bool    parking_radar_enabled;  /* 0x361 B4: 0x01=Active */
+    uint8_t active_profile_id;      /* 0x260 B3: 1..3 */
+    uint8_t cluster_dimmer;         /* 0x036 B3[7:4]: 0..15 */
+} vehicle_config_t;
 
 typedef struct {
     vehicle_doors_t          doors;
@@ -237,6 +253,7 @@ typedef struct {
     vehicle_alerts_t         alerts;
     vehicle_audio_settings_t audio;
     vehicle_media_t          media;
+    vehicle_config_t         config;
     vehicle_ignition_state_t ignition_state;
     uint16_t                 speed_kmh;
     uint16_t                 rpm;
@@ -264,6 +281,7 @@ void can_router_periodic_100ms(void);
 const vehicle_state_t *can_router_get_state(void);
 bool can_router_reset_trip(uint8_t trip_index);
 bool can_router_query_alert_journal(void);
+bool can_router_set_car_config(uint8_t cmd_id, uint8_t setting_id, uint8_t value);
 bool can_router_is_bus_sleeping(void);
 void can_router_notify_wake(void);
 void can_router_push_radio_and_media_state(void);

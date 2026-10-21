@@ -75,11 +75,11 @@
 | `[x]` | `0x2F` | Diagnostic Journal Query | `0x02` | `0x39B` | `proto_hiworld_adapter.c`, `can_router.c` | Replays `0x42` & `0xEA` summary |
 | `[x]` | `0x30` | Firmware Version Query | `0x02` | N/A | `hiworld_connection.c` | Replies with `0xF0` |
 | `[-]` | `0x3B` | Climate Control Downlink | `0x0B` | `0x1E1` | `CANBOX_SPEC_HIWORLD_407_02_DUAL_ZONE_HVAC.md` | Downlink spec ready |
-| `[-]` | `0x71` | Personalization Toggle | `0x02`/`0x03` | `0x361` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | DRL, follow-me-home |
+| `[x]` | `0x71` | Personalization Toggle | `0x02`/`0x03` | `0x361` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | DRL, follow-me-home |
 | `[ ]` | `0x76` | Overspeed Warning Set | `0x03` | `0x39B` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | Speed threshold |
 | `[ ]` | `0x79` | Navigation MFD Guidance | `0x08` | `0x3B6` | `CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md` | Turn arrows to MFD |
-| `[-]` | `0x7B` | Central Setting Req 1 | `0x03` | `0x361` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | Convenience param write |
-| `[-]` | `0x7D` | Central Setting Req 2 | `0x03` | `0x361` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | Convenience param write |
+| `[x]` | `0x7B` | Central Setting Req 1 | `0x03` | `0x361` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | Convenience param write |
+| `[x]` | `0x7D` | Central Setting Req 2 | `0x03` | `0x361` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | Convenience param write |
 | `[-]` | `0x81` | Cruise Presets Setup | `0x0A` | `0x39B` | `CANBOX_SPEC_HIWORLD_407_06_TRIP_COMPUTER_TELEMETRY.md` | Speed memory slots 1..6 |
 | `[x]` | `0x85` | Alarm Replay Query | `0x02` | `0x39B` | `proto_hiworld_adapter.c` | Replays active alert journal |
 | `[x]` | `0x94` | Software Reset / Ping | `0x01` | N/A | `hiworld_connection.c` | Link liveness / reboot |

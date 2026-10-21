@@ -138,6 +138,15 @@ void test_peugeot_407_rd4_source_transition_mute(void);
 void test_peugeot_407_station_list_scroll_closed_loop_success(void);
 void test_peugeot_407_station_list_scroll_timeout_retry_and_abort(void);
 
+// Peugeot 407 Car Configuration & Personalization (SPEC_11) declarations
+void test_peugeot_407_car_config_vector1_follow_me_home_downlink(void);
+void test_peugeot_407_car_config_vector2_drl_downlink(void);
+void test_peugeot_407_car_config_vector3_rear_wiper_downlink(void);
+void test_peugeot_407_car_config_vector4_bsi_to_uplink_0x76(void);
+void test_peugeot_407_car_config_extended_settings_downlink(void);
+void test_peugeot_407_car_config_central_state2_builder(void);
+void test_peugeot_407_car_config_boundary_and_guards(void);
+
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
 void test_hiworld_parse_valid_stream(void);
@@ -295,6 +304,15 @@ int main(void) {
     RUN_TEST(test_peugeot_407_rd4_source_transition_mute);
     RUN_TEST(test_peugeot_407_station_list_scroll_closed_loop_success);
     RUN_TEST(test_peugeot_407_station_list_scroll_timeout_retry_and_abort);
+
+    // Peugeot 407 Car Configuration & Personalization (SPEC_11)
+    RUN_TEST(test_peugeot_407_car_config_vector1_follow_me_home_downlink);
+    RUN_TEST(test_peugeot_407_car_config_vector2_drl_downlink);
+    RUN_TEST(test_peugeot_407_car_config_vector3_rear_wiper_downlink);
+    RUN_TEST(test_peugeot_407_car_config_vector4_bsi_to_uplink_0x76);
+    RUN_TEST(test_peugeot_407_car_config_extended_settings_downlink);
+    RUN_TEST(test_peugeot_407_car_config_central_state2_builder);
+    RUN_TEST(test_peugeot_407_car_config_boundary_and_guards);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

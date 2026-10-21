@@ -206,6 +206,11 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
     if (frame->dlc >= 4) {
         state->lights.illumination = (frame->data[3] & 0x20) != 0;
         state->lights.brightness   = (frame->data[3] & 0x0F);
+        uint8_t dimmer = (frame->data[3] >> 4) & 0x0F;
+        if (state->config.cluster_dimmer != dimmer) {
+            state->config.cluster_dimmer = dimmer;
+            state->dirty.config = true;
+        }
     }
 
     if (frame->dlc >= 5) {
@@ -265,6 +270,13 @@ static void psa_decode_etat_autoradio_0x165_profile(const can_frame_t *frame, ve
     psa_update_derived_power_state(state);
 }
 
+static void psa_decode_config_0x361_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state || frame->dlc < 6) return;
+
+    psa_decode_config_0x361(&state->config, frame->data, frame->dlc);
+    state->dirty.config = true;
+}
+
 static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_REVERSE_IGNITION,   psa_decode_ignition_reverse_0x036 },
     { PSA_CAN_ID_TEXTE_RADIO,        psa_rd4_decode_frame },
@@ -294,6 +306,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_NOM_STATION,        psa_rd4_decode_frame },
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_tpms_decode_frame },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_tpms_decode_frame },
+    { PSA_CAN_ID_BSI_PERSO_361,      psa_decode_config_0x361_profile },
     { PSA_CAN_ID_CD_TRAY_325,        psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_DISC_INFO_365,   psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_PLAY_3A5,        psa_rd4_decode_frame },
@@ -313,6 +326,7 @@ static void psa_init(void) {
     psa_journal_iso_tp_init(&s_journal_ctx);
     psa_rd4_media_init(NULL, NULL);
     psa_tpms_init(NULL);
+    psa_car_config_init();
 }
 
 static bool psa_reset_trip(uint8_t trip_index) {
@@ -335,13 +349,25 @@ static bool psa_query_alerts(void) {
     return hal_can_send(&frame) == HAL_STATUS_OK;
 }
 
+static bool psa_set_car_config(uint8_t cmd_id, uint8_t setting_id, uint8_t value, vehicle_config_t *cfg) {
+    if (can_router_is_bus_sleeping()) {
+        return false;
+    }
+    hal_status_t status = psa_car_config_apply_downlink(cmd_id, setting_id, value);
+    if (status == HAL_STATUS_OK && cfg) {
+        psa_car_config_get_cached(cfg);
+    }
+    return status == HAL_STATUS_OK;
+}
+
 const vehicle_profile_t g_profile_psa = {
-    .id           = VEHICLE_PROFILE_PSA_2004,
-    .name         = "PSA CAN2004/CAN2010 (Peugeot 407)",
-    .default_baud = CAN_BAUD_125K,
-    .rules        = s_psa_rules,
-    .rule_count   = sizeof(s_psa_rules) / sizeof(s_psa_rules[0]),
-    .init         = psa_init,
-    .reset_trip   = psa_reset_trip,
-    .query_alerts = psa_query_alerts
+    .id             = VEHICLE_PROFILE_PSA_2004,
+    .name           = "PSA CAN2004/CAN2010 (Peugeot 407)",
+    .default_baud   = CAN_BAUD_125K,
+    .rules          = s_psa_rules,
+    .rule_count     = sizeof(s_psa_rules) / sizeof(s_psa_rules[0]),
+    .init           = psa_init,
+    .reset_trip     = psa_reset_trip,
+    .query_alerts   = psa_query_alerts,
+    .set_car_config = psa_set_car_config
 };

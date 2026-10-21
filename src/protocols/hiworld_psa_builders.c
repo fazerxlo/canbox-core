@@ -478,3 +478,78 @@ size_t build_hiworld_alerts_summary(const vehicle_alert_item_t *items, uint8_t c
     return (size_t)(5 + payload_len);
 }
 
+size_t build_hiworld_central_state1(const vehicle_config_t *cfg, uint8_t *out, size_t max_len) {
+    if (!cfg || !out || max_len < 7) return 0;
+
+    out[0] = 0x5A;
+    out[1] = 0xA5;
+    out[2] = 0x02; /* Length: 2 payload bytes */
+    out[3] = 0x76; /* Cmd ID: CentralState1 */
+
+    /* Byte 0 */
+    uint8_t b0 = 0;
+    if (cfg->parking_radar_enabled) b0 |= 0x40;
+    if (cfg->ambient_lighting_level > 0) {
+        b0 |= 0x08; /* Ambient light active */
+        b0 |= ((cfg->ambient_lighting_level >> 1) & 0x07);
+    }
+    out[4] = b0;
+
+    /* Byte 1 */
+    uint8_t b1 = 0;
+    if (cfg->rear_wiper_reverse)    b1 |= 0x80;
+    if (cfg->auto_door_lock)        b1 |= 0x20;
+    if (cfg->selective_boot_unlock) b1 |= 0x08;
+    if (cfg->drl_enabled)           b1 |= 0x04;
+    if (cfg->follow_me_home) {
+        if (cfg->follow_me_home_sec >= 60)      b1 |= 0x03;
+        else if (cfg->follow_me_home_sec >= 30) b1 |= 0x02;
+        else if (cfg->follow_me_home_sec >= 15) b1 |= 0x01;
+    }
+    out[5] = b1;
+
+    /* Checksum: ((len + cmd + sum) - 1) & 0xFF */
+    uint8_t sum = out[2] + out[3] + out[4] + out[5];
+    out[6] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 7;
+}
+
+size_t build_hiworld_central_state2(const vehicle_config_t *cfg, const vehicle_state_t *st, uint8_t *out, size_t max_len) {
+    if (!cfg || !out || max_len < 12) return 0;
+
+    out[0] = 0x5A;
+    out[1] = 0xA5;
+    out[2] = 0x07; /* Length: 7 payload bytes */
+    out[3] = 0x79; /* Cmd ID: CentralState2 */
+
+    /* Byte 0 */
+    uint8_t b0 = 0;
+    if (cfg->motorized_tailgate)     b0 |= 0x80;
+    if (cfg->directional_headlights) b0 |= 0x40;
+    out[4] = b0;
+
+    /* Byte 1: Drive profile */
+    out[5] = (cfg->active_profile_id > 1) ? 0x20 : 0x00;
+
+    /* Byte 2: Cluster dimmer */
+    out[6] = (cfg->cluster_dimmer & 0x0F) << 2;
+
+    /* Byte 3: ESP Traction */
+    out[7] = 0x04; /* ESP active by default */
+
+    /* Bytes 4 & 5: Unused ADAS */
+    out[8] = 0x00;
+    out[9] = 0x00;
+
+    /* Byte 6: Climate Dual/Mono Sync (0x02=Mono, 0x00=Dual) */
+    out[10] = (st && !st->climate.dual_mode) ? 0x02 : 0x00;
+
+    /* Checksum: ((len + cmd + sum) - 1) & 0xFF */
+    uint8_t sum = 0;
+    for (size_t i = 2; i < 11; i++) sum += out[i];
+    out[11] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 12;
+}
+

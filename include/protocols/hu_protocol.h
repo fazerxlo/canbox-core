@@ -32,6 +32,8 @@ void hu_protocol_send_radio_state(const vehicle_radio_t *radio);
 void hu_protocol_send_radio_text(const char *text, uint8_t len);
 void hu_protocol_send_radio_presets(const vehicle_radio_t *radio);
 void hu_protocol_send_media_state(const vehicle_cdc_t *cdc);
+void hu_protocol_send_central_state1(const vehicle_config_t *config);
+void hu_protocol_send_central_state2(const vehicle_config_t *config, const vehicle_state_t *state);
 
 #ifdef __cplusplus
 }

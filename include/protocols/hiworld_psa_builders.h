@@ -27,6 +27,8 @@ size_t build_hiworld_tpms_numeric(const vehicle_tpms_t *tpms, uint8_t *out, size
 size_t build_hiworld_tpms_discrete(const vehicle_tpms_t *tpms, uint8_t *out, size_t max_len);
 size_t build_hiworld_alert_single(const vehicle_alert_item_t *alert, uint8_t *out, size_t max_len);
 size_t build_hiworld_alerts_summary(const vehicle_alert_item_t *items, uint8_t count, uint8_t *out, size_t max_len);
+size_t build_hiworld_central_state1(const vehicle_config_t *cfg, uint8_t *out, size_t max_len);
+size_t build_hiworld_central_state2(const vehicle_config_t *cfg, const vehicle_state_t *st, uint8_t *out, size_t max_len);
 
 #ifdef __cplusplus
 }

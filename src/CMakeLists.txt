@@ -5,6 +5,7 @@ set(srcs
     "core/ring_buffer.c"
     "core/vehicle_profile.c"
     "profiles/profile_psa.c"
+    "profiles/psa_407_car_config.c"
     "profiles/psa_407_hvac_body.c"
     "profiles/psa_407_telemetry.c"
     "profiles/psa_407_rd4_audio.c"

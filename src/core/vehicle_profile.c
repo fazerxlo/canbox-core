@@ -82,3 +82,10 @@ bool vehicle_profile_query_alerts(void) {
     return false;
 }
 
+bool vehicle_profile_set_car_config(uint8_t cmd_id, uint8_t setting_id, uint8_t value, vehicle_config_t *cfg) {
+    if (s_active_profile && s_active_profile->set_car_config) {
+        return s_active_profile->set_car_config(cmd_id, setting_id, value, cfg);
+    }
+    return false;
+}
+

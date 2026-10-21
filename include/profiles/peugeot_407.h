@@ -51,6 +51,7 @@ extern "C" {
 #define PSA_CAN_ID_TPMS_STATUS_1E1  0x1E1
 #define PSA_CAN_ID_TPMS_PRESSURES_3A1 0x3A1
 #define PSA_CAN_ID_BSI_PERSO_361    0x361
+#define PSA_CAN_ID_BSI_PROFILES_260 0x260
 #define PSA_CAN_ID_RDS_NAME         0x396
 #define PSA_CAN_ID_CD_TRAY_325      0x325
 #define PSA_CAN_ID_CD_DISC_INFO_365 0x365
@@ -379,6 +380,16 @@ void psa_decode_alerts_0x168(const uint8_t *data, uint8_t dlc,
 /* --------------------------------------------------------------------------
  * 2.5 Vehicle Alerts & Diagnostic Journal (Hiworld Command 0x42)
  * -------------------------------------------------------------------------- */
+
+/* --------------------------------------------------------------------------
+ * 2.6 BSI Vehicle Personalization & Configuration Options (Hiworld 0x76/0x79)
+ * -------------------------------------------------------------------------- */
+typedef vehicle_config_t psa_car_config_t;
+
+void psa_car_config_init(void);
+void psa_decode_config_0x361(vehicle_config_t *cfg, const uint8_t *data, uint8_t dlc);
+hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, uint8_t val);
+void psa_car_config_get_cached(vehicle_config_t *cfg);
 #define HIWORLD_CMD_WARNING_INFO     0x42
 #define HIWORLD_CMD_DIAGNOSTIC_QUERY 0x2F
 

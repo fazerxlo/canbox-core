@@ -184,6 +184,18 @@ void hu_protocol_send_media_state(const vehicle_cdc_t *cdc) {
     }
 }
 
+void hu_protocol_send_central_state1(const vehicle_config_t *config) {
+    if (s_active_driver && s_active_driver->send_central_state1) {
+        s_active_driver->send_central_state1(config);
+    }
+}
+
+void hu_protocol_send_central_state2(const vehicle_config_t *config, const vehicle_state_t *state) {
+    if (s_active_driver && s_active_driver->send_central_state2) {
+        s_active_driver->send_central_state2(config, state);
+    }
+}
+
 void hu_protocol_send_heartbeat(void) {
     if (s_active_driver && s_active_driver->send_heartbeat) {
         s_active_driver->send_heartbeat();

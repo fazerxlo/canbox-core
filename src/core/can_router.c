@@ -368,6 +368,16 @@ void can_router_process_can(const can_frame_t *frame) {
         }
     }
 
+    // Immediately push car configuration / personalization updates on change
+    if (s_current_state.dirty.config) {
+        s_current_state.dirty.config = false;
+        if (memcmp(&s_current_state.config, &s_last_sent_state.config, sizeof(vehicle_config_t)) != 0) {
+            hu_protocol_send_central_state1(&s_current_state.config);
+            hu_protocol_send_central_state2(&s_current_state.config, &s_current_state);
+            s_last_sent_state.config = s_current_state.config;
+        }
+    }
+
     // Immediately push radio tuner & source updates on change
     if (s_current_state.dirty.radio) {
         s_current_state.dirty.radio = false;
@@ -597,6 +607,8 @@ void can_router_periodic_100ms(void) {
     if (++s_bulk_resync_timer >= 600) {
         s_bulk_resync_timer = 0;
         hu_protocol_send_doors(&s_current_state.doors);
+        hu_protocol_send_central_state1(&s_current_state.config);
+        hu_protocol_send_central_state2(&s_current_state.config, &s_current_state);
         if (s_current_state.audio.valid && s_current_state.audio.active_mode == 0) {
             vehicle_audio_settings_t sync_audio = s_current_state.audio;
             sync_audio.active_mode = 0;
@@ -650,6 +662,20 @@ bool can_router_query_alert_journal(void) {
     s_bsi_alert_query_pending = true;
     s_bsi_alert_query_timeout_ticks = 5; /* 5 * 100ms = 500ms */
     return vehicle_profile_query_alerts();
+}
+
+bool can_router_set_car_config(uint8_t cmd_id, uint8_t setting_id, uint8_t value) {
+    if (can_router_is_bus_sleeping()) {
+        return false;
+    }
+    bool ok = vehicle_profile_set_car_config(cmd_id, setting_id, value, &s_current_state.config);
+    if (ok) {
+        s_current_state.dirty.config = false;
+        hu_protocol_send_central_state1(&s_current_state.config);
+        hu_protocol_send_central_state2(&s_current_state.config, &s_current_state);
+        s_last_sent_state.config = s_current_state.config;
+    }
+    return ok;
 }
 
 bool can_router_is_bus_sleeping(void) {
