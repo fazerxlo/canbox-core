@@ -82,6 +82,23 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
 
 ## 2. Hardware-in-the-Loop (HIL) & E2E Testing
 
+### `test_bsi_workbench.py`
+**PSA 407 BSI & SLCAN Automated Workbench Verification Suite**
+- **Purpose:** Automates bidirectional verification of OpenCanbox Core against a physical bench (Peugeot 407 BSI, RD4, and SLCAN `can0`). Validates live BSI cyclic traffic (`0x036`, `0x0F6`, `0x361`, `0x165`), tests CAN-to-HU telemetry dispatch, and verifies HU downlink commands (ACK, atomic CAN injection on `0x361`, and immediate optimistic HU telemetry).
+- **Usage:**
+  ```bash
+  # Run full automated test suite:
+  ./tools/test_bsi_workbench.py
+
+  # Passively sniff and decode live BSI status:
+  ./tools/test_bsi_workbench.py --sniff
+
+  # Test single setting (e.g. drl, wiper, lock, afs, boot):
+  ./tools/test_bsi_workbench.py --setting drl
+  ```
+
+---
+
 ### `canbox_e2e_logger.py`
 **Multi-Stream Real-Time Diagnostic Logger & Test Harness**
 - **Purpose:** Core E2E development tool. Spawns the desktop simulator or bridges physical USB serial lines, captures CAN bus traffic (`[CAN]`), OpenCanbox transmit (`[APP_UART_TX]`), Head Unit downlink (`[APP_UART_RX]`), and OEM reference box (`[ORIG_CANBOX]`).
