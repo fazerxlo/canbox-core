@@ -167,17 +167,55 @@ hal_status_t psa_trip_send_reset(uint8_t trip_index) {
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */
+static bool s_has_direct_pressures = false;
+
 void psa_tpms_init(vehicle_tpms_t *tpms) {
+    s_has_direct_pressures = false;
     if (!tpms) return;
     memset(tpms, 0, sizeof(vehicle_tpms_t));
-    tpms->pressure_bar_deci[0] = 24; /* 2.4 Bar default */
-    tpms->pressure_bar_deci[1] = 24;
-    tpms->pressure_bar_deci[2] = 22; /* 2.2 Bar default */
-    tpms->pressure_bar_deci[3] = 22;
+    tpms->pressure_bar_deci[0] = 24; /* FL: 2.4 Bar default */
+    tpms->pressure_bar_deci[1] = 24; /* FR: 2.4 Bar default */
+    tpms->pressure_bar_deci[2] = 22; /* RL: 2.2 Bar default */
+    tpms->pressure_bar_deci[3] = 22; /* RR: 2.2 Bar default */
+}
+
+static uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw_byte, uint8_t nominal_deci_bar, uint8_t *out_synth_bar) {
+    /* Bit 7 (0x80): Unmonitored / Standby / Sensor Offline Flag */
+    if ((raw_byte & 0x80) != 0) {
+        if (out_synth_bar) *out_synth_bar = 0;
+        return 3; /* Hiworld: Sensor Fault / Offline */
+    }
+
+    /* PSA 0x1E1 Bits 5..3 ((raw_byte >> 3) & 0x07) discrete wheel status enum:
+     * 0 (raw 0x00) = Normal / OK
+     * 1 (raw 0x08) = Under-inflated (Low pressure)
+     * 2 (raw 0x10) = Punctured (Flat)
+     * 3 (raw 0x18) = Sensor Missing / Not Detected
+     * 4 (raw 0x20) = Sensor Battery Low / Hardware Fault
+     */
+    uint8_t state_enum = (uint8_t)((raw_byte >> 3) & 0x07);
+    switch (state_enum) {
+        case 0:
+            if (out_synth_bar) *out_synth_bar = nominal_deci_bar;
+            return 0; /* Hiworld: Normal / OK */
+        case 1:
+            if (out_synth_bar) *out_synth_bar = 17; /* 1.7 Bar synthetic low */
+            return 1; /* Hiworld: Low Pressure */
+        case 2:
+            if (out_synth_bar) *out_synth_bar = 8;  /* 0.8 Bar synthetic puncture */
+            return 2; /* Hiworld: Puncture / Flat */
+        case 3:
+        case 4:
+        default:
+            if (out_synth_bar) *out_synth_bar = 0;  /* 0.0 Bar / Offline */
+            return 3; /* Hiworld: Sensor Fault / Missing */
+    }
 }
 
 void psa_tpms_process_can_0x361(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
     if (!tpms || !data || dlc < 8) return;
+
+    s_has_direct_pressures = true;
 
     uint16_t fl_raw = read_be16(&data[0]);
     uint16_t fr_raw = read_be16(&data[2]);
@@ -216,6 +254,8 @@ void psa_tpms_process_can_0x361(vehicle_tpms_t *tpms, const uint8_t *data, uint8
 void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
     if (!tpms || !data || dlc < 4) return;
 
+    s_has_direct_pressures = true;
+
     tpms->pressure_bar_deci[0] = (uint8_t)((data[0] * 5 + 5) / 10);
     tpms->pressure_bar_deci[1] = (uint8_t)((data[1] * 5 + 5) / 10);
     tpms->pressure_bar_deci[2] = (uint8_t)((data[3] * 5 + 5) / 10); /* RL */
@@ -226,19 +266,31 @@ void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
 void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
     if (!tpms || !data || dlc < 4) return;
 
-    /* PSA 0x1E1 bits 5..3 carry RT4 tyre state enum:
-       0=OK, 1=LOW, 2=FLAT, 3=NO_DATA, 4=BATTERY_LOW */
-    uint8_t fl_st = (uint8_t)((data[0] >> 3) & 0x07);
-    uint8_t fr_st = (uint8_t)((data[1] >> 3) & 0x07);
-    uint8_t rr_st = (uint8_t)((data[2] >> 3) & 0x07);
-    uint8_t rl_st = (uint8_t)((data[3] >> 3) & 0x07);
+    /* Guard against standby / unequipped 80 80 80 80 frame before TPMS wakes up */
+    if (!tpms->valid &&
+        (data[0] & 0x80) != 0 && (data[1] & 0x80) != 0 &&
+        (data[2] & 0x80) != 0 && (data[3] & 0x80) != 0) {
+        return;
+    }
 
-    /* Map PSA enum to Hiworld discrete alarm:
-       0=Normal, 1=Low, 2=Puncture, 3=Fault/Offline */
-    tpms->alarm_state[0] = (fl_st >= 3) ? 3 : fl_st;
-    tpms->alarm_state[1] = (fr_st >= 3) ? 3 : fr_st;
-    tpms->alarm_state[2] = (rl_st >= 3) ? 3 : rl_st;
-    tpms->alarm_state[3] = (rr_st >= 3) ? 3 : rr_st;
+    uint8_t synth_fl, synth_fr, synth_rl, synth_rr;
+
+    /* PSA 0x1E1 Byte order: Byte 0=FL, Byte 1=FR, Byte 2=RR, Byte 3=RL
+     * Hiworld array order:  [0]=FL,    [1]=FR,    [2]=RL,    [3]=RR */
+    tpms->alarm_state[0] = psa_tpms_decode_0x1e1_wheel(data[0], 24, &synth_fl); /* FL */
+    tpms->alarm_state[1] = psa_tpms_decode_0x1e1_wheel(data[1], 24, &synth_fr); /* FR */
+    tpms->alarm_state[2] = psa_tpms_decode_0x1e1_wheel(data[3], 22, &synth_rl); /* RL */
+    tpms->alarm_state[3] = psa_tpms_decode_0x1e1_wheel(data[2], 22, &synth_rr); /* RR */
+
+    /* If no direct numeric pressures (0x361 DLC 8 / 0x3A1) have been received,
+     * populate synthetic pressures so Hiworld Cmd 0x66 matches the discrete states. */
+    if (!s_has_direct_pressures) {
+        tpms->pressure_bar_deci[0] = synth_fl;
+        tpms->pressure_bar_deci[1] = synth_fr;
+        tpms->pressure_bar_deci[2] = synth_rl;
+        tpms->pressure_bar_deci[3] = synth_rr;
+    }
+
     tpms->valid = true;
 }
 
@@ -287,4 +339,3 @@ void psa_decode_cruise_0x1a8(const uint8_t *data, uint8_t dlc, bool *active, uin
         *partial_odo_m = (odo_raw == 0xFFFFFF) ? 0 : odo_raw;
     }
 }
-

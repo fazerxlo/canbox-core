@@ -98,6 +98,8 @@ void test_peugeot_407_tpms_hiworld_vector_2_asymmetric_low(void);
 void test_peugeot_407_tpms_hiworld_vector_3_puncture(void);
 void test_peugeot_407_tpms_hiworld_0x3a1_pressures(void);
 void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void);
+void test_peugeot_407_tpms_standby_guard(void);
+void test_peugeot_407_tpms_two_tier_hybrid(void);
 void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void);
 void test_psa_extended_start_stop(void);
 void test_psa_extended_cruise_memory(void);
@@ -254,6 +256,8 @@ int main(void) {
     RUN_TEST(test_peugeot_407_tpms_hiworld_vector_3_puncture);
     RUN_TEST(test_peugeot_407_tpms_hiworld_0x3a1_pressures);
     RUN_TEST(test_peugeot_407_tpms_hiworld_0x1e1_status_enum);
+    RUN_TEST(test_peugeot_407_tpms_standby_guard);
+    RUN_TEST(test_peugeot_407_tpms_two_tier_hybrid);
     RUN_TEST(test_peugeot_407_tpms_hiworld_pipeline_and_boundaries);
     RUN_TEST(test_psa_extended_start_stop);
     RUN_TEST(test_psa_extended_cruise_memory);

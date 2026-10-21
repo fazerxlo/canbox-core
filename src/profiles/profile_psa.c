@@ -313,6 +313,7 @@ static void psa_init(void) {
     psa_console_init(NULL);
     psa_journal_iso_tp_init(&s_journal_ctx);
     psa_rd4_media_init(NULL, NULL);
+    psa_tpms_init(NULL);
 }
 
 static bool psa_reset_trip(uint8_t trip_index) {
