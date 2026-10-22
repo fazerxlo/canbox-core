@@ -115,6 +115,9 @@ typedef struct {
     hiworld_uart_tx_fn    uart_tx;
     hiworld_can_config_fn can_config;
     hiworld_can_tx_fn     can_tx;
+
+    uint8_t              feat1[2];
+    uint8_t              feat2[8];
 } hiworld_connection_ctx_t;
 
 /* Checksum calculation helper */
@@ -140,6 +143,7 @@ void hiworld_conn_process_rx_byte(hiworld_connection_ctx_t *ctx, uint8_t byte);
 void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_millis);
 void hiworld_conn_send_version(hiworld_connection_ctx_t *ctx);
 void hiworld_conn_send_feature_enables(hiworld_connection_ctx_t *ctx);
+void hiworld_conn_set_feature_enables(hiworld_connection_ctx_t *ctx, const uint8_t *feat1, const uint8_t *feat2);
 size_t hiworld_conn_build_frame(uint8_t cmd_id, const uint8_t *payload, uint8_t len, uint8_t *out_buf, size_t max_out);
 
 #ifdef __cplusplus

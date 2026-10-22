@@ -63,6 +63,11 @@ void hiworld_conn_init(hiworld_connection_ctx_t *ctx,
         strncpy(ctx->fw_version, fw_version_str, sizeof(ctx->fw_version) - 1);
         ctx->fw_version[sizeof(ctx->fw_version) - 1] = '\0';
     }
+    ctx->feat1[0] = 0x60;
+    ctx->feat1[1] = 0x12;
+    ctx->feat2[0] = 0x00;
+    ctx->feat2[1] = 0x01;
+    ctx->feat2[2] = 0x80;
     s_step = HW_PARSE_SOF1;
     s_payload_len = 0;
     s_cmd_id = 0;
@@ -75,16 +80,24 @@ void hiworld_conn_send_version(hiworld_connection_ctx_t *ctx) {
     send_hiworld_frame(ctx, HIWORLD_CMD_VERSION_REPORT, (const uint8_t *)ctx->fw_version, (uint8_t)len);
 }
 
+void hiworld_conn_set_feature_enables(hiworld_connection_ctx_t *ctx, const uint8_t *feat1, const uint8_t *feat2) {
+    if (!ctx) return;
+    if (feat1) {
+        memcpy(ctx->feat1, feat1, 2);
+    }
+    if (feat2) {
+        memcpy(ctx->feat2, feat2, 8);
+    }
+}
+
 void hiworld_conn_send_feature_enables(hiworld_connection_ctx_t *ctx) {
     if (!ctx) return;
 
-    /* Feature Enable 1 (Cmd 0x71): 2 bytes (0x60, 0x12) - matches OEM Canbox */
-    uint8_t feat1[2] = { 0x60, 0x12 };
-    send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE1, feat1, 2);
+    /* Feature Enable 1 (Cmd 0x71): 2 bytes */
+    send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE1, ctx->feat1, 2);
 
-    /* Feature Enable 2 (Cmd 0x72): 8 bytes - matches OEM Canbox */
-    uint8_t feat2[8] = { 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00 };
-    send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE2, feat2, 8);
+    /* Feature Enable 2 (Cmd 0x72): 8 bytes */
+    send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE2, ctx->feat2, 8);
 
     /* Central State 1 (Cmd 0x76): 2 bytes */
     uint8_t state1[2] = { 0x00, 0x00 };

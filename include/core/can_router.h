@@ -227,18 +227,19 @@ typedef struct {
 } vehicle_dirty_flags_t;
 
 typedef struct {
-    bool    follow_me_home;         /* 0x361 B0.7 */
-    uint8_t follow_me_home_sec;     /* 0, 15, 30, 60 (from 0x361 B1[3:0]) */
-    bool    drl_enabled;            /* 0x361 B0.6 */
-    bool    rear_wiper_reverse;     /* 0x361 B0.5 */
-    bool    auto_door_lock;         /* 0x361 B0.3 */
-    bool    selective_boot_unlock;  /* 0x361 B0.2 */
-    bool    directional_headlights; /* 0x361 B0.1 */
-    bool    motorized_tailgate;     /* 0x361 B0.0 */
-    uint8_t ambient_lighting_level; /* 0x361 B2[3:0]: 0..15 */
-    bool    parking_radar_enabled;  /* 0x361 B4: 0x01=Active */
-    uint8_t active_profile_id;      /* 0x260 B3: 1..3 */
-    uint8_t cluster_dimmer;         /* 0x036 B3[7:4]: 0..15 */
+    bool    follow_me_home;         /* 0x260 B2.5 (0x20) */
+    uint8_t follow_me_home_sec;     /* 0, 15, 30, 60 (from 0x260 B2[1:0] or B2[3:2]) */
+    bool    auto_lighting_enabled;  /* 0x260 B2.4 (0x10) -> Cmd 0x76 B0.4 (0x10) */
+    bool    drl_enabled;            /* 0x260 B3.6 */
+    bool    rear_wiper_reverse;     /* 0x260 B5.4 */
+    bool    auto_door_lock;         /* Auto door lock status */
+    bool    selective_boot_unlock;  /* Selective door / boot unlock */
+    bool    directional_headlights; /* 0x260 B2.7 */
+    bool    motorized_tailgate;     /* Tailgate motorized status */
+    uint8_t ambient_lighting_level; /* Ambient lighting level 0..15 */
+    bool    parking_radar_enabled;  /* 0x260 B5.6 */
+    uint8_t active_profile_id;      /* 0x260 B0: 1..3 */
+    uint8_t cluster_dimmer;         /* 0x036 B3[3:0]: 0..15 */
 } vehicle_config_t;
 
 typedef struct {

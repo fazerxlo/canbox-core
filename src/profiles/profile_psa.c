@@ -1,6 +1,7 @@
 #include "core/vehicle_profile.h"
 #include "core/can_router.h"
 #include "profiles/peugeot_407.h"
+#include "protocols/hu_protocol.h"
 #include <string.h>
 
 static inline uint16_t read_be16_local(const uint8_t *d) {
@@ -206,7 +207,7 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
     if (frame->dlc >= 4) {
         state->lights.illumination = (frame->data[3] & 0x20) != 0;
         state->lights.brightness   = (frame->data[3] & 0x0F);
-        uint8_t dimmer = (frame->data[3] >> 4) & 0x0F;
+        uint8_t dimmer = (frame->data[3] & 0x0F);
         if (state->config.cluster_dimmer != dimmer) {
             state->config.cluster_dimmer = dimmer;
             state->dirty.config = true;
@@ -271,9 +272,26 @@ static void psa_decode_etat_autoradio_0x165_profile(const can_frame_t *frame, ve
 }
 
 static void psa_decode_config_0x361_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    if (!frame || !state || frame->dlc < 6) return;
+    (void)state;
+    if (!frame || frame->dlc < 6) return;
 
-    psa_decode_config_0x361(&state->config, frame->data, frame->dlc);
+    uint8_t old_feat1[2], old_feat2[8];
+    psa_car_config_get_feature_enables(old_feat1, old_feat2);
+
+    psa_decode_config_0x361(frame->data, frame->dlc);
+
+    uint8_t new_feat1[2], new_feat2[8];
+    psa_car_config_get_feature_enables(new_feat1, new_feat2);
+
+    if (memcmp(old_feat1, new_feat1, 2) != 0 || memcmp(old_feat2, new_feat2, 8) != 0) {
+        hu_protocol_send_feature_enables(new_feat1, new_feat2);
+    }
+}
+
+static void psa_decode_bsi_profiles_0x260_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state || frame->dlc < 8) return;
+
+    psa_decode_config_0x260(&state->config, frame->data, frame->dlc);
     state->dirty.config = true;
 }
 
@@ -307,6 +325,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_TPMS_STATUS_1E1,    psa_tpms_decode_frame },
     { PSA_CAN_ID_TPMS_PRESSURES_3A1, psa_tpms_decode_frame },
     { PSA_CAN_ID_BSI_PERSO_361,      psa_decode_config_0x361_profile },
+    { PSA_CAN_ID_BSI_PROFILES_260,   psa_decode_bsi_profiles_0x260_profile },
     { PSA_CAN_ID_CD_TRAY_325,        psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_DISC_INFO_365,   psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_PLAY_3A5,        psa_rd4_decode_frame },

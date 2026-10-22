@@ -743,6 +743,21 @@ static void hiworld_send_radio_presets(const vehicle_radio_t *radio) {
     }
 }
 
+static void hiworld_send_feature_enables(const uint8_t *feat1, const uint8_t *feat2) {
+    if (!feat1 || !feat2) return;
+    hiworld_conn_set_feature_enables(&s_hw_conn_ctx, feat1, feat2);
+
+    uint8_t tx_buf[16];
+    size_t len1 = hiworld_conn_build_frame(HIWORLD_CMD_FEATURE_ENABLE1, feat1, 2, tx_buf, sizeof(tx_buf));
+    if (len1 > 0) {
+        hal_uart_write(tx_buf, len1);
+    }
+    size_t len2 = hiworld_conn_build_frame(HIWORLD_CMD_FEATURE_ENABLE2, feat2, 8, tx_buf, sizeof(tx_buf));
+    if (len2 > 0) {
+        hal_uart_write(tx_buf, len2);
+    }
+}
+
 static void hiworld_send_central_state1(const vehicle_config_t *config) {
     if (!config) return;
     uint8_t tx_buf[16];
@@ -787,6 +802,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_radio_text = hiworld_send_radio_text,
     .send_radio_presets = hiworld_send_radio_presets,
     .send_media_state = hiworld_send_media_state,
+    .send_feature_enables = hiworld_send_feature_enables,
     .send_central_state1 = hiworld_send_central_state1,
     .send_central_state2 = hiworld_send_central_state2,
     .send_heartbeat = hiworld_send_heartbeat,

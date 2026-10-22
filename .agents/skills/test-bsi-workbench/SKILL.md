@@ -36,7 +36,7 @@ This skill guides testing and validating **any** OpenCanbox Core subsystem (Pers
                                          v
 +-------------------------------------------------------------------------+
 |                         Physical Workbench                              |
-|  - Peugeot 407 BSI (0x036, 0x0F6, 0x361, 0x120)                         |
+|  - Peugeot 407 BSI (0x036, 0x0F6, 0x260, 0x361, 0x120)                   |
 |  - Climate ECU / Façade (0x1D0, 0x1E3, 0x12D)                           |
 |  - Blaupunkt RD4 Radio (0x165, 0x225, 0x2A5)                            |
 +-------------------------------------------------------------------------+
@@ -75,7 +75,8 @@ Ensure the BSI and radio are actively transmitting on `can0`:
 Expected active frames when BSI and RD4 are powered:
 * **`0x036` (Ignition/Dimmer):** `0E 00 00 0F 01 00 00 A0` (ACC=True, Dimmer=15)
 * **`0x0F6` (Slow Telemetry):** `88 FF FF FF FF FF FF 20` (Economy mode inactive)
-* **`0x361` (BSI Personalization):** `01 01 91 40 30 10` (Tailgate=1, FMH=15s, Ambient=1)
+* **`0x260` (BSI Active Config Profile):** `01 00 B4 00 00 40 00 00` (Profile 1: FMH=15s, AutoLight=1, Radar=1)
+* **`0x361` (BSI Equipment Availability Mask):** `01 01 91 40 30 10` (FMH/DRL/AAS supported)
 * **`0x165` (RD4 Audio Source):** `C8 C0 40 00` (Source Tuner / Power ON)
 
 > [!NOTE]
@@ -204,9 +205,11 @@ Run the standalone scenario directly from the CLI:
 * **Command:** `./tools/test_bsi_workbench.py --scenario climate`
 
 ### 5.2 Car Personalization Options
-* **CAN Status & Injection:** `0x361` (DLC 6, 250 ms) — `MSG_BSI_INF_CFG_MENU_PERSO`.
-* **HU Telemetry:** `Cmd 0x76` (`CentralState1`) & `Cmd 0x79` (`CentralState2`).
-* **HU Downlink:** `Cmd 0x7B` (Primary options: DRL, Wiper, AutoLock, FMH, Ambient) & `Cmd 0x7D` (Tailgate, AFS).
+* **CAN Status:** `0x260` (DLC 8, 1500 ms per profile) — BSI Active Personalization Settings (`MSG_BSI_INF_CFG_PERSO_ETAT`).
+* **CAN Equipment Mask:** `0x361` (DLC 6, 500 ms) — Menu Availability (`MSG_BSI_INF_CFG_MENU_PERSO`).
+* **CAN Downlink Injection:** `0x15B` (DLC 8, Event-driven) — Mutates setting via Profile 1 pending request (`MSG_BSI_DEM_CFG_PERSO`).
+* **HU Telemetry:** `Cmd 0x76` (`CentralState1`), `Cmd 0x79` (`CentralState2`), `Cmd 0x71`/`0x72` (Feature Enables).
+* **HU Downlink:** `Cmd 0x7B` (Primary options: DRL, Wiper, AutoLock, FMH, Ambient, Radar) & `Cmd 0x7D` (Tailgate, AFS).
 * **Command:** `./tools/test_bsi_workbench.py --scenario config`
 
 ### 5.3 Trip Computer & Resets

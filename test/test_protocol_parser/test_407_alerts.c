@@ -669,11 +669,11 @@ void test_can_id_filter_enforcement(void) {
         }
     }
 
-    /* 2. Verify unmapped standard CAN IDs (e.g., 0x7FF, 0x111, 0x217, 0x260) are rejected */
+    /* 2. Verify unmapped standard CAN IDs (e.g., 0x7FF, 0x111, 0x217, 0x262) are rejected */
     TEST_ASSERT_FALSE(can_router_is_id_allowed(0x7FF));
     TEST_ASSERT_FALSE(can_router_is_id_allowed(0x111));
     TEST_ASSERT_FALSE(can_router_is_id_allowed(0x217));
-    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x260));
+    TEST_ASSERT_FALSE(can_router_is_id_allowed(0x262));
 
     /* 3. Verify boundary / out-of-range IDs (> 0x7FF) are rejected */
     TEST_ASSERT_FALSE(can_router_is_id_allowed(0x800));

@@ -15,7 +15,7 @@ Architecture:
   WorkbenchScenario subclasses with minimal code.
 
 Supported Scenarios:
-  - config  : Car Personalization Options (0x361 <-> 0x76, 0x79, 0x7B, 0x7D)
+  - config  : Car Personalization Options (0x260/0x361 <-> 0x76, 0x79, 0x7B, 0x7D)
   - climate : Dual-Zone HVAC Control (0x1E3/0x1D0 <-> 0x31, 0x3B)
   - trip    : Trip Computer & Resets (0x221 <-> 0x13, 0x14, 0x15, 0x1B)
   - doors   : Door & Trunk Status (0x220/0x036 <-> 0x12)
@@ -49,13 +49,15 @@ CAN_FRAME_FMT = "=IB3x8s"
 # Peugeot 407 / PSA CAN2004 Message IDs
 CAN_ID_BSI_IGNITION_036 = 0x036
 CAN_ID_BSI_SLOW_0F6     = 0x0F6
+CAN_ID_ALERT_JOURNAL_120 = 0x120
+CAN_ID_BSI_DOWNLINK_15B = 0x15B
+CAN_ID_RD4_SOURCE_165   = 0x165
 CAN_ID_CLIMATE_PANEL_1D0 = 0x1D0
 CAN_ID_CLIMATE_EMF_1E3   = 0x1E3
-CAN_ID_RD4_SOURCE_165   = 0x165
 CAN_ID_DOORS_BODY_220   = 0x220
 CAN_ID_TRIP_INSTANT_221 = 0x221
+CAN_ID_BSI_CONFIG_260   = 0x260
 CAN_ID_BSI_PERSO_361    = 0x361
-CAN_ID_ALERT_JOURNAL_120 = 0x120
 
 # Hiworld Framing Constants
 HIWORLD_SYNC_1 = 0x5A
@@ -229,8 +231,8 @@ class BsiWorkbenchHarness:
                     pass
             self.proc = None
 
-    def read_can_frame(self, target_id: int, timeout_sec: float = 0.8) -> Optional[List[int]]:
-        """Waits for a specific CAN ID on the bus."""
+    def read_can_frame(self, target_id: int, timeout_sec: float = 0.8, predicate=None) -> Optional[List[int]]:
+        """Waits for a specific CAN ID on the bus matching an optional predicate."""
         t0 = time.time()
         while time.time() - t0 < timeout_sec:
             r, _, _ = select.select([self.can_sock], [], [], 0.05)
@@ -238,7 +240,9 @@ class BsiWorkbenchHarness:
                 raw = self.can_sock.recv(16)
                 cid, dlc, data = struct.unpack(CAN_FRAME_FMT, raw)
                 if cid == target_id:
-                    return list(data[:dlc])
+                    payload = list(data[:dlc])
+                    if predicate is None or predicate(payload):
+                        return payload
         return None
 
     def send_can_frame(self, can_id: int, data: bytes):
@@ -305,55 +309,55 @@ class BaseWorkbenchScenario:
 # ==============================================================================
 class CarConfigScenario(BaseWorkbenchScenario):
     name = "config"
-    description = "BSI Personalization Options (0x361 <-> 0x76, 0x79, 0x7B, 0x7D)"
+    description = "BSI Personalization Options (0x260/0x361 <-> 0x76, 0x79, 0x7B, 0x7D)"
 
     ITEMS = [
         {
             "key": "wiper", "name": "Rear Wiper in Reverse",
             "setting_id": 0x01, "cmd_id": HIWORLD_CMD_SETTING1,
-            "can_byte": 0, "can_bit": 0x20, "hu_val_enable": 0x01,
+            "can_byte": 5, "can_bit": 0x10, "inj_byte": 5, "inj_bit": 0x10, "hu_val_enable": 0x01,
             "chk_cmd": HIWORLD_CMD_CENTRAL_STATE1, "chk_byte": 1, "chk_bit": 0x80
         },
         {
             "key": "selective_unlock", "name": "Selective Door Unlocking",
             "setting_id": 0x04, "cmd_id": HIWORLD_CMD_SETTING1,
-            "can_byte": 0, "can_bit": 0x04, "hu_val_enable": 0x01,
+            "can_byte": 4, "can_bit": 0x04, "inj_byte": 4, "inj_bit": 0x04, "hu_val_enable": 0x01,
             "chk_cmd": HIWORLD_CMD_CENTRAL_STATE1, "chk_byte": 1, "chk_bit": 0x08
         },
         {
             "key": "drl", "name": "Daytime Running Lights (DRL)",
             "setting_id": 0x05, "cmd_id": HIWORLD_CMD_SETTING1,
-            "can_byte": 0, "can_bit": 0x40, "hu_val_enable": 0x01,
+            "can_byte": 3, "can_bit": 0x40, "inj_byte": 3, "inj_bit": 0x40, "hu_val_enable": 0x01,
             "chk_cmd": HIWORLD_CMD_CENTRAL_STATE1, "chk_byte": 1, "chk_bit": 0x04
         },
         {
-            "key": "follow_me", "name": "Follow-Me-Home Headlamp Delay (30s)",
+            "key": "follow_me", "name": "Follow-Me-Home Delay (30s)",
             "setting_id": 0x06, "cmd_id": HIWORLD_CMD_SETTING1,
-            "can_byte": 0, "can_bit": 0x80, "can_byte1_val": 0x02, "hu_val_enable": 0x02,
+            "can_byte": 2, "can_bit": 0x20, "inj_byte": 2, "inj_bit": 0x20, "hu_val_enable": 0x02,
             "chk_cmd": HIWORLD_CMD_CENTRAL_STATE1, "chk_byte": 1, "chk_bit": 0x02
         },
         {
-            "key": "ambient_light", "name": "Ambient Mood Lighting (Level 3)",
-            "setting_id": 0x0A, "cmd_id": HIWORLD_CMD_SETTING1,
-            "can_byte": 2, "can_val": 0x93, "hu_val_enable": 0x83,
-            "chk_cmd": HIWORLD_CMD_CENTRAL_STATE1, "chk_byte": 0, "chk_bit": 0x08
+            "key": "radar", "name": "Parking Radar (AAS) Toggle",
+            "setting_id": 0x0B, "cmd_id": HIWORLD_CMD_SETTING1,
+            "can_byte": 5, "can_bit": 0x40, "inj_byte": 5, "inj_bit": 0x40, "hu_val_enable": 0x01,
+            "chk_cmd": HIWORLD_CMD_CENTRAL_STATE1, "chk_byte": 0, "chk_bit": 0x40
         },
         {
             "key": "auto_lock", "name": "Auto Door Lock while Driving",
             "setting_id": 0x0C, "cmd_id": HIWORLD_CMD_SETTING1,
-            "can_byte": 0, "can_bit": 0x08, "hu_val_enable": 0x01,
+            "can_byte": 4, "can_bit": 0x08, "inj_byte": 4, "inj_bit": 0x08, "hu_val_enable": 0x01,
             "chk_cmd": HIWORLD_CMD_CENTRAL_STATE1, "chk_byte": 1, "chk_bit": 0x20
         },
         {
             "key": "boot", "name": "Motorized Tailgate / Remote Boot",
             "setting_id": 0x01, "cmd_id": HIWORLD_CMD_SETTING2,
-            "can_byte": 0, "can_bit": 0x01, "hu_val_enable": 0x01,
+            "can_byte": 5, "can_bit": 0x80, "inj_byte": 5, "inj_bit": 0x80, "hu_val_enable": 0x01,
             "chk_cmd": HIWORLD_CMD_CENTRAL_STATE2, "chk_byte": 0, "chk_bit": 0x80
         },
         {
             "key": "afs", "name": "Directional Headlights (AFS)",
             "setting_id": 0x02, "cmd_id": HIWORLD_CMD_SETTING2,
-            "can_byte": 0, "can_bit": 0x02, "hu_val_enable": 0x01,
+            "can_byte": 2, "can_bit": 0x80, "inj_byte": 2, "inj_bit": 0x80, "hu_val_enable": 0x01,
             "chk_cmd": HIWORLD_CMD_CENTRAL_STATE2, "chk_byte": 0, "chk_bit": 0x40
         },
     ]
@@ -363,12 +367,22 @@ class CarConfigScenario(BaseWorkbenchScenario):
         print("SCENARIO: BSI PERSONALIZATION & CAR CONFIGURATION OPTIONS")
         print("=" * 72)
 
-        base_can = harness.read_can_frame(CAN_ID_BSI_PERSO_361, timeout_sec=1.5)
-        if not base_can:
-            print("[FAIL] BSI is not transmitting CAN ID 0x361! Check bench power.")
-            return False
+        # Baseline: wait for live BSI 0x260 Profile 1 if physical bench is connected,
+        # otherwise use synthetic Profile 1 baseline.
+        base_can = harness.read_can_frame(
+            CAN_ID_BSI_CONFIG_260,
+            timeout_sec=2.0,
+            predicate=lambda d: len(d) >= 8 and d[0] == 0x01
+        )
+        if base_can:
+            print(f"[*] Live BSI 0x260 Baseline (Profile 1): {' '.join([f'{x:02X}' for x in base_can])}")
+        else:
+            print("[*] No live 0x260 on bus; using synthetic Profile 1 baseline")
+            base_can = [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
 
-        print(f"[*] Live BSI 0x361 Baseline: {' '.join([f'{x:02X}' for x in base_can])}")
+        # Broadcast 0x361 equipment mask so menu items are enabled in state cache
+        harness.send_can_frame(CAN_ID_BSI_PERSO_361, bytes([0x01, 0x01, 0x91, 0x40, 0x30, 0x10]))
+        time.sleep(0.05)
 
         test_items = self.ITEMS
         if filter_key:
@@ -380,23 +394,29 @@ class CarConfigScenario(BaseWorkbenchScenario):
         all_passed = True
 
         # Part A: CAN -> Core -> HU
-        print("\n--- Part A: CAN Bus State Change -> canbox-core -> HU Serial Telemetry ---")
+        print("\n--- Part A: CAN Bus State Change (0x260) -> canbox-core -> HU Serial Telemetry ---")
         for item in test_items:
             name = item["name"]
-            curr_can = harness.read_can_frame(CAN_ID_BSI_PERSO_361, timeout_sec=0.6) or list(base_can)
+            curr_can = harness.read_can_frame(
+                CAN_ID_BSI_CONFIG_260,
+                timeout_sec=0.6,
+                predicate=lambda d: len(d) >= 8 and d[0] == 0x01
+            ) or list(base_can)
             test_payload = list(curr_can)
+            test_payload[0] = 0x01  # Profile 1
 
-            if "can_bit" in item:
+            if item["key"] == "follow_me":
+                if test_payload[2] & 0x20:
+                    test_payload[2] &= ~(0x20 | 0x0F)
+                    target_on = False
+                else:
+                    test_payload[2] |= 0x22  # Follow-me ON (30s)
+                    target_on = True
+            else:
                 test_payload[item["can_byte"]] ^= item["can_bit"]
                 target_on = (test_payload[item["can_byte"]] & item["can_bit"]) != 0
-            elif "can_val" in item:
-                test_payload[item["can_byte"]] = item["can_val"]
-                target_on = True
 
-            if "can_byte1_val" in item and target_on:
-                test_payload[1] = (test_payload[1] & 0xF0) | item["can_byte1_val"]
-
-            harness.send_can_frame(CAN_ID_BSI_PERSO_361, bytes(test_payload))
+            harness.send_can_frame(CAN_ID_BSI_CONFIG_260, bytes(test_payload))
             pkts = harness.read_uart_packets(duration=0.3)
             relevant = [p for p in pkts if p[0] == item["chk_cmd"]]
 
@@ -409,11 +429,12 @@ class CarConfigScenario(BaseWorkbenchScenario):
             flag = "[PASS]" if uart_ok else "[FAIL]"
             if not uart_ok:
                 all_passed = False
-            print(f"  {flag} CAN -> HU: {name:32s} (Byte[{item['chk_byte']}]=0x{b_val:02X} match: {uart_ok})")
+            b_str = f"0x{b_val:02X}" if b_val is not None else "None"
+            print(f"  {flag} CAN -> HU: {name:32s} (Byte[{item['chk_byte']}]={b_str} match: {uart_ok})")
             time.sleep(0.08)
 
         # Part B: HU -> Core -> CAN
-        print("\n--- Part B: HU Downlink Command -> canbox-core -> CAN Injection & Uplink ---")
+        print("\n--- Part B: HU Downlink Command -> canbox-core -> CAN Injection (0x15B) & Uplink ---")
         for item in test_items:
             name = item["name"]
             val = item["hu_val_enable"]
@@ -424,13 +445,12 @@ class CarConfigScenario(BaseWorkbenchScenario):
             rx_pkts = harness.read_uart_packets(duration=0.25)
             ack_ok = any(p[0] == HIWORLD_CMD_HEARTBEAT and len(p[1]) >= 1 and p[1][0] == item["cmd_id"] for p in rx_pkts)
 
-            injected_can = harness.read_can_frame(CAN_ID_BSI_PERSO_361, timeout_sec=0.2)
+            injected_can = harness.read_can_frame(CAN_ID_BSI_DOWNLINK_15B, timeout_sec=0.25)
             can_ok = False
-            if injected_can:
-                if "can_bit" in item:
-                    can_ok = (injected_can[item["can_byte"]] & item["can_bit"]) != 0
-                elif "can_val" in item:
-                    can_ok = (injected_can[item["can_byte"]] & 0x0F) == (item["can_val"] & 0x0F)
+            if injected_can and len(injected_can) >= 8:
+                inj_byte = item["inj_byte"]
+                inj_bit = item["inj_bit"]
+                can_ok = (injected_can[0] == 0x01) and ((injected_can[inj_byte] & inj_bit) != 0)
 
             tel_pkt = [p for p in rx_pkts if p[0] == item["chk_cmd"]]
             tel_ok = False
@@ -442,7 +462,7 @@ class CarConfigScenario(BaseWorkbenchScenario):
             flag = "[PASS]" if pass_all else "[FAIL]"
             if not pass_all:
                 all_passed = False
-            print(f"  {flag} HU -> CAN: {name:32s} (ACK={ack_ok}, CAN_Inj={can_ok}, HU_Echo={tel_ok})")
+            print(f"  {flag} HU -> CAN: {name:32s} (ACK={ack_ok}, CAN_Inj(0x15B)={can_ok}, HU_Echo={tel_ok})")
             time.sleep(0.08)
 
         return all_passed
@@ -626,8 +646,23 @@ def sniff_bsi_status(can_iface: str):
             label = f"[BSI Ignition: ACC={(d[4] == 1)} Dimmer={d[3] & 0x0F}]"
         elif cid == CAN_ID_BSI_SLOW_0F6:
             label = "[BSI Slow Telemetry / Economy Mode]"
+        elif cid == CAN_ID_BSI_CONFIG_260:
+            p_id = d[0] if len(d) > 0 else 0
+            label = (f"[BSI Config Profile {p_id}: "
+                     f"AFS={bool(d[2] & 0x80) if len(d) > 2 else False} "
+                     f"FollowMe={bool(d[2] & 0x20) if len(d) > 2 else False} "
+                     f"AutoLight={bool(d[2] & 0x10) if len(d) > 2 else False} "
+                     f"DRL={bool(d[3] & 0x40) if len(d) > 3 else False} "
+                     f"Lock={bool(d[4] & 0x08) if len(d) > 4 else False} "
+                     f"Wiper={bool(d[5] & 0x10) if len(d) > 5 else False} "
+                     f"Radar={bool(d[5] & 0x40) if len(d) > 5 else False}]")
         elif cid == CAN_ID_BSI_PERSO_361:
-            label = f"[BSI Personalization: DRL={bool(d[0] & 0x40)} Wiper={bool(d[0] & 0x20)} Lock={bool(d[0] & 0x08)}]"
+            label = (f"[BSI Equipment Mask (Menu Availability): "
+                     f"FollowMeAvail={bool(d[2] & 0x10) if len(d) > 2 else False} "
+                     f"DRLAvail={bool(d[3] & 0x40) if len(d) > 3 else False} "
+                     f"AASAvail={bool(d[4] & 0x20) if len(d) > 4 else False}]")
+        elif cid == CAN_ID_BSI_DOWNLINK_15B:
+            label = f"[BSI Config Mutation Request (Downlink, Profile {d[0] if len(d) > 0 else 0})]"
         elif cid == CAN_ID_RD4_SOURCE_165:
             label = f"[RD4 Radio Source / Volume / Power: 0x{d[0]:02X}]"
         elif cid == CAN_ID_ALERT_JOURNAL_120:

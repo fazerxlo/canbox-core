@@ -489,6 +489,7 @@ size_t build_hiworld_central_state1(const vehicle_config_t *cfg, uint8_t *out, s
     /* Byte 0 */
     uint8_t b0 = 0;
     if (cfg->parking_radar_enabled) b0 |= 0x40;
+    if (cfg->auto_lighting_enabled) b0 |= 0x10; /* Automatic headlights (0x260 B2.4) -> 0x50 with radar */
     if (cfg->ambient_lighting_level > 0) {
         b0 |= 0x08; /* Ambient light active */
         b0 |= ((cfg->ambient_lighting_level >> 1) & 0x07);
@@ -504,23 +505,23 @@ size_t build_hiworld_central_state1(const vehicle_config_t *cfg, uint8_t *out, s
     if (cfg->follow_me_home) {
         if (cfg->follow_me_home_sec >= 60)      b1 |= 0x03;
         else if (cfg->follow_me_home_sec >= 30) b1 |= 0x02;
-        else if (cfg->follow_me_home_sec >= 15) b1 |= 0x01;
+        else                                    b1 |= 0x01;
     }
     out[5] = b1;
 
     /* Checksum: ((len + cmd + sum) - 1) & 0xFF */
-    uint8_t sum = out[2] + out[3] + out[4] + out[5];
+    uint8_t sum = (uint8_t)(out[2] + out[3] + out[4] + out[5]);
     out[6] = (uint8_t)((sum - 1) & 0xFF);
 
     return 7;
 }
 
 size_t build_hiworld_central_state2(const vehicle_config_t *cfg, const vehicle_state_t *st, uint8_t *out, size_t max_len) {
-    if (!cfg || !out || max_len < 12) return 0;
+    if (!cfg || !out || max_len < 13) return 0;
 
     out[0] = 0x5A;
     out[1] = 0xA5;
-    out[2] = 0x07; /* Length: 7 payload bytes */
+    out[2] = 0x08; /* Length: 8 payload bytes (matches OEM PA12.20) */
     out[3] = 0x79; /* Cmd ID: CentralState2 */
 
     /* Byte 0 */
@@ -532,11 +533,11 @@ size_t build_hiworld_central_state2(const vehicle_config_t *cfg, const vehicle_s
     /* Byte 1: Drive profile */
     out[5] = (cfg->active_profile_id > 1) ? 0x20 : 0x00;
 
-    /* Byte 2: Cluster dimmer */
-    out[6] = (cfg->cluster_dimmer & 0x0F) << 2;
+    /* Byte 2: Cluster dimmer (0x036 B3[3:0] << 2, e.g. 0x0F << 2 = 0x3C) */
+    out[6] = (uint8_t)((cfg->cluster_dimmer & 0x0F) << 2);
 
-    /* Byte 3: ESP Traction */
-    out[7] = 0x04; /* ESP active by default */
+    /* Byte 3: Door / Window / ESP status (matches PA12.20 0x10) */
+    out[7] = 0x10;
 
     /* Bytes 4 & 5: Unused ADAS */
     out[8] = 0x00;
@@ -545,11 +546,14 @@ size_t build_hiworld_central_state2(const vehicle_config_t *cfg, const vehicle_s
     /* Byte 6: Climate Dual/Mono Sync (0x02=Mono, 0x00=Dual) */
     out[10] = (st && !st->climate.dual_mode) ? 0x02 : 0x00;
 
+    /* Byte 7: Reserved */
+    out[11] = 0x00;
+
     /* Checksum: ((len + cmd + sum) - 1) & 0xFF */
     uint8_t sum = 0;
-    for (size_t i = 2; i < 11; i++) sum += out[i];
-    out[11] = (uint8_t)((sum - 1) & 0xFF);
+    for (size_t i = 2; i < 12; i++) sum = (uint8_t)(sum + out[i]);
+    out[12] = (uint8_t)((sum - 1) & 0xFF);
 
-    return 12;
+    return 13;
 }
 

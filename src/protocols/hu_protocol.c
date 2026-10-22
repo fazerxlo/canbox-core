@@ -184,6 +184,12 @@ void hu_protocol_send_media_state(const vehicle_cdc_t *cdc) {
     }
 }
 
+void hu_protocol_send_feature_enables(const uint8_t *feat1, const uint8_t *feat2) {
+    if (s_active_driver && s_active_driver->send_feature_enables) {
+        s_active_driver->send_feature_enables(feat1, feat2);
+    }
+}
+
 void hu_protocol_send_central_state1(const vehicle_config_t *config) {
     if (s_active_driver && s_active_driver->send_central_state1) {
         s_active_driver->send_central_state1(config);
