@@ -40,6 +40,29 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
 
 ---
 
+### `update_canbox_usb.py`
+**Automated USB Flash Drive Firmware Updater for Head Unit**
+- **Purpose:** One-click script to compile the `raise_nuc131` target, convert the binary into the commercial Hiworld `can_app.iap` container format, discover connected USB drives containing a `canmcuupdata` directory, safely copy and sync the file, and verify checksum integrity.
+- **Usage:**
+  ```bash
+  # Compile raise_nuc131, convert to can_app.iap, and write to connected USB drive:
+  ./tools/update_canbox_usb.py
+
+  # Use existing .bin without rebuilding:
+  ./tools/update_canbox_usb.py --no-build
+
+  # Target a specific mount path or auto-create 'canmcuupdata' if missing:
+  ./tools/update_canbox_usb.py --create-dir
+  ```
+- **Key Arguments:**
+  - `-e`, `--env`: PlatformIO environment (default: `raise_nuc131`).
+  - `--no-build`: Skip build step and use existing binary.
+  - `-t`, `--target`: Manually specify target USB path or destination directory.
+  - `--create-dir`: Automatically create `canmcuupdata/` on the USB drive if absent.
+  - `--dry-run`: Test compilation and IAP conversion without writing to USB.
+
+---
+
 ### `pack_hiworld_iap.py`
 **Hiworld CAN Box Firmware Container Packer (.bin $\to$ .iap)**
 - **Purpose:** Takes a raw ARM Cortex-M0 application binary (compiled for offset `0x00002000`) and packages it into the commercial Hiworld `can_app.iap` container format expected by Android Head Units (`/canmcuupdata/can_app.iap`).
