@@ -288,11 +288,32 @@ static void psa_decode_config_0x361_profile(const can_frame_t *frame, vehicle_st
     }
 }
 
+static void psa_decode_mdf_presence_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)frame;
+    (void)state;
+    psa_car_config_notify_mdf_seen();
+}
+
 static void psa_decode_bsi_profiles_0x260_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state || frame->dlc < 8) return;
 
-    psa_decode_config_0x260(&state->config, frame->data, frame->dlc);
-    state->dirty.config = true;
+    if (psa_car_config_is_mdf_present()) {
+        /* Physical MDF present on bus: MDF has authority, update cache from BSI */
+        psa_car_config_update_from_bsi(frame->data, frame->dlc);
+        psa_car_config_get_cached(&state->config);
+        state->dirty.config = true;
+    } else {
+        /* Standalone mode (No physical MDF):
+         * Android Head Unit is authoritative.
+         * Seed cache from BSI 0x260 once on initial boot.
+         * Afterwards, ignore static BSI 0x260 so user settings are never reverted.
+         */
+        if (!psa_car_config_is_cached_valid()) {
+            psa_car_config_update_from_bsi(frame->data, frame->dlc);
+            psa_car_config_get_cached(&state->config);
+            state->dirty.config = true;
+        }
+    }
 }
 
 static const profile_can_rule_t s_psa_rules[] = {
@@ -330,6 +351,8 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_CD_DISC_INFO_365,   psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_PLAY_3A5,        psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_CHANGER,         psa_rd4_decode_frame },
+    { PSA_CAN_ID_MDF_TRIP_3F6,       psa_decode_mdf_presence_profile },
+    { PSA_CAN_ID_MDF_DIAG_525,       psa_decode_mdf_presence_profile },
 };
 
 static void psa_init(void) {

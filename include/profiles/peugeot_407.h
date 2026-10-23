@@ -42,6 +42,9 @@ extern "C" {
 #define PSA_CAN_ID_TRIP_INSTANT     0x221
 #define PSA_CAN_ID_ETAT_TUNER       0x225
 #define PSA_CAN_ID_BSI_PERSO_REQ_15B 0x15B
+#define PSA_CAN_ID_MDF_STATUS_0DF   0x0DF
+#define PSA_CAN_ID_MDF_TRIP_3F6     0x3F6
+#define PSA_CAN_ID_MDF_DIAG_525     0x525
 #define PSA_CAN_ID_TRIP2_ODB        0x261
 #define PSA_CAN_ID_INFO_TUNER       0x265
 #define PSA_CAN_ID_FRONT_RADAR_AAS  0x270
@@ -392,6 +395,11 @@ void psa_decode_config_0x260(vehicle_config_t *cfg, const uint8_t *data, uint8_t
 void psa_car_config_get_feature_enables(uint8_t feat1[2], uint8_t feat2[8]);
 hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, uint8_t val);
 void psa_car_config_get_cached(vehicle_config_t *cfg);
+void psa_car_config_notify_mdf_seen(void);
+bool psa_car_config_is_mdf_present(void);
+bool psa_car_config_is_cached_valid(void);
+void psa_car_config_update_from_bsi(const uint8_t *data, uint8_t dlc);
+void psa_car_config_periodic_100ms(void);
 #define HIWORLD_CMD_WARNING_INFO     0x42
 #define HIWORLD_CMD_DIAGNOSTIC_QUERY 0x2F
 

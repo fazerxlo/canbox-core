@@ -1,5 +1,6 @@
 #include "core/can_router.h"
 #include "core/vehicle_profile.h"
+#include "profiles/peugeot_407.h"
 #include "profiles/psa_source_arbiter.h"
 #include "protocols/hu_protocol.h"
 #include "hal/hal_gpio.h"
@@ -547,6 +548,9 @@ void can_router_periodic_100ms(void) {
 
     // Periodic RD4 Source Arbiter tick (100ms)
     psa_source_arbiter_tick_100ms();
+
+    // Periodic PSA car config / virtual MDF tick (100ms)
+    psa_car_config_periodic_100ms();
 
     // Broadcast periodic states (Vehicle speed, RPM)
     if (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||

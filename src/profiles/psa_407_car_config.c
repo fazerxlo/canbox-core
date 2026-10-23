@@ -1,30 +1,31 @@
 #include "profiles/peugeot_407.h"
 #include "hal/hal_can.h"
+#include "hal/hal_system.h"
 #include <string.h>
 
-static uint8_t s_cached_0x361_raw[6] = { 0x01, 0x01, 0x91, 0x40, 0x30, 0x10 };
-static bool    s_cached_0x361_valid  = false;
+static uint8_t  s_cached_0x361_raw[6] = { 0x01, 0x01, 0x91, 0x40, 0x30, 0x10 };
+static bool     s_cached_0x361_valid  = false;
 
 /* Live cache of active Profile 1 status frame (0x260 / 0x15B) */
-static uint8_t s_cached_profile1_raw[8] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
-static bool    s_cached_profile1_valid  = false;
+static uint8_t  s_cached_profile1_raw[8] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+static bool     s_cached_profile1_valid  = false;
+static uint32_t s_last_mdf_seen_ms       = 0;
 
 /* Feature enables (Cmd 0x71 and Cmd 0x72) telecoded in BSI */
 static uint8_t s_feature_enable_1[2] = { 0x60, 0x12 };
 static uint8_t s_feature_enable_2[8] = { 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
-/* Convert Byte 2 delay code to seconds (supports both B2[1:0] and EMF-C B2[3:2] e.g. 0xB4) */
+/* Convert Byte 2 delay code to seconds:
+ * Bit 2 (0x04) = 60s
+ * Bit 1 (0x02) = 30s
+ * Bit 0 (0x01) = 15s
+ * Also supports sequential 0x03 = 60s. Default minimum is 15s. */
 static inline uint8_t delay_code_to_sec(uint8_t byte2) {
-    uint8_t code = byte2 & 0x03;
-    if (code == 0) {
-        code = (byte2 >> 2) & 0x03;
-    }
-    switch (code) {
-        case 1:  return 15;
-        case 2:  return 30;
-        case 3:  return 60;
-        default: return 15; /* Any active Follow-Me-Home (B2.5 = 1) maps to at least 15s */
-    }
+    if (byte2 & 0x04) return 60;
+    if ((byte2 & 0x03) == 3) return 60;
+    if (byte2 & 0x02) return 30;
+    if (byte2 & 0x01) return 15;
+    return 15;
 }
 
 void psa_car_config_init(void) {
@@ -46,6 +47,8 @@ void psa_car_config_init(void) {
     s_cached_profile1_raw[7] = 0x10;
     s_cached_profile1_valid  = false;
 
+    s_last_mdf_seen_ms = 0;
+
     s_feature_enable_1[0] = 0x60;
     s_feature_enable_1[1] = 0x12;
 
@@ -53,6 +56,27 @@ void psa_car_config_init(void) {
     s_feature_enable_2[0] = 0x00;
     s_feature_enable_2[1] = 0x01;
     s_feature_enable_2[2] = 0x80;
+}
+
+void psa_car_config_notify_mdf_seen(void) {
+    s_last_mdf_seen_ms = hal_get_tick_ms();
+}
+
+bool psa_car_config_is_mdf_present(void) {
+    if (s_last_mdf_seen_ms == 0) return false;
+    return (hal_get_tick_ms() - s_last_mdf_seen_ms) < 3000;
+}
+
+bool psa_car_config_is_cached_valid(void) {
+    return s_cached_profile1_valid;
+}
+
+void psa_car_config_update_from_bsi(const uint8_t *data, uint8_t dlc) {
+    if (!data || dlc < 8) return;
+    if (data[0] != 0x01) return;
+
+    memcpy(s_cached_profile1_raw, data, 8);
+    s_cached_profile1_valid = true;
 }
 
 void psa_decode_config_0x361(const uint8_t *data, uint8_t dlc) {
@@ -118,9 +142,6 @@ void psa_decode_config_0x260(vehicle_config_t *cfg, const uint8_t *data, uint8_t
         return;
     }
 
-    memcpy(s_cached_profile1_raw, data, 8);
-    s_cached_profile1_valid = true;
-
     cfg->active_profile_id      = 1;
     cfg->directional_headlights = (data[2] & 0x80) != 0;
     cfg->follow_me_home         = (data[2] & 0x20) != 0;
@@ -158,12 +179,15 @@ hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, u
                 else     frame.data[3] &= ~0x40;
                 break;
             case 0x06: /* Follow-Me-Home Headlamp Delay */
-                if (val == 0) {
-                    frame.data[2] &= ~0x20;
-                    frame.data[2] &= ~0x03;
+                frame.data[2] &= ~0x27; /* Clear bit 5 (enable) and bits 2..0 (duration) */
+                if (val == 1) {
+                    frame.data[2] |= (0x20 | 0x01); /* 15s */
+                } else if (val == 2) {
+                    frame.data[2] |= (0x20 | 0x02); /* 30s */
+                } else if (val == 3) {
+                    frame.data[2] |= (0x20 | 0x04); /* 60s */
                 } else {
-                    frame.data[2] |= 0x20;
-                    frame.data[2] = (uint8_t)((frame.data[2] & ~0x03) | (val & 0x03));
+                    frame.data[2] |= 0x01; /* 0 = OFF (bit 5 cleared), default 15s base */
                 }
                 break;
             case 0x0A: /* Ambient Lighting Brightness */
@@ -250,5 +274,24 @@ hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, u
 void psa_car_config_get_cached(vehicle_config_t *cfg) {
     if (cfg && s_cached_profile1_valid) {
         psa_decode_config_0x260(cfg, s_cached_profile1_raw, 8);
+    }
+}
+
+void psa_car_config_periodic_100ms(void) {
+    /* Virtual MDF mode: broadcast 0x15B periodically only when no external physical MDF is on bus */
+    if (psa_car_config_is_mdf_present() || !s_cached_profile1_valid) {
+        return;
+    }
+
+    static uint8_t s_timer_15b = 0;
+    if (++s_timer_15b >= 5) { /* Every 500 ms (matching Hiworld PA12.20 OEM timing) */
+        s_timer_15b = 0;
+        can_frame_t frame;
+        memset(&frame, 0, sizeof(frame));
+        frame.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B;
+        frame.dlc = 8;
+        memcpy(frame.data, s_cached_profile1_raw, 8);
+        frame.data[0] = 0x01;
+        hal_can_send(&frame);
     }
 }

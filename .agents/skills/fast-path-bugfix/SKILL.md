@@ -20,9 +20,12 @@ Activate this workflow whenever the prompt includes:
 ## The 3-Turn Fast Pipeline
 
 ### Turn 1: Surgical Scope & Parallel Read
-1. **Zero Exploratory Grepping:** Never run broad greps (`grep -rn`) across `doc/archive/`, historical git logs, or multiple dump logs. Trust user diagnostics.
-2. **Locate Target Functions:** Run `grep -n -C 5 "<symbol>" <target_file>` and locate the corresponding test case in `test/test_protocol_parser/test_407_*.c` or `test/test_integration/`.
-3. **Parallel Range Reads:** Batch `view_file` calls in the same turn for only the target function line ranges (80–150 lines).
+1. **Resumed Session Fast-Track:** If resuming from a compacted session summary or detailed user prompt where Root Cause Analysis (RCA) and Next Steps are already identified, skip all exploratory investigation. Proceed immediately to reading the target function line ranges.
+2. **Zero Exploratory Grepping & External Repo Prohibition:**
+   - Never run broad greps (`grep -rn`) across `doc/archive/`, historical git logs, or raw dump files.
+   - Never run exploratory greps or file searches across external decompiled codebases (e.g. `/home/Fazer/git/QF_Canbus_system/`, `smali/`) when `doc/CANBOX_SPEC_*.md` or the user spec already documents the command ID, byte offsets, or UI values. Treat `CANBOX_SPEC_*.md` as verified ground truth.
+3. **Locate Target Functions:** Run `grep -n -C 5 "<symbol>" <target_file>` and locate the corresponding test case in `test/test_protocol_parser/test_407_*.c` or `test/test_integration/`.
+4. **Parallel Range Reads:** Batch `read_file` calls in the same turn for only the target function line ranges (80–150 lines).
 
 ### Turn 2: Atomic Batch Edits
 Apply all necessary modifications in parallel in a single turn using `replace_file_content`:

@@ -198,7 +198,7 @@ When the user taps an option on Android, the headunit sends a serial command to 
 | **Rear Wiper on Reverse** | `0x7B` | `0x01` | `1` | `0` = Off, `1` = On | `0x15B` Byte 5 Bit 4 (`0x10`) | `data[5] = (data[5] & ~0x10) \| (val ? 0x10 : 0x00)` |
 | **Selective Door Unlock** | `0x7B` | `0x04` | `4` | `0` = All Doors, `1` = Driver Only | `0x15B` Byte 4 Bit 2 (`0x04`) | `data[4] = (data[4] & ~0x04) \| (val ? 0x04 : 0x00)` |
 | **Daytime Running (DRL)** | `0x7B` | `0x05` | `5` | `0` = Disabled, `1` = Enabled | `0x15B` Byte 3 Bit 6 (`0x40`) | `data[3] = (data[3] & ~0x40) \| (val ? 0x40 : 0x00)` |
-| **Follow-Me-Home Delay** | `0x7B` | `0x06` | `6` | `0` = 0s (Off)<br>`1` = 15s<br>`2` = 30s<br>`3` = 60s | `0x15B` Byte 2 Bit 5 (`0x20`) &<br>`0x15B` Byte 2 Bits 1..0 | If `val == 0`:<br>`data[2] &= ~0x20; data[2] &= ~0x03;`<br>Else:<br>`data[2] \|= 0x20; data[2] = (data[2] & ~0x03) \| (val & 0x03);` |
+| **Follow-Me-Home Delay** | `0x7B` | `0x06` | `6` | `0` = 0s (Off)<br>`1` = 15s<br>`2` = 30s<br>`3` = 60s | `0x15B` Byte 2 Bit 5 (`0x20`) &<br>`0x15B` Byte 2 Bits 2..0 | `data[2] &= ~0x27;`<br>If `val == 1`: `data[2] \|= (0x20 \| 0x01);`<br>Else if `val == 2`: `data[2] \|= (0x20 \| 0x02);`<br>Else if `val == 3`: `data[2] \|= (0x20 \| 0x04);`<br>Else: `data[2] \|= 0x01;` |
 | **Ambient Mood Brightness** | `0x7B` | `0x0A` | `10` | `0x80 \| (brightness & 0x0F)`<br>Bit 7: Switch (1=On, 0=Off)<br>Bits 3..0: Level (0..15) | `0x15B` Byte 2 Bits 3..0 | If `val & 0x80`:<br>`data[2] = (data[2] & 0xF0) \| (val & 0x0F);`<br>Else:<br>`data[2] = (data[2] & 0xF0);` |
 | **Parking Radar (AAS) Toggle**| `0x7B` | `0x0B` | `11` | `0` = Muted/Off, `1` = Enabled | `0x15B` Byte 5 Bit 6 (`0x40`) | `data[5] = (data[5] & ~0x40) \| (val ? 0x40 : 0x00)` |
 | **Auto Door Lock Driving** | `0x7B` | `0x0C` | `12` | `0` = Off, `1` = On ($>10\text{ km/h}$) | `0x15B` Byte 4 Bit 3 (`0x08`) | `data[4] = (data[4] & ~0x08) \| (val ? 0x08 : 0x00)` |
@@ -467,18 +467,17 @@ static bool    s_cached_profile1_valid  = false;
 static uint8_t s_feature_enable_1[2] = { 0x60, 0x12 };
 static uint8_t s_feature_enable_2[8] = { 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
-/* Convert Byte 2 delay code to seconds (supports both B2[1:0] and EMF-C B2[3:2] e.g. 0xB4) */
+/* Convert Byte 2 delay code to seconds:
+ * Bit 2 (0x04) = 60s
+ * Bit 1 (0x02) = 30s
+ * Bit 0 (0x01) = 15s
+ * Also supports sequential 0x03 = 60s. Default minimum is 15s. */
 static inline uint8_t delay_code_to_sec(uint8_t byte2) {
-    uint8_t code = byte2 & 0x03;
-    if (code == 0) {
-        code = (byte2 >> 2) & 0x03;
-    }
-    switch (code) {
-        case 2:  return 30;
-        case 3:  return 60;
-        case 1:
-        default: return 15; /* Any active Follow-Me-Home (B2.5 = 1) maps to at least 15s */
-    }
+    if (byte2 & 0x04) return 60;
+    if ((byte2 & 0x03) == 3) return 60;
+    if (byte2 & 0x02) return 30;
+    if (byte2 & 0x01) return 15;
+    return 15;
 }
 
 void psa_decode_config_0x361(const uint8_t *data, uint8_t dlc) {

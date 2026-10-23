@@ -58,6 +58,7 @@ CAN_ID_DOORS_BODY_220   = 0x220
 CAN_ID_TRIP_INSTANT_221 = 0x221
 CAN_ID_BSI_CONFIG_260   = 0x260
 CAN_ID_BSI_PERSO_361    = 0x361
+CAN_ID_MDF_TRIP_3F6     = 0x3F6
 
 # Hiworld Framing Constants
 HIWORLD_SYNC_1 = 0x5A
@@ -380,8 +381,9 @@ class CarConfigScenario(BaseWorkbenchScenario):
             print("[*] No live 0x260 on bus; using synthetic Profile 1 baseline")
             base_can = [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
 
-        # Broadcast 0x361 equipment mask so menu items are enabled in state cache
+        # Broadcast 0x361 equipment mask and 0x3F6 MDF presence so menu items and external MDF authority are active
         harness.send_can_frame(CAN_ID_BSI_PERSO_361, bytes([0x01, 0x01, 0x91, 0x40, 0x30, 0x10]))
+        harness.send_can_frame(CAN_ID_MDF_TRIP_3F6, bytes([0x00, 0x88, 0x40, 0x00, 0x00, 0xC0, 0x01]))
         time.sleep(0.05)
 
         test_items = self.ITEMS

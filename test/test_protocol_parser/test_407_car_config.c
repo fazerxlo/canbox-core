@@ -109,13 +109,27 @@ void test_peugeot_407_car_config_vector4_bsi_to_uplink_0x76(void) {
     TEST_ASSERT_EQUAL_UINT32(7, out_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_on, out, 7);
 
-    /* Test EMF-C MDF encoding format: 01 03 B4 40 00 D0 00 10 (bits 3..2 = 1 -> 15s) */
-    const uint8_t can_data_260_mdf[8] = { 0x01, 0x03, 0xB4, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+    /* Test 60s Follow-Me-Home encoding format: 01 03 B4 40 00 D0 00 10 (bit 2 = 1 -> 60s) */
+    const uint8_t can_data_260_60s[8] = { 0x01, 0x03, 0xB4, 0x40, 0x00, 0xD0, 0x00, 0x10 };
     memset(&cfg, 0, sizeof(cfg));
-    psa_decode_config_0x260(&cfg, can_data_260_mdf, sizeof(can_data_260_mdf));
+    psa_decode_config_0x260(&cfg, can_data_260_60s, sizeof(can_data_260_60s));
     TEST_ASSERT_TRUE(cfg.follow_me_home);
-    TEST_ASSERT_EQUAL_UINT8(15, cfg.follow_me_home_sec);
+    TEST_ASSERT_EQUAL_UINT8(60, cfg.follow_me_home_sec);
     TEST_ASSERT_TRUE(cfg.auto_lighting_enabled);
+    out_len = build_hiworld_central_state1(&cfg, out, sizeof(out));
+    const uint8_t expected_60s[7] = { 0x5A, 0xA5, 0x02, 0x76, 0x50, 0x87, 0x4E };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_60s, out, 7);
+
+    /* Test 30s Follow-Me-Home encoding format: 01 03 B2 40 00 D0 00 10 (bit 1 = 1 -> 30s) */
+    const uint8_t can_data_260_30s[8] = { 0x01, 0x03, 0xB2, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+    memset(&cfg, 0, sizeof(cfg));
+    psa_decode_config_0x260(&cfg, can_data_260_30s, sizeof(can_data_260_30s));
+    TEST_ASSERT_TRUE(cfg.follow_me_home);
+    TEST_ASSERT_EQUAL_UINT8(30, cfg.follow_me_home_sec);
+    TEST_ASSERT_TRUE(cfg.auto_lighting_enabled);
+    out_len = build_hiworld_central_state1(&cfg, out, sizeof(out));
+    const uint8_t expected_30s[7] = { 0x5A, 0xA5, 0x02, 0x76, 0x50, 0x86, 0x4D };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_30s, out, 7);
 
     /* State B: Follow-Me-Home & DRL OFF: 01 03 91 00 00 D0 00 10 */
     const uint8_t can_data_260_off[8] = { 0x01, 0x03, 0x91, 0x00, 0x00, 0xD0, 0x00, 0x10 };
@@ -291,4 +305,77 @@ void test_peugeot_407_car_config_boundary_and_guards(void) {
     uint8_t small_buf[4];
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_central_state1(&cfg, small_buf, sizeof(small_buf)));
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_central_state2(&cfg, NULL, small_buf, sizeof(small_buf)));
+}
+
+void test_peugeot_407_car_config_disconnected_mdf_authority(void) {
+    setUp_peugeot_407_car_config();
+    can_router_init();
+
+    /* 1. Initial boot: receive 0x260 from BSI with Follow-Me-Home 15s (0xB1) */
+    can_frame_t frame_bsi;
+    memset(&frame_bsi, 0, sizeof(frame_bsi));
+    frame_bsi.id  = 0x260;
+    frame_bsi.dlc = 8;
+    const uint8_t bsi_data_15s[8] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+    memcpy(frame_bsi.data, bsi_data_15s, 8);
+
+    can_router_process_can(&frame_bsi);
+    TEST_ASSERT_TRUE(psa_car_config_is_cached_valid());
+    TEST_ASSERT_FALSE(psa_car_config_is_mdf_present());
+
+    vehicle_config_t cfg;
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_TRUE(cfg.follow_me_home);
+    TEST_ASSERT_EQUAL_UINT8(15, cfg.follow_me_home_sec);
+
+    /* 2. HU Downlink: User selects 30 seconds (Cmd 0x7B setting 0x06 val 2) */
+    hal_can_native_clear_sent_frame();
+    TEST_ASSERT_TRUE(can_router_set_car_config(0x7B, 0x06, 0x02));
+
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_TRUE(cfg.follow_me_home);
+    TEST_ASSERT_EQUAL_UINT8(30, cfg.follow_me_home_sec);
+
+    can_frame_t sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x15B, sent.id);
+    TEST_ASSERT_EQUAL_UINT8(0x02, sent.data[2] & 0x07); /* One-hot bit 1 = 30s */
+
+    /* 3. Static BSI 0x260 EEPROM frame arrives (still containing 0xB1 / 15s) while MDF is disconnected */
+    can_router_process_can(&frame_bsi);
+
+    /* Assert that standalone authority preserved the user's 30s setting without reverting */
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_TRUE(cfg.follow_me_home);
+    TEST_ASSERT_EQUAL_UINT8(30, cfg.follow_me_home_sec);
+
+    /* 4. HU Downlink: User selects 60 seconds (val 3) */
+    hal_can_native_clear_sent_frame();
+    TEST_ASSERT_TRUE(can_router_set_car_config(0x7B, 0x06, 0x03));
+
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_TRUE(cfg.follow_me_home);
+    TEST_ASSERT_EQUAL_UINT8(60, cfg.follow_me_home_sec);
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x15B, sent.id);
+    TEST_ASSERT_EQUAL_UINT8(0x04, sent.data[2] & 0x07); /* One-hot bit 2 = 60s */
+
+    /* 5. Simulate MDF reconnect on workbench (0x3F6 arrives) */
+    can_frame_t frame_mdf;
+    memset(&frame_mdf, 0, sizeof(frame_mdf));
+    frame_mdf.id  = 0x3F6;
+    frame_mdf.dlc = 7;
+    frame_mdf.data[0] = 0x00;
+    frame_mdf.data[1] = 0x88;
+    frame_mdf.data[2] = 0x40;
+    can_router_process_can(&frame_mdf);
+
+    TEST_ASSERT_TRUE(psa_car_config_is_mdf_present());
+
+    /* With physical MDF present, BSI 0x260 update is authoritative */
+    can_router_process_can(&frame_bsi);
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_TRUE(cfg.follow_me_home);
+    TEST_ASSERT_EQUAL_UINT8(15, cfg.follow_me_home_sec);
 }
