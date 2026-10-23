@@ -102,36 +102,32 @@ openocd -f openocd_nuc131.cfg &
 > [!IMPORTANT]
 > The Nuvoton NUC131 chip ID (`0x11413102`) is unrecognized by stock OpenOCD `flash write_image`.
 > Always use the repo's dedicated FMC hardware flasher `tools/nuc131_flasher.py`.
+> Note: `tools/nuc131_flasher.py` automatically clears the boot token and executes `reset run` over TCL RPC upon flash verification. A manual socket/telnet reset is NOT required.
 
 ### Build Firmware Silently (`-s`)
 ```bash
 ~/.platformio/penv/bin/pio run -s -e raise_nuc131
 ```
 
-### Flash Application Binary (`0x00002000`)
+### One-Shot Flash Application Binary (`0x00002000`)
+Auto-spawns OpenOCD in the background (if not already running) and flashes the application:
 ```bash
-python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000
+pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 > /tmp/openocd.log 2>&1 & sleep 0.5) && python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000
 ```
 
 ### Flash Bootloader Binary (`0x00000000`)
 ```bash
-python3 tools/nuc131_flasher.py .pio/build/nuc131_bootloader/program.bin 0x0000
+pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 > /tmp/openocd.log 2>&1 & sleep 0.5) && python3 tools/nuc131_flasher.py .pio/build/nuc131_bootloader/program.bin 0x0000
 ```
 
-### Reset & Run MCU
-Send command to OpenOCD Telnet port (4444) or TCL port (6666):
+### Targeted Live Verification One-Liners
+Avoid broad dumping of logcat or raw CAN dumps:
 ```bash
-python3 -c '
-import socket, time
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect(("localhost", 4444))
-time.sleep(0.1)
-s.recv(1024)
-s.sendall(b"reset run\n")
-time.sleep(0.5)
-print(s.recv(1024).decode(errors="replace"))
-s.close()
-'
+# Verify live UART frames pushed to Android Head Unit:
+adb -s 192.168.1.33:9876 logcat -d -t 150 | grep -E "readdata.*5a a5.*(76|79|15b)" | tail -n 10
+
+# Verify live CAN frames (e.g. 0x15B / 0x260):
+timeout 2 candump can0 | grep -E "15B|260"
 ```
 
 ---
