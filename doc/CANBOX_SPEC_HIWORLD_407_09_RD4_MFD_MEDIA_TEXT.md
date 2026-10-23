@@ -201,6 +201,7 @@ $$\text{Hiworld\_Freq} = f_{\text{MHz}} \times 10 = (R \times 0.5) + 500 = \frac
   2. **Extended Station Names Mode (Payload: 49 bytes, Wire: 54 bytes):**
      * `LEN`: `0x31` (49 payload bytes)
      * **Data Source:** Decoded directly from native PSA CAN `0x125` ISO-TP station list broadcasts (triggered when `LIST` mode is open or stalk wheel scrolls).
+     * **MDF Emulation / ISO-TP Flow Control:** When physical MDF is absent (`!psa_car_config_is_mdf_present()`), OpenCanbox automatically responds to First Frame (`pci == 0x10`) by delaying ~2 ms and sending Flow Control CTS `CAN ID 0x11F` (`DLC = 3`, `30 00 00`, STmin = 0 ms) for station list `0x125`, and `CAN ID 0x09F` (`DLC = 3`, `30 00 00`, STmin = 0 ms) for Radio Text `0x0A4`, so RD4 proceeds to stream Consecutive Frames (`0x21`..`0x29`) at maximum bus throughput without inter-frame delay. Payload byte 0 (`0x40`) is a list header and must never overwrite `radio->band`. Strip the 4-byte PSA header (e.g. `10 xx xx xx` when `payload[0] == 0x10`) and filter non-printable characters while preserving mid-string content until trailing null/spaces or carriage return. No periodic display emulation frames (such as `0x167`, `0x15B`, or `0x525`) are required for RD4 Radio Text.
      * `Data[0]`: Band code (`0x00` = FM1, etc.)
      * `Data[1..8]`: Preset 1 Station Name (8 ASCII bytes, e.g. `"JEDYNKA "`)
      * `Data[9..16]`: Preset 2 Station Name (8 ASCII bytes, e.g. `" RMF FM "`)

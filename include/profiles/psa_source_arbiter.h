@@ -34,12 +34,13 @@ typedef struct {
 #define PSA_RD4_SRC_CDC   0x03
 #define PSA_RD4_SRC_AUX   0x04
 
-#define STALK_PRESS_DURATION_MS     50   /* Hold 0x21F#020000 for 50 ms */
+#define STALK_PRESS_DURATION_MS     60   /* Hold 0x21F for 60 ms */
 #define STALK_WAIT_CONFIRM_MAX_MS  650   /* Wait up to 650 ms for CAN 0x165 source nibble to change */
 #define STALK_POST_CHANGE_SETTLE_MS 150  /* Wait 150 ms AFTER 0x165 changes before next press */
 
 void psa_source_arbiter_init(void);
 void psa_source_arbiter_handle_hu_cmd(uint8_t subcmd, uint8_t param);
+void psa_source_arbiter_handle_f1_cmd(uint8_t type, uint8_t param);
 void psa_source_arbiter_switch_source(uint8_t target_source);
 void psa_source_arbiter_trigger_station_list(void);
 void psa_source_arbiter_update_stalk_rotary(uint8_t rotary_cnt);

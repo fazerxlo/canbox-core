@@ -243,3 +243,51 @@ void test_canbox_embedded_firmware_version(void) {
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, s_mock_uart_tx_buf[3]);
     TEST_ASSERT_EQUAL_MEMORY(ver, &s_mock_uart_tx_buf[4], strlen(ver));
 }
+
+void test_hiworld_parse_downlink_cmd_f1(void) {
+    /* 1. Test standard checksum: 5A A5 02 F1 04 00 F6 (CS = (2 + 0xF1 + 4 + 0 - 1) = 0xF6) */
+    const uint8_t stream_std[] = { 0x5A, 0xA5, 0x02, 0xF1, 0x04, 0x00, 0xF6 };
+    s_rx_call_count = 0;
+    for (size_t i = 0; i < sizeof(stream_std); i++) {
+        proto_hiworld_feed_byte(stream_std[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(0xF1, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_UINT8(2, s_last_packet.payload_len);
+    TEST_ASSERT_EQUAL_HEX8(0x04, s_last_packet.payload[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, s_last_packet.payload[1]);
+
+    /* 2. Test ADB test vector with sum+3 checksum: 5AA502F10400FA (Seek Up) */
+    const uint8_t stream_fa[] = { 0x5A, 0xA5, 0x02, 0xF1, 0x04, 0x00, 0xFA };
+    s_rx_call_count = 0;
+    for (size_t i = 0; i < sizeof(stream_fa); i++) {
+        proto_hiworld_feed_byte(stream_fa[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(0xF1, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_UINT8(2, s_last_packet.payload_len);
+    TEST_ASSERT_EQUAL_HEX8(0x04, s_last_packet.payload[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, s_last_packet.payload[1]);
+
+    /* 3. Test ADB test vector with preset 2: 5AA502F10702FF */
+    const uint8_t stream_ff[] = { 0x5A, 0xA5, 0x02, 0xF1, 0x07, 0x02, 0xFF };
+    s_rx_call_count = 0;
+    for (size_t i = 0; i < sizeof(stream_ff); i++) {
+        proto_hiworld_feed_byte(stream_ff[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(0xF1, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_UINT8(2, s_last_packet.payload_len);
+    TEST_ASSERT_EQUAL_HEX8(0x07, s_last_packet.payload[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x02, s_last_packet.payload[1]);
+
+    /* 4. Test ADB test vector with poll query: 5AA5010F1E */
+    const uint8_t stream_poll[] = { 0x5A, 0xA5, 0x01, 0x0F, 0x1E };
+    s_rx_call_count = 0;
+    for (size_t i = 0; i < sizeof(stream_poll); i++) {
+        proto_hiworld_feed_byte(stream_poll[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(0x0F, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_packet.payload_len);
+}

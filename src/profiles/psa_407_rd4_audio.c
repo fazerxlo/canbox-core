@@ -1,6 +1,25 @@
 #include "profiles/peugeot_407.h"
 #include "profiles/psa_source_arbiter.h"
+#include "core/can_router.h"
+#include "hal/hal_can.h"
+#include "hal/hal_system.h"
 #include <string.h>
+
+static void psa_rd4_send_isotp_fc(uint32_t fc_can_id) {
+    if (can_router_is_bus_sleeping() || psa_car_config_is_mdf_present()) {
+        return;
+    }
+    /* OEM EMF responds ~2 ms after First Frame completes */
+    hal_delay_ms(2);
+
+    can_frame_t fc = {0};
+    fc.id      = fc_can_id;
+    fc.dlc     = 3;
+    fc.data[0] = 0x30; /* Flow Control: Clear To Send (CTS) */
+    fc.data[1] = 0x00; /* Block Size: 0 (send all remaining CFs without waiting) */
+    fc.data[2] = 0x00; /* STmin: 0 ms separation time (maximum transmission speed) */
+    hal_can_send(&fc);
+}
 
 /* --------------------------------------------------------------------------
  * 1.7 OEM JBL Sound Amplifier (DSP)
@@ -396,12 +415,6 @@ bool psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
     if (pci == 0x00) {
         uint8_t len = data[0] & 0x0F;
         if (len >= 13 && len <= (dlc - 1)) {
-            uint8_t raw_band = data[1];
-            if (raw_band == 0x10 || raw_band == 0x90)      radio->band = 0x01; /* FM1 */
-            else if (raw_band == 0x20 || raw_band == 0xA0) radio->band = 0x02; /* FM2 */
-            else if (raw_band == 0x40 || raw_band == 0xC0) radio->band = 0x04; /* FM-AST */
-            else if (raw_band == 0x50 || raw_band == 0xD0) radio->band = 0x10; /* AM */
-
             uint8_t num_stations = (uint8_t)((len - 4) / 9);
             if (num_stations > 6) num_stations = 6;
 
@@ -438,6 +451,9 @@ bool psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
         isotp->received_length = chunk_len;
         isotp->next_sn         = 1;
         isotp->active          = true;
+
+        /* Emulate MDF ISO-TP Flow Control (0x11F) when physical MDF is absent */
+        psa_rd4_send_isotp_fc(PSA_CAN_ID_EMF_FC_11F);
         return false;
     }
 
@@ -460,12 +476,7 @@ bool psa_rd4_process_can_0x125(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
                 isotp->active = false;
                 uint16_t len = isotp->total_length;
                 if (len >= 13) {
-                    uint8_t raw_band = isotp->buffer[0];
-                    if (raw_band == 0x10 || raw_band == 0x90)      radio->band = 0x01; /* FM1 */
-                    else if (raw_band == 0x20 || raw_band == 0xA0) radio->band = 0x02; /* FM2 */
-                    else if (raw_band == 0x40 || raw_band == 0xC0) radio->band = 0x04; /* FM-AST */
-                    else if (raw_band == 0x50 || raw_band == 0xD0) radio->band = 0x10; /* AM */
-
+                    /* Do NOT overwrite radio->band from isotp->buffer[0] (0x40 is list header, not FM-AST!) */
                     uint8_t num_stations = (uint8_t)((len - 4) / 9);
                     if (num_stations > 6) num_stations = 6;
 
@@ -503,15 +514,28 @@ bool psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
         uint8_t len = data[0] & 0x0F;
         if (len > 0 && len <= (dlc - 1)) {
             const uint8_t *payload = &data[1];
-            /* Strip 4-byte prefix 10 00 00 00 if present */
-            if (len > 4 && payload[0] == 0x10 && payload[1] == 0x00 && payload[2] == 0x00 && payload[3] == 0x00) {
+            /* Strip 4-byte PSA 0x0A4 header (e.g. 10 xx xx xx) if present */
+            if (len > 4 && payload[0] == 0x10) {
                 payload += 4;
                 len -= 4;
             }
             if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
-            memcpy(radio->radio_text, payload, len);
-            radio->radio_text[len] = '\0';
-            radio->radio_text_len = len;
+
+            uint8_t text_end = 0;
+            for (uint8_t i = 0; i < len; i++) {
+                uint8_t ch = payload[i];
+                if (ch == 0x0D || ch == 0x0A) {
+                    break;
+                }
+                if (ch >= 0x20 && ch <= 0x7E) {
+                    radio->radio_text[i] = (char)ch;
+                    text_end = (uint8_t)(i + 1);
+                } else {
+                    radio->radio_text[i] = ' ';
+                }
+            }
+            radio->radio_text[text_end] = '\0';
+            radio->radio_text_len = text_end;
             radio->indicators |= 0x04; /* RDTEXT */
             isotp->active = false;
             return true;
@@ -533,6 +557,9 @@ bool psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
         isotp->received_length = chunk_len;
         isotp->next_sn         = 1;
         isotp->active          = true;
+
+        /* Emulate MDF ISO-TP Flow Control (0x09F) when physical MDF is absent */
+        psa_rd4_send_isotp_fc(PSA_CAN_ID_EMF_FC_09F);
         return false;
     }
 
@@ -555,16 +582,28 @@ bool psa_rd4_process_can_0x0a4(vehicle_radio_t *radio, psa_isotp_rx_ctx_t *isotp
                 const uint8_t *payload = isotp->buffer;
                 uint16_t len = isotp->total_length;
 
-                /* Strip 4-byte prefix 10 00 00 00 if present */
-                if (len > 4 && payload[0] == 0x10 && payload[1] == 0x00 && payload[2] == 0x00 && payload[3] == 0x00) {
+                /* Strip 4-byte PSA 0x0A4 header (e.g. 10 xx xx xx) if present */
+                if (len > 4 && payload[0] == 0x10) {
                     payload += 4;
                     len -= 4;
                 }
                 if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
 
-                memcpy(radio->radio_text, payload, len);
-                radio->radio_text[len] = '\0';
-                radio->radio_text_len = (uint8_t)len;
+                uint8_t text_end = 0;
+                for (uint16_t i = 0; i < len; i++) {
+                    uint8_t ch = payload[i];
+                    if (ch == 0x0D || ch == 0x0A) {
+                        break;
+                    }
+                    if (ch >= 0x20 && ch <= 0x7E) {
+                        radio->radio_text[i] = (char)ch;
+                        text_end = (uint8_t)(i + 1);
+                    } else {
+                        radio->radio_text[i] = ' ';
+                    }
+                }
+                radio->radio_text[text_end] = '\0';
+                radio->radio_text_len = text_end;
                 radio->indicators |= 0x04; /* RDTEXT */
                 isotp->active = false;
                 return true;

@@ -134,13 +134,15 @@ Upon receiving `Cmd 0x24`, the CAN box MUST immediately acknowledge receipt to s
 To prevent serial buffer overflows on Android head units and avoid UI redraw stuttering:
 1. **Unchanged Model in `HIWORLD_LINK_ACTIVE`:**
    If the CAN box is already in `HIWORLD_LINK_ACTIVE` state and receives a `0x24` frame whose `car_model_id` and `car_variant` match the active configuration:
-   - The CAN box returns **ONLY** the 6-byte ACK `5A A5 01 FF 24 23`.
+   - The CAN box returns the 6-byte ACK `5A A5 01 FF 24 23`.
    - The redundant ~70-byte initialization block (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`) is **suppressed**.
+   - Triggers an immediate full state push (`can_router_trigger_full_state_push()`) to synchronize radio/media telemetry (`0x84`, `0x85`, `0x86`), doors (`0x12`), climate (`0x31`), and DSP settings without waiting for CAN delta transitions.
 2. **Initial Handshake or Model Change:**
    If the CAN box is in `HIWORLD_LINK_WAIT_MODEL` state OR the received `car_model_id` / `car_variant` differs from the current configuration:
    - Returns ACK `5A A5 01 FF 24 23`.
    - Dynamically reconfigures CAN controller hardware (e.g., 125 kbps for CAN2004 vs 500 kbps for EMP2) and switches active profile (`vehicle_profile_set_active`).
    - Transmits full initialization sequence: `0xF0` (Version), `0x71` & `0x72` (Feature Enable Masks), `0x76` & `0x79` (Central States), and `0xC1` (Measurement Units).
+   - Triggers an immediate full state push (`can_router_trigger_full_state_push()`) ensuring all current vehicle and media states are forwarded to Android.
    - Sets state to `HIWORLD_LINK_ACTIVE`.
 
 ---

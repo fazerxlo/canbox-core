@@ -15,6 +15,7 @@ static uint8_t s_mdf_trip_page_mask    = 0x01; /* 0x01=Instant, 0x02=Trip1, 0x04
 static uint8_t s_mdf_trip_reset_mask   = 0x00; /* 0x80=Reset Trip1, 0x40=Reset Trip2 */
 static uint8_t s_mdf_reset_ticks       = 0;
 static uint8_t s_periodic_1000ms_ticks = 0;
+static uint8_t s_mdf_3f6_counter       = 0;
 
 /* Feature enables (Cmd 0x71 and Cmd 0x72) telecoded in BSI */
 static uint8_t s_feature_enable_1[2] = { 0x60, 0x12 };
@@ -58,6 +59,7 @@ void psa_car_config_init(void) {
     s_mdf_trip_reset_mask   = 0x00;
     s_mdf_reset_ticks       = 0;
     s_periodic_1000ms_ticks = 0;
+    s_mdf_3f6_counter       = 0;
 
     s_feature_enable_1[0] = 0x60;
     s_feature_enable_1[1] = 0x12;
@@ -340,13 +342,14 @@ void psa_car_config_periodic_100ms(void) {
     if (++s_periodic_1000ms_ticks >= 10) {
         s_periodic_1000ms_ticks = 0;
 
-        /* 0x3F6 (DLC 7): 00 00 00 00 00 80 0B */
+        /* 0x3F6 (DLC 7): 00 00 <counter> 00 00 C0 01 */
         can_frame_t frame_3f6;
         memset(&frame_3f6, 0, sizeof(frame_3f6));
         frame_3f6.id = PSA_CAN_ID_MDF_TRIP_3F6;
         frame_3f6.dlc = 7;
-        frame_3f6.data[5] = 0x80;
-        frame_3f6.data[6] = 0x0B;
+        frame_3f6.data[2] = s_mdf_3f6_counter++;
+        frame_3f6.data[5] = 0xC0;
+        frame_3f6.data[6] = 0x01;
         hal_can_send(&frame_3f6);
 
         /* 0x0DF (DLC 3): 10 00 50 */
@@ -358,9 +361,6 @@ void psa_car_config_periodic_100ms(void) {
         frame_0df.data[1] = 0x00;
         frame_0df.data[2] = 0x50;
         hal_can_send(&frame_0df);
-
-        /* 0x167 (DLC 8): Trip Page & Reset */
-        psa_car_config_send_0x167();
 
         /* 0x15B (DLC 8): Personalization State (if valid) */
         if (s_cached_profile1_valid) {

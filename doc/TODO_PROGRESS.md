@@ -100,6 +100,6 @@
 | `[x]` | `0xCB` | GPS Date & Time Set | `0x07` | `0x228` | `hiworld_connection.c` | `CANBOX_SPEC_HIWORLD_407_10_BSI_SETTINGS_CLOCK_SYNC.md` |
 | `[x]` | `0xC2`/`0xE0` | MCU IAP Flash Transfer | Var | N/A | `hiworld_iap_nuc131.c`, `pack_hiworld_iap.py` | Verified on OpenCanbox hardware (NUC131 FMC vector remap & 136B container) |
 | `[ ]` | `0xE1`/`0xE4` | Media Metadata / ID3 to MFD | `13..32` | `0x3B6` | `PEUGEOT_HIWORLD_COMMANDS.md` | Forward song title & artist to car display |
-| `[ ]` | `0xF1` | Dedicated RD4 UI Downlink | `0x02`..`0x03` | `0x21F` | `PEUGEOT_HIWORLD_COMMANDS.md` | On-screen Seek, Step, Presets 1..6 translated to stalk frames |
+| `[x]` | `0xF1` | Dedicated RD4 UI Downlink | `0x02`..`0x03` | `0x21F` | `PEUGEOT_HIWORLD_COMMANDS.md` | On-screen Seek, Step, Presets 1..6 translated to stalk frames |
 | `[ ]` | `0xF2` | Parking Assist View Mode | `0x02` | N/A | `PEUGEOT_HIWORLD_COMMANDS.md` | Camera overlay view mode switch |
 | `[x]` | **ALL** | Universal Downlink ACK | `0x02` | N/A | `proto_hiworld_adapter.c` | `5A A5 01 FF <RxCmd> <(RxCmd-1)&0xFF>` |

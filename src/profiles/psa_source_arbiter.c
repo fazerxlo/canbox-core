@@ -14,19 +14,10 @@ static uint32_t s_last_station_list_scroll_ms = 0;
 
 typedef enum {
     STATION_LIST_SCROLL_IDLE = 0,
-    STATION_LIST_SCROLL_WAIT_NEXT,     /* Sent forward scroll (+1), waiting for RD4 to move to station 2 */
-    STATION_LIST_SCROLL_SETTLE_RETURN, /* Confirmed station 2, brief settle before issuing return (-1) */
-    STATION_LIST_SCROLL_WAIT_RETURN    /* Sent return scroll (-1), waiting for RD4 to return to original station */
+    STATION_LIST_SCROLL_ACTIVE
 } psa_station_scroll_state_t;
 
-#define PSA_STATION_SCROLL_TIMEOUT_MS   500
-#define PSA_STATION_SCROLL_SETTLE_MS    60
-
 static psa_station_scroll_state_t s_scroll_state = STATION_LIST_SCROLL_IDLE;
-static uint8_t  s_scroll_initial_preset = 0;
-static uint16_t s_scroll_initial_freq   = 0;
-static uint8_t  s_scroll_retry_count    = 0;
-static uint32_t s_scroll_timer_ms       = 0;
 
 void psa_source_arbiter_init(void) {
     memset(&s_arbiter, 0, sizeof(s_arbiter));
@@ -35,10 +26,6 @@ void psa_source_arbiter_init(void) {
     s_target_reached_tick_ms = 0;
     s_last_station_list_scroll_ms = 0;
     s_scroll_state = STATION_LIST_SCROLL_IDLE;
-    s_scroll_initial_preset = 0;
-    s_scroll_initial_freq   = 0;
-    s_scroll_retry_count    = 0;
-    s_scroll_timer_ms       = 0;
 }
 
 const psa_source_arbiter_t *psa_source_arbiter_get_context(void) {
@@ -83,29 +70,27 @@ static bool psa_rd4_is_source(uint8_t target_source, const vehicle_radio_t *radi
     }
 }
 
-static void psa_source_arbiter_pulse_source(void) {
+static void psa_source_arbiter_pulse_key(uint8_t key_mask) {
     if (can_router_is_bus_sleeping()) {
         return;
     }
-    can_frame_t frame_press;
-    memset(&frame_press, 0, sizeof(frame_press));
-    frame_press.id = PSA_CAN_ID_STALK_21F;
-    frame_press.dlc = 3;
-    frame_press.data[0] = 0x02;
-    frame_press.data[1] = s_stalk_rotary_cnt;
-    frame_press.data[2] = 0x00;
-    hal_can_send(&frame_press);
+    can_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.id = PSA_CAN_ID_STALK_21F;
+    frame.dlc = 3;
+    frame.data[0] = key_mask;
+    frame.data[1] = s_stalk_rotary_cnt;
+    frame.data[2] = 0x00;
+    hal_can_send(&frame);
 
     hal_delay_ms(STALK_PRESS_DURATION_MS);
 
-    can_frame_t frame_release;
-    memset(&frame_release, 0, sizeof(frame_release));
-    frame_release.id = PSA_CAN_ID_STALK_21F;
-    frame_release.dlc = 3;
-    frame_release.data[0] = 0x00;
-    frame_release.data[1] = s_stalk_rotary_cnt;
-    frame_release.data[2] = 0x00;
-    hal_can_send(&frame_release);
+    frame.data[0] = 0x00;
+    hal_can_send(&frame);
+}
+
+static void psa_source_arbiter_pulse_source(void) {
+    psa_source_arbiter_pulse_key(0x02);
 }
 
 static void psa_source_arbiter_send_rotary_step(int8_t step) {
@@ -131,60 +116,20 @@ static void psa_source_arbiter_execute_station_list_scroll(void) {
     if (can_router_is_bus_sleeping()) {
         return;
     }
-    if (s_scroll_state != STATION_LIST_SCROLL_IDLE) {
-        return;
-    }
     uint32_t now = hal_get_tick_ms();
     if (s_last_station_list_scroll_ms != 0 && (now - s_last_station_list_scroll_ms) < 2000) {
         return;
     }
     s_last_station_list_scroll_ms = (now != 0) ? now : 1;
 
-    const vehicle_state_t *st = can_router_get_state();
-    if (st != NULL) {
-        s_scroll_initial_preset = st->media.radio.preset_slot;
-        s_scroll_initial_freq   = st->media.radio.freq_0_1mhz;
-    } else {
-        s_scroll_initial_preset = 0;
-        s_scroll_initial_freq   = 0;
-    }
-
-    s_scroll_retry_count = 0;
-    s_scroll_timer_ms = now;
-    s_scroll_state = STATION_LIST_SCROLL_WAIT_NEXT;
-
+    /* Rotate once UP to trigger station list; hardware/RD4 handles return */
     psa_source_arbiter_send_rotary_step(+1);
+    s_scroll_state = STATION_LIST_SCROLL_IDLE;
 }
 
 void psa_source_arbiter_process_can_0x225(uint8_t preset_slot, uint16_t freq_0_1mhz) {
-    uint32_t now = hal_get_tick_ms();
-    if (s_scroll_state == STATION_LIST_SCROLL_WAIT_NEXT) {
-        bool moved = false;
-        if (s_scroll_initial_preset != 0) {
-            moved = (preset_slot != s_scroll_initial_preset);
-        } else {
-            moved = (freq_0_1mhz != s_scroll_initial_freq || preset_slot != 0);
-        }
-
-        if (moved) {
-            /* Confirmed RD4 moved to station 2; settle briefly before return */
-            s_scroll_state = STATION_LIST_SCROLL_SETTLE_RETURN;
-            s_scroll_timer_ms = now;
-        }
-    } else if (s_scroll_state == STATION_LIST_SCROLL_WAIT_RETURN) {
-        bool returned = false;
-        if (s_scroll_initial_preset != 0) {
-            returned = (preset_slot == s_scroll_initial_preset);
-        } else {
-            returned = (freq_0_1mhz == s_scroll_initial_freq && preset_slot == 0);
-        }
-
-        if (returned) {
-            /* Confirmed RD4 returned to original station */
-            s_scroll_state = STATION_LIST_SCROLL_IDLE;
-            s_last_station_list_scroll_ms = now;
-        }
-    }
+    (void)preset_slot;
+    (void)freq_0_1mhz;
 }
 
 bool psa_source_arbiter_is_station_scroll_in_progress(void) {
@@ -379,6 +324,95 @@ void psa_source_arbiter_handle_hu_cmd(uint8_t subcmd, uint8_t param) {
     }
 }
 
+static void psa_source_arbiter_select_preset(uint8_t target_preset) {
+    if (target_preset < 1 || target_preset > 6) {
+        return;
+    }
+    if (can_router_is_bus_sleeping()) {
+        return;
+    }
+
+    const vehicle_state_t *st = can_router_get_state();
+    uint8_t current_preset = (st != NULL) ? st->media.radio.preset_slot : 0;
+
+    if (current_preset == 0) {
+        /* In manual tuning mode, emit 1 rotary click first to lock into preset ring */
+        psa_source_arbiter_send_rotary_step(+1);
+        current_preset = 1;
+        hal_delay_ms(STALK_PRESS_DURATION_MS);
+    }
+
+    st = can_router_get_state();
+    if (st != NULL && st->media.radio.preset_slot == target_preset) {
+        return;
+    }
+
+    int8_t diff = (int8_t)target_preset - (int8_t)current_preset;
+    if (diff < 0) {
+        diff = (int8_t)(diff + 6);
+    }
+    uint8_t delta = (uint8_t)diff;
+    if (delta == 0) {
+        return;
+    }
+
+    int8_t step_dir = (delta <= 3) ? +1 : -1;
+    uint8_t steps = (delta <= 3) ? delta : (uint8_t)(6 - delta);
+
+    for (uint8_t i = 0; i < steps; i++) {
+        psa_source_arbiter_send_rotary_step(step_dir);
+        st = can_router_get_state();
+        if (st != NULL && st->media.radio.preset_slot == target_preset) {
+            break;
+        }
+        if (i + 1 < steps) {
+            hal_delay_ms(STALK_PRESS_DURATION_MS);
+        }
+    }
+}
+
+void psa_source_arbiter_handle_f1_cmd(uint8_t type, uint8_t param) {
+    if (can_router_is_bus_sleeping()) {
+        return;
+    }
+
+    switch (type) {
+        case 0x01: /* STEP_DOWN */
+        case 0x03: /* SEEK_DOWN */
+        case 0x05: /* FAST_REWIND */
+        case 0x11: /* CD_PREV */
+            psa_source_arbiter_pulse_key(0x40); /* Prev Track / Seek- */
+            break;
+
+        case 0x02: /* STEP_UP */
+        case 0x04: /* SEEK_UP */
+        case 0x06: /* FAST_FORWARD */
+        case 0x10: /* CD_NEXT */
+            psa_source_arbiter_pulse_key(0x80); /* Next Track / Seek+ */
+            break;
+
+        case 0x09: /* BAND_CYCLE */
+            psa_source_arbiter_pulse_source();  /* Stalk Source key 0x02 */
+            break;
+
+        case 0x07: /* PRESET_SELECT (param = 1..6) */
+            psa_source_arbiter_select_preset(param);
+            break;
+
+        case 0x08: /* AUTO_SCAN */
+            /* Pulse seek or trigger RD4 auto-store sequence */
+            psa_source_arbiter_pulse_key(0x80);
+            break;
+
+        case 0x12: /* CD_PLAY_PAUSE */
+            psa_source_arbiter_pulse_key(0x0C); /* Stalk Chorded Mute */
+            break;
+
+        default:
+            break;
+    }
+}
+
 void psa_source_arbiter_tick_100ms(void) {
     uint32_t now = hal_get_tick_ms();
     if (s_arbiter.sync_state == SRC_SYNC_PHYSICAL_DEBOUNCE) {
@@ -410,34 +444,6 @@ void psa_source_arbiter_tick_100ms(void) {
         }
     }
 
-    /* Station List Scroll Closed-Loop State Machine */
-    if (s_scroll_state == STATION_LIST_SCROLL_WAIT_NEXT) {
-        if ((now - s_scroll_timer_ms) >= PSA_STATION_SCROLL_TIMEOUT_MS) {
-            if (s_scroll_retry_count == 0) {
-                /* Timeout waiting for RD4 to move to station 2: repeat once */
-                s_scroll_retry_count = 1;
-                s_scroll_timer_ms = now;
-                psa_source_arbiter_send_rotary_step(+1);
-            } else {
-                /* Timeout elapsed on second attempt: abort cleanly without moving back (-1) */
-                s_scroll_state = STATION_LIST_SCROLL_IDLE;
-                s_last_station_list_scroll_ms = now;
-            }
-        }
-    } else if (s_scroll_state == STATION_LIST_SCROLL_SETTLE_RETURN) {
-        if ((now - s_scroll_timer_ms) >= PSA_STATION_SCROLL_SETTLE_MS) {
-            /* Settle duration elapsed: send return scroll (-1) back to station 1 */
-            psa_source_arbiter_send_rotary_step(-1);
-            s_scroll_state = STATION_LIST_SCROLL_WAIT_RETURN;
-            s_scroll_timer_ms = now;
-        }
-    } else if (s_scroll_state == STATION_LIST_SCROLL_WAIT_RETURN) {
-        if ((now - s_scroll_timer_ms) >= PSA_STATION_SCROLL_TIMEOUT_MS) {
-            /* Timed out waiting for return confirmation: return to idle */
-            s_scroll_state = STATION_LIST_SCROLL_IDLE;
-            s_last_station_list_scroll_ms = now;
-        }
-    }
 }
 
 bool psa_source_arbiter_is_switching_in_progress(void) {

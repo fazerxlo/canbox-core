@@ -765,3 +765,45 @@ void test_integration_hiworld_rd4_aux_mode_pipeline(void) {
     TEST_ASSERT_TRUE(found_0x85);
 }
 
+void test_integration_hiworld_cmd_0x24_full_state_push(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    vehicle_profile_set_active(VEHICLE_PROFILE_PSA_2004);
+    can_router_rebuild_filter();
+
+    uint8_t rx_buf[256];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 1. Setup radio state: 0x165 (present, FM, tuned), 0x225 (96.0 MHz), 0x2A5 (" RMF FM ") */
+    can_frame_t f_165 = { .id = 0x165, .dlc = 8, .data = { 0x81, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
+    can_router_process_can(&f_165);
+
+    can_frame_t f_225 = { .id = 0x225, .dlc = 8, .data = { 0x00, 0x25, 0x80, 0x01, 0x00, 0x00, 0x00, 0x00 } };
+    can_router_process_can(&f_225);
+
+    can_frame_t f_2a5 = { .id = 0x2A5, .dlc = 8, .data = { ' ', 'R', 'M', 'F', ' ', 'F', 'M', ' ' } };
+    can_router_process_can(&f_2a5);
+
+    /* Drain all initial CAN UART emissions */
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 2. Simulate Head Unit sending Cmd 0x24: 5A A5 02 24 22 00 47 */
+    const uint8_t cmd_0x24[] = { 0x5A, 0xA5, 0x02, 0x24, 0x22, 0x00, 0x47 };
+    for (size_t i = 0; i < sizeof(cmd_0x24); i++) {
+        can_router_process_uart_byte(cmd_0x24[i]);
+    }
+
+    /* 3. Verify that UART transmitted ACK and radio state (Cmd 0x84) */
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_GREATER_THAN(0, rx_len);
+
+    /* Search for Cmd 0x84 (5A A5 .. 84) in UART output */
+    bool found_0x84 = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x84) {
+            found_0x84 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_0x84, "Expected Cmd 0x84 (radio state) pushed upon Cmd 0x24 reception");
+}
+

@@ -46,7 +46,9 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         }
     }
 
-    if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
+    if (packet->cmd == HIWORLD_CMD_CAR_TYPE_SET) {
+        can_router_trigger_full_state_push();
+    } else if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
         /* ForwardEcuSetting:
          * 4-byte variant (standard Android QF/Hiworld APK):
          *   payload[0] = Active Page (1=Instant, 2=Trip1, 3=Trip2)
@@ -82,10 +84,21 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         /* Head Unit requested alert/diagnostic log refresh (forwardType 0x2F) */
         can_router_query_alert_journal();
     } else if (packet->cmd == 0x0F) {
-        /* Head Unit resume query forwardType(0x0F): immediate retransmit of radio state */
+        /* Head Unit resume query (forwardType 0x0F): immediate retransmit of radio telemetry */
         hu_protocol_send_radio_state(NULL);
         hu_protocol_send_radio_presets(NULL);
+        hu_protocol_send_dsp_state(NULL);
+        const vehicle_state_t *st = can_router_get_state();
+        if (st && st->media.radio.source_mode >= 0x20) {
+            hu_protocol_send_media_state(NULL);
+        }
         psa_source_arbiter_trigger_station_list();
+    } else if (packet->cmd == HIWORLD_CMD_DOWNLINK_RD4_CTRL) { /* 0xF1 */
+        if (packet->payload_len >= 1) {
+            uint8_t type  = packet->payload[0];
+            uint8_t param = (packet->payload_len >= 2) ? packet->payload[1] : 0x00;
+            psa_source_arbiter_handle_f1_cmd(type, param);
+        }
     } else if (packet->cmd == HIWORLD_CMD_RADIO_CONTROL) { /* 0xA1 */
         /* When HU Tuner UI opens or volume/source updates occur, it sends 5A A5 03 A1 00 01 ...
          * to query/sync current radio state and preset list.
@@ -573,7 +586,14 @@ static void hiworld_send_alerts_summary(const vehicle_alert_item_t *alerts, uint
 }
 
 static void hiworld_send_audio_settings(const vehicle_audio_settings_t *audio) {
-    if (!audio) return;
+    if (!audio) {
+        const vehicle_state_t *st = can_router_get_state();
+        if (st != NULL) {
+            audio = &st->audio;
+        } else {
+            return;
+        }
+    }
     ensure_hiworld_initialized();
 
     /* Hiworld Audio/DSP Settings (Cmd 0x56): 8 payload bytes
@@ -684,7 +704,15 @@ static void hiworld_send_media_state(const vehicle_cdc_t *cdc) {
         s_cached_cdc_state = *cdc;
         s_cached_cdc_valid = true;
     } else {
-        if (!s_cached_cdc_valid) return;
+        if (!s_cached_cdc_valid) {
+            const vehicle_state_t *st = can_router_get_state();
+            if (st != NULL) {
+                s_cached_cdc_state = st->media.cdc;
+                s_cached_cdc_valid = true;
+            } else {
+                return;
+            }
+        }
         cdc = &s_cached_cdc_state;
     }
 

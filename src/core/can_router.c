@@ -168,13 +168,15 @@ void can_router_process_can(const can_frame_t *frame) {
     }
 
     // Immediately push door status updates on change
-    if (memcmp(&s_current_state.doors, &s_last_sent_state.doors, sizeof(vehicle_doors_t)) != 0) {
+    if (s_current_state.dirty.doors || memcmp(&s_current_state.doors, &s_last_sent_state.doors, sizeof(vehicle_doors_t)) != 0) {
+        s_current_state.dirty.doors = false;
         hu_protocol_send_doors(&s_current_state.doors);
         s_last_sent_state.doors = s_current_state.doors;
     }
 
     // Immediately push climate updates on change
-    if (memcmp(&s_current_state.climate, &s_last_sent_state.climate, sizeof(vehicle_climate_t)) != 0) {
+    if (s_current_state.dirty.climate || memcmp(&s_current_state.climate, &s_last_sent_state.climate, sizeof(vehicle_climate_t)) != 0) {
+        s_current_state.dirty.climate = false;
         hu_protocol_send_climate(&s_current_state.climate);
         s_last_sent_state.climate = s_current_state.climate;
     }
@@ -514,6 +516,41 @@ void can_router_push_radio_and_media_state(void) {
         hu_protocol_send_media_state(&s_current_state.media.cdc);
         s_last_sent_state.media.cdc = s_current_state.media.cdc;
     }
+}
+
+void can_router_trigger_full_state_push(void) {
+    s_current_state.dirty.radio = true;
+    s_current_state.dirty.radio_preset = true;
+    s_current_state.dirty.radio_text = true;
+    s_current_state.dirty.audio = true;
+    s_current_state.dirty.doors = true;
+    s_current_state.dirty.climate = true;
+    s_current_state.dirty.config = true;
+
+    can_router_push_radio_and_media_state();
+    s_current_state.dirty.radio = false;
+
+    hu_protocol_send_doors(&s_current_state.doors);
+    s_last_sent_state.doors = s_current_state.doors;
+    s_current_state.dirty.doors = false;
+
+    hu_protocol_send_climate(&s_current_state.climate);
+    s_last_sent_state.climate = s_current_state.climate;
+    s_current_state.dirty.climate = false;
+
+    hu_protocol_send_central_state1(&s_current_state.config);
+    hu_protocol_send_central_state2(&s_current_state.config, &s_current_state);
+    s_last_sent_state.config = s_current_state.config;
+    s_current_state.dirty.config = false;
+
+    if (s_current_state.audio.valid) {
+        hu_protocol_send_audio_settings(&s_current_state.audio);
+        s_last_sent_state.audio = s_current_state.audio;
+        s_current_state.dirty.audio = false;
+    }
+
+    s_bulk_resync_timer = 0;
+    s_media_resync_timer = 0;
 }
 
 void can_router_process_uart_byte(uint8_t byte) {

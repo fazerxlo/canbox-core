@@ -14,6 +14,7 @@ extern "C" {
 #define PSA_CAN_ID_REVERSE_IGNITION 0x036
 #define PSA_CAN_ID_FAST_DYNAMIC     0x0B6
 #define PSA_CAN_ID_TEXTE_RADIO      0x0A4
+#define PSA_CAN_ID_EMF_FC_09F       0x09F  /* MDF ISO-TP Flow Control for Radio Text 0x0A4 */
 #define PSA_CAN_ID_RADAR_0E1        0x0E1
 #define PSA_CAN_ID_STEERING_ANGLE   0x0E6
 #define PSA_CAN_ID_STEERING_SAS_10B 0x10B  /* BSI-routed SAS angle (CAN Comfort 125 kbps) */
@@ -21,6 +22,7 @@ extern "C" {
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
 #define PSA_CAN_ID_ALERT_JOURNAL    0x120
 #define PSA_CAN_ID_STATION_LIST_125 0x125
+#define PSA_CAN_ID_EMF_FC_11F       0x11F  /* MDF ISO-TP Flow Control for Station List 0x125 */
 #define PSA_CAN_ID_ALERT_QUERY      0x39B
 #define PSA_CAN_ID_BSI_GAUGES       0x161
 #define PSA_CAN_ID_FUEL_RANGE_TEMP  0x165
@@ -305,7 +307,7 @@ void psa_decode_rds_name_0x396(const uint8_t *data, uint8_t dlc, char out_name[9
 
 /* Static ISO-TP Multi-frame Reassembler */
 typedef struct {
-    uint8_t  buffer[PSA_RD4_MAX_RADIO_TEXT_LEN + 8];
+    uint8_t  buffer[72]; /* >= 68 bytes for 0x0A4 FF (0x44: 4-byte header + 64-byte text) */
     uint16_t total_length;
     uint16_t received_length;
     uint8_t  next_sn;

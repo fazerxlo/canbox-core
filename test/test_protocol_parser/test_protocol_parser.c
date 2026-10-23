@@ -137,6 +137,8 @@ void test_peugeot_407_rd4_cmd_0xad_switches_to_line_in_1(void);
 void test_peugeot_407_rd4_source_transition_mute(void);
 void test_peugeot_407_station_list_scroll_closed_loop_success(void);
 void test_peugeot_407_station_list_scroll_timeout_retry_and_abort(void);
+void test_peugeot_407_rd4_f1_key_pulses(void);
+void test_peugeot_407_rd4_f1_preset_navigation(void);
 
 // Peugeot 407 Car Configuration & Personalization (SPEC_11) declarations
 void test_peugeot_407_car_config_vector1_follow_me_home_downlink(void);
@@ -164,6 +166,7 @@ void test_hiworld_verification_vector_4_gps_time_sync(void);
 void test_hiworld_connection_periodic_ping(void);
 void test_hiworld_car_mapping_lookup(void);
 void test_canbox_embedded_firmware_version(void);
+void test_hiworld_parse_downlink_cmd_f1(void);
 
 // Driver manager tests
 void test_hu_protocol_driver_switching(void) {
@@ -309,6 +312,8 @@ int main(void) {
     RUN_TEST(test_peugeot_407_rd4_source_transition_mute);
     RUN_TEST(test_peugeot_407_station_list_scroll_closed_loop_success);
     RUN_TEST(test_peugeot_407_station_list_scroll_timeout_retry_and_abort);
+    RUN_TEST(test_peugeot_407_rd4_f1_key_pulses);
+    RUN_TEST(test_peugeot_407_rd4_f1_preset_navigation);
 
     // Peugeot 407 Car Configuration & Personalization (SPEC_11)
     RUN_TEST(test_peugeot_407_car_config_vector1_follow_me_home_downlink);
@@ -336,6 +341,7 @@ int main(void) {
     RUN_TEST(test_hiworld_connection_periodic_ping);
     RUN_TEST(test_hiworld_car_mapping_lookup);
     RUN_TEST(test_canbox_embedded_firmware_version);
+    RUN_TEST(test_hiworld_parse_downlink_cmd_f1);
 
     return UNITY_END();
 }

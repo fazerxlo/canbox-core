@@ -160,6 +160,10 @@ void hu_protocol_send_audio_settings(const vehicle_audio_settings_t *audio) {
     }
 }
 
+void hu_protocol_send_dsp_state(const vehicle_audio_settings_t *audio) {
+    hu_protocol_send_audio_settings(audio);
+}
+
 void hu_protocol_send_radio_state(const vehicle_radio_t *radio) {
     if (s_active_driver && s_active_driver->send_radio_state) {
         s_active_driver->send_radio_state(radio);

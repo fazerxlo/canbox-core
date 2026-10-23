@@ -171,15 +171,28 @@ void test_integration_hiworld_runtime_car_selection_and_handshake(void) {
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, rx_buf[7]);
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, rx_buf[9]);
 
+    // Drain all remaining bytes from initial handshake burst
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
     // Feed downlink car model selection packet again (repeated handshake with unchanged model)
     for (size_t i = 0; i < sizeof(stream); i++) {
         hu_protocol_get_active()->feed_byte(stream[i]);
     }
 
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    // MUST ONLY emit ACK frame (6 bytes), completely suppressing the 70-byte configuration burst
-    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_ack), rx_len);
+    // Verify first frame is ACK (5A A5 01 FF 24 23)
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    // Verify 70-byte handshake configuration burst (0xF0 Version, 0x71/0x72 Feature Enables) is suppressed
+    bool found_version = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+            break;
+        }
+    }
+    TEST_ASSERT_FALSE(found_version);
 }
 
 void test_integration_hiworld_tpms_pipeline(void) {

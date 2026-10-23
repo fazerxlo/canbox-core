@@ -37,6 +37,7 @@ extern "C" {
 #define HIWORLD_CMD_RADIO_CONTROL     0xA1
 #define HIWORLD_CMD_AUDIO_SOURCE      0xAD
 #define HIWORLD_CMD_UPGRADE_TRIGGER   0xE0
+#define HIWORLD_CMD_DOWNLINK_RD4_CTRL 0xF1
 #define HIWORLD_CMD_HEARTBEAT         0xFF
 
 /* Alert transmission compilation parameters:

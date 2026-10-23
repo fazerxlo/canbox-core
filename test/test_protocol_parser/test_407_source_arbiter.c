@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 bool hal_can_native_get_last_sent_frame(can_frame_t *out_frame);
+size_t hal_can_native_get_sent_history(can_frame_t *out_frames, size_t max_count);
 void hal_can_native_clear_sent_frame(void);
 
 void test_peugeot_407_aux_mode_suppression(void) {
@@ -116,7 +117,7 @@ void test_peugeot_407_rd4_station_list_trigger(void) {
     st->media.radio.power_status = 0x01;
     st->media.radio.present = true;
 
-    /* 2. Trigger station list rotary encoder scroll */
+    /* 2. Trigger station list rotary encoder scroll: just rotate once up (+1) */
     hal_can_native_clear_sent_frame();
     psa_source_arbiter_trigger_station_list();
 
@@ -126,14 +127,6 @@ void test_peugeot_407_rd4_station_list_trigger(void) {
     TEST_ASSERT_EQUAL_UINT8(3, frame_sent.dlc);
     /* Forward rotary change is +1 */
     TEST_ASSERT_EQUAL_UINT8(0x11, psa_source_arbiter_get_stalk_rotary());
-
-    /* Complete closed-loop sequence: RD4 confirms station 2, settle, return pulse */
-    psa_source_arbiter_process_can_0x225(2, 960);
-    hal_delay_ms(70);
-    psa_source_arbiter_tick_100ms();
-    /* Net rotary change is 0 after Up then Down */
-    TEST_ASSERT_EQUAL_UINT8(0x10, psa_source_arbiter_get_stalk_rotary());
-    psa_source_arbiter_process_can_0x225(1, 960);
 
     /* 3. Non-tuner mode (CD mode 0x20): trigger must be suppressed to avoid disturbing CD playback */
     st->media.radio.source_mode = 0x20;
@@ -558,39 +551,18 @@ void test_peugeot_407_station_list_scroll_closed_loop_success(void) {
 
     hal_can_native_clear_sent_frame();
     psa_source_arbiter_trigger_station_list();
-    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
 
-    /* Verify first forward pulse (+1) sent */
+    /* Verify single forward pulse (+1) sent */
     can_frame_t frame_sent;
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
     TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
-    uint8_t forward_cnt = frame_sent.data[1];
+    TEST_ASSERT_EQUAL_UINT8(0x01, frame_sent.data[1]);
 
-    /* Advance time without RD4 station change: should remain in WAIT_NEXT */
-    hal_delay_ms(200);
+    /* Settle and tick: no return pulse sent */
+    hal_delay_ms(100);
     hal_can_native_clear_sent_frame();
     psa_source_arbiter_tick_100ms();
     TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
-    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
-
-    /* RD4 confirms move to Station / Preset 2 via CAN 0x225 */
-    can_frame_t frame_225_p2 = {
-        .id = 0x225, .dlc = 5, .data = { 0x29, 0x20, 0x10, 0x03, 0x98 }
-    };
-    can_router_process_can(&frame_225_p2);
-
-    /* Settle for 70 ms (>= PSA_STATION_SCROLL_SETTLE_MS) */
-    hal_delay_ms(70);
-    hal_can_native_clear_sent_frame();
-    psa_source_arbiter_tick_100ms();
-
-    /* Verify return pulse (-1) sent back to station 1 */
-    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
-    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)(forward_cnt - 1), frame_sent.data[1]);
-
-    /* RD4 confirms return to Station / Preset 1 via CAN 0x225 */
-    can_router_process_can(&frame_225_p1);
     TEST_ASSERT_FALSE(psa_source_arbiter_is_station_scroll_in_progress());
 }
 
@@ -610,28 +582,114 @@ void test_peugeot_407_station_list_scroll_timeout_retry_and_abort(void) {
 
     hal_can_native_clear_sent_frame();
     psa_source_arbiter_trigger_station_list();
-    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
 
     can_frame_t frame_sent;
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
     TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
-
-    /* Timeout attempt 1: wait 510 ms without RD4 moving to station 2 */
-    hal_delay_ms(510);
-    hal_can_native_clear_sent_frame();
-    psa_source_arbiter_tick_100ms();
-
-    /* Requirement: repeated once upon timeout! */
-    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&frame_sent));
-    TEST_ASSERT_EQUAL_HEX32(0x21F, frame_sent.id);
-    TEST_ASSERT_TRUE(psa_source_arbiter_is_station_scroll_in_progress());
-
-    /* Timeout attempt 2: wait another 510 ms without RD4 moving */
-    hal_delay_ms(510);
-    hal_can_native_clear_sent_frame();
-    psa_source_arbiter_tick_100ms();
-
-    /* Requirement: abort and do NOT send return pulse (-1) to avoid wrap to station 6! */
-    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&frame_sent));
     TEST_ASSERT_FALSE(psa_source_arbiter_is_station_scroll_in_progress());
+}
+
+void test_peugeot_407_rd4_f1_key_pulses(void) {
+    can_router_init();
+    psa_source_arbiter_init();
+    psa_source_arbiter_update_stalk_rotary(5);
+
+    can_frame_t history[4];
+    size_t count;
+
+    /* 1. STEP_DOWN (0x01) -> Prev Track / Seek- pulse (0x40) on 0x21F */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_f1_cmd(0x01, 0x00);
+    count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_HEX32(0x21F, history[0].id);
+    TEST_ASSERT_EQUAL_HEX8(0x40, history[0].data[0]); /* Press */
+    TEST_ASSERT_EQUAL_HEX8(5, history[0].data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, history[1].data[0]); /* Release */
+
+    /* 2. SEEK_UP (0x04) -> Next Track / Seek+ pulse (0x80) on 0x21F */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_f1_cmd(0x04, 0x00);
+    count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_HEX32(0x21F, history[0].id);
+    TEST_ASSERT_EQUAL_HEX8(0x80, history[0].data[0]); /* Press */
+    TEST_ASSERT_EQUAL_HEX8(0x00, history[1].data[0]); /* Release */
+
+    /* 3. BAND_CYCLE (0x09) -> Stalk Source key pulse (0x02) on 0x21F */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_f1_cmd(0x09, 0x00);
+    count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_HEX32(0x21F, history[0].id);
+    TEST_ASSERT_EQUAL_HEX8(0x02, history[0].data[0]); /* Press */
+    TEST_ASSERT_EQUAL_HEX8(0x00, history[1].data[0]); /* Release */
+
+    /* 4. CD_PLAY_PAUSE (0x12) -> Stalk Chorded Mute (0x0C) on 0x21F */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_f1_cmd(0x12, 0x00);
+    count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_HEX32(0x21F, history[0].id);
+    TEST_ASSERT_EQUAL_HEX8(0x0C, history[0].data[0]); /* Press */
+    TEST_ASSERT_EQUAL_HEX8(0x00, history[1].data[0]); /* Release */
+}
+
+void test_peugeot_407_rd4_f1_preset_navigation(void) {
+    can_router_init();
+    psa_source_arbiter_init();
+    psa_source_arbiter_update_stalk_rotary(10);
+
+    /* Setup radio state: Tuner, Preset 1 */
+    can_frame_t frame_165_tuner = {
+        .id = 0x165, .dlc = 4, .data = { 0xC8, 0xD0, 0x10, 0x00 }
+    };
+    can_router_process_can(&frame_165_tuner);
+    can_frame_t frame_225_p1 = {
+        .id = 0x225, .dlc = 5, .data = { 0x20, 0x10, 0x10, 0x03, 0x98 }
+    };
+    can_router_process_can(&frame_225_p1);
+
+    /* 1. Navigate from Preset 1 to Preset 2:
+     * Delta = (2 - 1) = 1 <= 3 -> scroll UP 1 step */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_f1_cmd(0x07, 0x02);
+    can_frame_t sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x00, sent.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(11, sent.data[1]); /* Count incremented: 10 -> 11 */
+
+    /* RD4 updates state to Preset 2 */
+    can_frame_t frame_225_p2 = {
+        .id = 0x225, .dlc = 5, .data = { 0x20, 0x20, 0x10, 0x03, 0x98 }
+    };
+    can_router_process_can(&frame_225_p2);
+
+    /* 2. Navigate from Preset 2 to Preset 6:
+     * Delta = (6 - 2) = 4 > 3 -> scroll DOWN (6 - 4) = 2 steps */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_f1_cmd(0x07, 0x06);
+    can_frame_t history[4];
+    size_t count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_HEX8(10, history[0].data[1]); /* Step 1 down: 11 -> 10 */
+    TEST_ASSERT_EQUAL_HEX8(9, history[1].data[1]);  /* Step 2 down: 10 -> 9 */
+    TEST_ASSERT_EQUAL_HEX8(9, psa_source_arbiter_get_stalk_rotary());
+
+    /* 3. Manual tuning mode (Preset 0) to Preset 3:
+     * Should emit 1 rotary click first to enter preset ring (assume Preset 1),
+     * then scroll delta (3 - 1) = 2 steps UP. Total: 3 steps UP */
+    can_frame_t frame_225_manual = {
+        .id = 0x225, .dlc = 5, .data = { 0x20, 0x00, 0x10, 0x03, 0x98 }
+    };
+    can_router_process_can(&frame_225_manual);
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_f1_cmd(0x07, 0x03);
+    count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(3, count);
+    TEST_ASSERT_EQUAL_HEX8(10, history[0].data[1]); /* Click to enter ring: 9 -> 10 */
+    TEST_ASSERT_EQUAL_HEX8(11, history[1].data[1]); /* Step 1 to P3: 10 -> 11 */
+    TEST_ASSERT_EQUAL_HEX8(12, history[2].data[1]); /* Step 2 to P3: 11 -> 12 */
+    TEST_ASSERT_EQUAL_HEX8(12, psa_source_arbiter_get_stalk_rotary());
 }

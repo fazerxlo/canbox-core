@@ -343,8 +343,16 @@ void test_peugeot_407_rd4_vector_2_isotp_radiotext(void) {
     const uint8_t cf3[] = { 0x23, 0x20, 0x52, 0x68, 0x61, 0x70, 0x73, 0x6F };
     const uint8_t cf4[] = { 0x24, 0x64, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
+    hal_can_native_clear_sent_frame();
     TEST_ASSERT_FALSE(psa_rd4_process_can_0x0a4(&media.radio, &isotp, ff, sizeof(ff)));
     TEST_ASSERT_TRUE(isotp.active);
+    can_frame_t fc_frame;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&fc_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x09F, fc_frame.id);
+    TEST_ASSERT_EQUAL_UINT8(3, fc_frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x30, fc_frame.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, fc_frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, fc_frame.data[2]);
 
     TEST_ASSERT_FALSE(psa_rd4_process_can_0x0a4(&media.radio, &isotp, cf1, sizeof(cf1)));
     TEST_ASSERT_TRUE(isotp.active);
@@ -374,6 +382,39 @@ void test_peugeot_407_rd4_vector_2_isotp_radiotext(void) {
         sum += out[4 + i];
     }
     TEST_ASSERT_EQUAL_HEX8((uint8_t)((sum - 1) & 0xFF), out[29]);
+
+    // Test 68-byte (0x44) First Frame with 4-byte header (non-zero RDS flags) and full 64-character text
+    // FF: 10 44 10 01 02 00 'T' 'e' (total_len = 0x44 = 68 bytes)
+    const uint8_t ff_68[] = { 0x10, 0x44, 0x10, 0x01, 0x02, 0x00, 'T', 'e' };
+    hal_can_native_clear_sent_frame();
+    TEST_ASSERT_FALSE(psa_rd4_process_can_0x0a4(&media.radio, &isotp, ff_68, sizeof(ff_68)));
+    TEST_ASSERT_TRUE(isotp.active);
+    TEST_ASSERT_EQUAL_UINT16(68, isotp.total_length);
+    TEST_ASSERT_EQUAL_UINT16(6, isotp.received_length);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&fc_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x09F, fc_frame.id);
+    TEST_ASSERT_EQUAL_HEX8(0x00, fc_frame.data[2]);
+
+    // Feed 9 Consecutive Frames (21..29) of 7 bytes each: 6 + (9 * 7) = 69 >= 68
+    uint8_t sn = 1;
+    for (int i = 0; i < 8; i++) {
+        uint8_t cf[8];
+        cf[0] = 0x20 | (sn & 0x0F);
+        memset(&cf[1], 'A' + i, 7);
+        sn = (sn + 1) & 0x0F;
+        TEST_ASSERT_FALSE(psa_rd4_process_can_0x0a4(&media.radio, &isotp, cf, sizeof(cf)));
+        TEST_ASSERT_TRUE(isotp.active);
+    }
+    // Final CF to complete reassembly (6 + 56 = 62; need 6 more bytes)
+    uint8_t cf_last[8];
+    cf_last[0] = 0x20 | (sn & 0x0F);
+    memset(&cf_last[1], 'Z', 7);
+    TEST_ASSERT_TRUE(psa_rd4_process_can_0x0a4(&media.radio, &isotp, cf_last, sizeof(cf_last)));
+    TEST_ASSERT_FALSE(isotp.active);
+    TEST_ASSERT_EQUAL_UINT8(PSA_RD4_MAX_RADIO_TEXT_LEN, media.radio.radio_text_len);
+    TEST_ASSERT_EQUAL_UINT8('T', media.radio.radio_text[0]);
+    TEST_ASSERT_EQUAL_UINT8('e', media.radio.radio_text[1]);
+    TEST_ASSERT_EQUAL_UINT8('\0', media.radio.radio_text[64]);
 }
 
 void test_peugeot_407_rd4_vector_3_cd_changer(void) {
@@ -753,7 +794,18 @@ void test_peugeot_407_rd4_preset_memory_list(void) {
     const uint8_t can_125_cf4[] = { 0x24, 0x41, 0x58, 0x58, 0xB0, 0x20, 0x54, 0x52 };
     const uint8_t can_125_cf5[] = { 0x25, 0x4F, 0x4A, 0x4B, 0x41, 0x20, 0xB0 };
 
+    media.radio.band = 0x01; /* Initial band: FM1 */
+    hal_can_native_clear_sent_frame();
     psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_ff, sizeof(can_125_ff));
+    TEST_ASSERT_TRUE(isotp.active);
+    can_frame_t fc_125;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&fc_125));
+    TEST_ASSERT_EQUAL_HEX32(0x11F, fc_125.id);
+    TEST_ASSERT_EQUAL_UINT8(3, fc_125.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x30, fc_125.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, fc_125.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, fc_125.data[2]);
+
     psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf1, sizeof(can_125_cf1));
     psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf2, sizeof(can_125_cf2));
     psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_cf3, sizeof(can_125_cf3));
@@ -766,6 +818,20 @@ void test_peugeot_407_rd4_preset_memory_list(void) {
     TEST_ASSERT_EQUAL_STRING(" TROJKA ", media.radio.preset_names[3]);
     TEST_ASSERT_EQUAL_STRING("        ", media.radio.preset_names[4]);
     TEST_ASSERT_EQUAL_STRING("        ", media.radio.preset_names[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, media.radio.band); /* Band must not be overwritten by 0x125 */
+
+    // dump_mdf.log vector at 1792763612.148: ID:125 DLC:8 DATA:103a406000002052 (First Frame)
+    const uint8_t can_125_dump_mdf_ff[] = { 0x10, 0x3A, 0x40, 0x60, 0x00, 0x00, 0x20, 0x52 };
+    hal_can_native_clear_sent_frame();
+    psa_rd4_process_can_0x125(&media.radio, &isotp, can_125_dump_mdf_ff, sizeof(can_125_dump_mdf_ff));
+    TEST_ASSERT_TRUE(isotp.active);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&fc_125));
+    TEST_ASSERT_EQUAL_HEX32(0x11F, fc_125.id);
+    TEST_ASSERT_EQUAL_UINT8(3, fc_125.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x30, fc_125.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, fc_125.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, fc_125.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, media.radio.band); /* 0x40 in payload must not corrupt band to FM-AST (0x04) */
 
     // Build Extended Station Names Mode (Cmd 0x85, 49 payload bytes -> 54 wire bytes)
     out_len = build_hiworld_radio_preset_names(&media.radio, out, sizeof(out));

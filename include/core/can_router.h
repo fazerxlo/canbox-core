@@ -214,6 +214,8 @@ typedef vehicle_cdc_t   psa_rd4_cdc_state_t;
 typedef vehicle_media_t psa_rd4_media_state_t;
 
 typedef struct {
+    bool    doors;
+    bool    climate;
     bool    radar;
     bool    alert_realtime;
     bool    alert_journal;
@@ -286,6 +288,7 @@ bool can_router_set_car_config(uint8_t cmd_id, uint8_t setting_id, uint8_t value
 bool can_router_is_bus_sleeping(void);
 void can_router_notify_wake(void);
 void can_router_push_radio_and_media_state(void);
+void can_router_trigger_full_state_push(void);
 
 #ifdef __cplusplus
 }
