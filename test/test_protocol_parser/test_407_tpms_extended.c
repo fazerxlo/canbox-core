@@ -597,19 +597,21 @@ void test_peugeot_407_hvac_hiworld(void) {
 void test_peugeot_407_trip_reset_frames(void) {
     can_frame_t frame;
 
-    // 1. Trip 1 Reset (Bit 7 = 0x80)
+    // 1. Trip 1 Reset (CAN ID 0x167, Bit 7 = 0x80 on Byte 1)
     TEST_ASSERT_TRUE(build_psa_trip_reset_frame(1, &frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
-    for (int i = 1; i < 8; i++) {
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x80, frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[3]);
 
-    // 2. Trip 2 Reset (Bit 6 = 0x40)
+    // 2. Trip 2 Reset (CAN ID 0x167, Bit 6 = 0x40 on Byte 1)
     TEST_ASSERT_TRUE(build_psa_trip_reset_frame(2, &frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, frame.dlc);
-    for (int i = 1; i < 8; i++) {
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x40, frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, frame.data[3]);
 
     // 3. Boundary & Error checks
     TEST_ASSERT_FALSE(build_psa_trip_reset_frame(0, &frame));

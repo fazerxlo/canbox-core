@@ -147,6 +147,10 @@ void test_peugeot_407_car_config_extended_settings_downlink(void);
 void test_peugeot_407_car_config_central_state2_builder(void);
 void test_peugeot_407_car_config_boundary_and_guards(void);
 void test_peugeot_407_car_config_disconnected_mdf_authority(void);
+void test_peugeot_407_virtual_mdf_periodic_broadcast(void);
+void test_peugeot_407_mdf_coexistence_suppression(void);
+void test_peugeot_407_matrix_cluster_page_cycling(void);
+void test_peugeot_407_trip_reset_0x167(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -315,6 +319,10 @@ int main(void) {
     RUN_TEST(test_peugeot_407_car_config_central_state2_builder);
     RUN_TEST(test_peugeot_407_car_config_boundary_and_guards);
     RUN_TEST(test_peugeot_407_car_config_disconnected_mdf_authority);
+    RUN_TEST(test_peugeot_407_virtual_mdf_periodic_broadcast);
+    RUN_TEST(test_peugeot_407_mdf_coexistence_suppression);
+    RUN_TEST(test_peugeot_407_matrix_cluster_page_cycling);
+    RUN_TEST(test_peugeot_407_trip_reset_0x167);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

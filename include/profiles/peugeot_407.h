@@ -43,6 +43,7 @@ extern "C" {
 #define PSA_CAN_ID_ETAT_TUNER       0x225
 #define PSA_CAN_ID_BSI_PERSO_REQ_15B 0x15B
 #define PSA_CAN_ID_MDF_STATUS_0DF   0x0DF
+#define PSA_CAN_ID_MDF_TRIP_CMD_167 0x167
 #define PSA_CAN_ID_MDF_TRIP_3F6     0x3F6
 #define PSA_CAN_ID_MDF_DIAG_525     0x525
 #define PSA_CAN_ID_TRIP2_ODB        0x261
@@ -400,6 +401,10 @@ bool psa_car_config_is_mdf_present(void);
 bool psa_car_config_is_cached_valid(void);
 void psa_car_config_update_from_bsi(const uint8_t *data, uint8_t dlc);
 void psa_car_config_periodic_100ms(void);
+void psa_car_config_cycle_trip_page(void);
+uint8_t psa_car_config_get_trip_page_mask(void);
+void psa_car_config_set_trip_reset(uint8_t trip_index);
+void psa_trip_init(void);
 #define HIWORLD_CMD_WARNING_INFO     0x42
 #define HIWORLD_CMD_DIAGNOSTIC_QUERY 0x2F
 

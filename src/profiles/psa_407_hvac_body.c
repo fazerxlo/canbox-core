@@ -488,12 +488,11 @@ void psa_radar_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
 void psa_stalk_process_tip_0x221(vehicle_wheel_t *wheel, const uint8_t *data, uint8_t dlc) {
     if (!wheel || !data || dlc < 1) return;
     bool curr_trip = (data[0] & 0x08) != 0;
-    bool prev_trip = (g_stalk_state.prev_trip_tip != 0);
 
-    if (curr_trip && !prev_trip) {
+    if (curr_trip) {
         wheel->active_key = WHEEL_KEY_TRIP;
         wheel->press_state = 1;
-    } else if (!curr_trip && prev_trip) {
+    } else if (g_stalk_state.prev_trip_tip != 0 || wheel->active_key == WHEEL_KEY_TRIP) {
         wheel->active_key = WHEEL_KEY_NONE;
         wheel->press_state = 0;
     }

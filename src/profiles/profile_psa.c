@@ -351,7 +351,6 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_CD_DISC_INFO_365,   psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_PLAY_3A5,        psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_CHANGER,         psa_rd4_decode_frame },
-    { PSA_CAN_ID_MDF_TRIP_3F6,       psa_decode_mdf_presence_profile },
     { PSA_CAN_ID_MDF_DIAG_525,       psa_decode_mdf_presence_profile },
 };
 
@@ -369,6 +368,7 @@ static void psa_init(void) {
     psa_rd4_media_init(NULL, NULL);
     psa_tpms_init(NULL);
     psa_car_config_init();
+    psa_trip_init();
 }
 
 static bool psa_reset_trip(uint8_t trip_index) {

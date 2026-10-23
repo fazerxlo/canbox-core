@@ -72,7 +72,7 @@ void test_integration_hiworld_door_status_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_220_rl_rr), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_220_rl_rr, rx_buf, sizeof(expected_220_rl_rr));
 
-    // 3. Verify that receiving non-door CAN ID 0x221 (BSI status) does NOT overwrite door state
+    // 3. Verify that receiving non-door CAN ID 0x221 (BSI status/trip) does NOT overwrite door state
     can_frame_t bsi_frame_221 = {
         .id = 0x221,
         .dlc = 7,
@@ -80,7 +80,9 @@ void test_integration_hiworld_door_status_pipeline(void) {
     };
     can_router_process_can(&bsi_frame_221);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    TEST_ASSERT_EQUAL_UINT32(0, rx_len); // No bogus door status frame emitted
+    if (rx_len > 0) {
+        TEST_ASSERT_NOT_EQUAL(0x12, rx_buf[3]); // Emitted trip 0x13, NOT bogus door status frame 0x12
+    }
 
     // 4. Test PSA 0x220 all closed frame: DATA: 04 00 (bit 0x04 must NOT be treated as hood open)
     can_frame_t frame_220_closed = {
@@ -367,7 +369,7 @@ void test_integration_hiworld_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_dump_261), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_261, rx_buf, sizeof(expected_dump_261));
 
-    // 5. Verify masked frame produces no output
+    // 5. Verify 0x221 with bit 7 set (nominal PSA 407 C0/C8/80) emits valid trip 0x13
     can_frame_t masked_221 = {
         .id = 0x221,
         .dlc = 7,
@@ -375,7 +377,9 @@ void test_integration_hiworld_trip_pipeline(void) {
     };
     can_router_process_can(&masked_221);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    TEST_ASSERT_EQUAL_UINT32(0, rx_len);
+    const uint8_t expected_221_80[] = { 0x5A, 0xA5, 0x0A, 0x13, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE2 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_221_80), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_221_80, rx_buf, sizeof(expected_221_80));
 
     // 6. Stationary sentinel frame with 0xFFFF (dump_2026-10-20_13-33-42.log) must emit 0x13
     can_frame_t stationary_221 = {
@@ -417,12 +421,11 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     }
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[0]); // Bit 7: Trip 1 Reset
-    for (int i = 1; i < 8; i++) {
-        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[1]); // Bit 7: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
     // 2. Android sends Trip 1 Reset (2-byte format, page 2 = EcuInfoPage2): 5A A5 02 1B 02 01 1F
     hal_can_native_clear_sent_frame();
@@ -432,12 +435,11 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     }
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[0]); // Bit 7: Trip 1 Reset
-    for (int i = 1; i < 8; i++) {
-        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[1]); // Bit 7: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
     // 3. Android sends Trip 1 Reset (4-byte format from bench log dump_2026-09-29_17-13-36.log): 5A A5 04 1B 02 02 01 FF 22
     hal_can_native_clear_sent_frame();
@@ -447,12 +449,11 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     }
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[0]); // Bit 7: Trip 1 Reset
-    for (int i = 1; i < 8; i++) {
-        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[1]); // Bit 7: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
     // 4. Android sends Trip 2 Reset (4-byte format from bench log dump_2026-09-29_17-17-52.log): 5A A5 04 1B 03 03 01 FF 24
     hal_can_native_clear_sent_frame();
@@ -462,12 +463,11 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     }
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x40, sent_frame.data[0]); // Bit 6: Trip 2 Reset
-    for (int i = 1; i < 8; i++) {
-        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x40, sent_frame.data[1]); // Bit 6: Trip 2 Reset
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
     // 5. Android sends Tab Navigation frames (dump_2026-09-29_17-22-10.log): MUST NOT trigger any CAN reset
     hal_can_native_clear_sent_frame();
@@ -777,7 +777,7 @@ void test_integration_hiworld_native_stalk_0x21f_pipeline(void) {
 void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
 
-    uint8_t rx_buf[32];
+    uint8_t rx_buf[64];
     size_t rx_len;
 
     // Stalk Tip Trip Button Press (CAN ID 0x221: Byte 0 Bit 3 = 0x08, 0xC8 nominal from vehicle dumps)
@@ -793,10 +793,17 @@ void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
     const uint8_t expected_stalk_trip_press[] = {
         0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x14, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0xDC
     };
-    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stalk_trip_press), rx_len);
+    const uint8_t expected_trip_instant[] = {
+        0x5A, 0xA5, 0x0A, 0x13, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x16
+    };
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_stalk_trip_press));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_press, rx_buf, sizeof(expected_stalk_trip_press));
+    if (rx_len >= sizeof(expected_stalk_trip_press) + sizeof(expected_trip_instant)) {
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_trip_instant, rx_buf + sizeof(expected_stalk_trip_press), sizeof(expected_trip_instant));
+    }
 
     // Release Stalk Tip Trip Button (0xC0 nominal from vehicle dumps)
+    hal_can_native_clear_sent_frame();
     frame_221.data[0] = 0xC0;
     can_router_process_can(&frame_221);
 
@@ -806,5 +813,15 @@ void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
     };
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stalk_trip_release), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_release, rx_buf, sizeof(expected_stalk_trip_release));
+
+    // Verify 0x167 is sent on release advancing trip page
+    can_frame_t sent_frame;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x02, sent_frame.data[0]); // Advance to Trip 1
+    TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 }
 

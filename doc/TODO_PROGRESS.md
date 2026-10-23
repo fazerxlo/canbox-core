@@ -70,7 +70,7 @@
 
 | St | CMD | Name | Wire LEN | CAN Tx | Core Files | Spec / Notes |
 | :-: | :-: | :--- | :-: | :-: | :--- | :--- |
-| `[x]` | `0x1B` | Trip Computer Reset | `0x03`/`0x05` | `0x221` | `psa_407_telemetry.c`, `proto_hiworld_adapter.c` | Resets Trip 1 (`0x80`) or Trip 2 (`0x40`) |
+| `[x]` | `0x1B` | Trip Computer Reset | `0x03`/`0x05` | `0x167` | `psa_407_telemetry.c`, `proto_hiworld_adapter.c` | Resets Trip 1 (`0x80`) or Trip 2 (`0x40`) |
 | `[x]` | `0x24` | Car Model & Baud Select | `0x02`/`0x03` | N/A | `hiworld_connection.c`, `hiworld_car_mapping.c` | ID 34 (Peugeot 407), ACK `5A A5 01 FF 24 23` |
 | `[x]` | `0x2F` | Diagnostic Journal Query | `0x02` | `0x39B` | `proto_hiworld_adapter.c`, `can_router.c` | Replays `0x42` & `0xEA` summary |
 | `[x]` | `0x30` | Firmware Version Query | `0x02` | N/A | `hiworld_connection.c` | Replies with `0xF0` |

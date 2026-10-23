@@ -52,12 +52,9 @@ void psa_reverse_set_hardware_trigger(bool reverse_active) {
 bool psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8_t dlc) {
     if (!trip || !data || dlc < 7) return false;
 
-    /* Byte 0 Bit 7: Fuel info hidden/invalid.
-     * Note: 0xFFFF sentinels in fuel/range represent valid PSA stationary/undefined
+    /* Note: 0xFFFF sentinels in fuel/range represent valid PSA stationary/undefined
      * indicators ('--.-') and must NOT be suppressed so the HU displays '--.-'.
      */
-    if ((data[0] & 0x80) != 0) return false;
-
     trip->instant_fuel_deci = read_be16(&data[1]);
     trip->range_km          = read_be16(&data[3]);
     trip->dest_dist_km      = read_be16(&data[5]);
@@ -110,13 +107,62 @@ void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint
 }
 
 
+static bool     s_prev_trip_btn           = false;
+static uint32_t s_trip_btn_press_ms       = 0;
+static bool     s_trip_long_press_handled = false;
+
+void psa_trip_init(void) {
+    s_prev_trip_btn           = false;
+    s_trip_btn_press_ms       = 0;
+    s_trip_long_press_handled = false;
+}
+
 void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     switch (frame->id) {
         case PSA_CAN_ID_TRIP_INSTANT: /* 0x221 */
+            if (frame->dlc >= 1) {
+                bool trip_btn_pressed = (frame->data[0] & 0x08) != 0;
+                uint32_t now = hal_get_tick_ms();
+
+                if (trip_btn_pressed && !s_prev_trip_btn) {
+                    /* Rising Edge */
+                    s_trip_btn_press_ms = now;
+                    s_trip_long_press_handled = false;
+                } else if (trip_btn_pressed && s_prev_trip_btn) {
+                    /* Held State */
+                    if (!s_trip_long_press_handled && (now - s_trip_btn_press_ms) >= 2000) {
+                        s_trip_long_press_handled = true;
+                        if (!psa_car_config_is_mdf_present()) {
+                            uint8_t page_mask = psa_car_config_get_trip_page_mask();
+                            if (page_mask == 0x02) {
+                                psa_trip_send_reset(1);
+                            } else if (page_mask == 0x04) {
+                                psa_trip_send_reset(2);
+                            }
+                        }
+                    }
+                } else if (!trip_btn_pressed && s_prev_trip_btn) {
+                    /* Falling Edge */
+                    if (!s_trip_long_press_handled && !psa_car_config_is_mdf_present()) {
+                        psa_car_config_cycle_trip_page();
+                        uint8_t page_mask = psa_car_config_get_trip_page_mask();
+                        if (page_mask == 0x01) {
+                            state->dirty.trip_page = 1;
+                        } else if (page_mask == 0x02) {
+                            state->dirty.trip_page = 2;
+                        } else if (page_mask == 0x04) {
+                            state->dirty.trip_page = 3;
+                        }
+                    }
+                }
+                s_prev_trip_btn = trip_btn_pressed;
+            }
             psa_stalk_process_tip_0x221(&state->wheel, frame->data, frame->dlc);
             if (psa_trip_process_can_0x221(&state->trip, frame->data, frame->dlc)) {
-                state->dirty.trip_page = 1;
+                if (state->dirty.trip_page == 0) {
+                    state->dirty.trip_page = 1;
+                }
             }
             break;
         case PSA_CAN_ID_TRIP1_ODB: /* 0x2A1 */
@@ -140,26 +186,30 @@ bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame) {
     }
 
     memset(out_frame, 0, sizeof(*out_frame));
-    out_frame->id          = PSA_CAN_ID_TRIP_INSTANT; /* 0x221 (MSG_DEMANDES_EMF) */
+    out_frame->id          = PSA_CAN_ID_MDF_TRIP_CMD_167; /* 0x167 */
     out_frame->dlc         = 8;
     out_frame->is_extended = false;
     out_frame->is_remote   = false;
 
-    if (trip_index == 1) {
-        out_frame->data[0] = 0x80; /* Bit 7: Trip 1 Reset */
-    } else {
-        out_frame->data[0] = 0x40; /* Bit 6: Trip 2 Reset */
-    }
+    out_frame->data[0] = psa_car_config_get_trip_page_mask();
+    out_frame->data[1] = (trip_index == 1) ? 0x80 : 0x40;
+    out_frame->data[2] = 0xFF;
+    out_frame->data[3] = 0xFF;
 
     return true;
 }
 
 hal_status_t psa_trip_send_reset(uint8_t trip_index) {
+    if (psa_car_config_is_mdf_present()) {
+        return HAL_STATUS_ERROR;
+    }
+
     can_frame_t frame;
     if (!build_psa_trip_reset_frame(trip_index, &frame)) {
         return HAL_STATUS_ERROR;
     }
 
+    psa_car_config_set_trip_reset(trip_index);
     return hal_can_send(&frame);
 }
 

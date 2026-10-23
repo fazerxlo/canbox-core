@@ -10,6 +10,7 @@
 
 bool hal_can_native_get_last_sent_frame(can_frame_t *out_frame);
 void hal_can_native_clear_sent_frame(void);
+size_t hal_can_native_get_sent_history(can_frame_t *out_frames, size_t max_count);
 
 void setUp_peugeot_407_car_config(void) {
     psa_car_config_init();
@@ -361,11 +362,11 @@ void test_peugeot_407_car_config_disconnected_mdf_authority(void) {
     TEST_ASSERT_EQUAL_HEX32(0x15B, sent.id);
     TEST_ASSERT_EQUAL_UINT8(0x04, sent.data[2] & 0x07); /* One-hot bit 2 = 60s */
 
-    /* 5. Simulate MDF reconnect on workbench (0x3F6 arrives) */
+    /* 5. Simulate MDF reconnect on workbench (0x525 arrives) */
     can_frame_t frame_mdf;
     memset(&frame_mdf, 0, sizeof(frame_mdf));
-    frame_mdf.id  = 0x3F6;
-    frame_mdf.dlc = 7;
+    frame_mdf.id  = PSA_CAN_ID_MDF_DIAG_525;
+    frame_mdf.dlc = 8;
     frame_mdf.data[0] = 0x00;
     frame_mdf.data[1] = 0x88;
     frame_mdf.data[2] = 0x40;
@@ -378,4 +379,126 @@ void test_peugeot_407_car_config_disconnected_mdf_authority(void) {
     psa_car_config_get_cached(&cfg);
     TEST_ASSERT_TRUE(cfg.follow_me_home);
     TEST_ASSERT_EQUAL_UINT8(15, cfg.follow_me_home_sec);
+}
+
+void test_peugeot_407_virtual_mdf_periodic_broadcast(void) {
+    setUp_peugeot_407_car_config();
+
+    TEST_ASSERT_FALSE(psa_car_config_is_mdf_present());
+
+    /* Call periodic 100ms 9 times: no broadcast yet */
+    for (int i = 0; i < 9; i++) {
+        psa_car_config_periodic_100ms();
+    }
+    can_frame_t sent;
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
+
+    /* 10th tick (1000 ms): 0x3F6, 0x0DF, 0x167 emitted */
+    hal_can_native_clear_sent_frame();
+    psa_car_config_periodic_100ms();
+
+    can_frame_t history[4];
+    size_t count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(3, count);
+
+    /* Frame 1: 0x3F6 (DLC 7): 00 00 00 00 00 80 0B */
+    TEST_ASSERT_EQUAL_HEX32(0x3F6, history[0].id);
+    TEST_ASSERT_EQUAL_UINT8(7, history[0].dlc);
+    const uint8_t exp_3f6[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x0B };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_3f6, history[0].data, 7);
+
+    /* Frame 2: 0x0DF (DLC 3): 10 00 50 */
+    TEST_ASSERT_EQUAL_HEX32(0x0DF, history[1].id);
+    TEST_ASSERT_EQUAL_UINT8(3, history[1].dlc);
+    const uint8_t exp_0df[] = { 0x10, 0x00, 0x50 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_0df, history[1].data, 3);
+
+    /* Frame 3: 0x167 (DLC 8): 01 00 FF FF 00 00 00 00 */
+    TEST_ASSERT_EQUAL_HEX32(0x167, history[2].id);
+    TEST_ASSERT_EQUAL_UINT8(8, history[2].dlc);
+    const uint8_t exp_167[] = { 0x01, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_167, history[2].data, 8);
+}
+
+void test_peugeot_407_mdf_coexistence_suppression(void) {
+    setUp_peugeot_407_car_config();
+
+    /* Physical MDF transmits 0x525 */
+    can_frame_t frame_525;
+    memset(&frame_525, 0, sizeof(frame_525));
+    frame_525.id  = PSA_CAN_ID_MDF_DIAG_525;
+    frame_525.dlc = 8;
+    can_router_process_can(&frame_525);
+
+    TEST_ASSERT_TRUE(psa_car_config_is_mdf_present());
+
+    /* 10 periodic ticks: verify NOTHING is transmitted on CAN */
+    hal_can_native_clear_sent_frame();
+    for (int i = 0; i < 10; i++) {
+        psa_car_config_periodic_100ms();
+    }
+    can_frame_t sent;
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
+}
+
+void test_peugeot_407_matrix_cluster_page_cycling(void) {
+    setUp_peugeot_407_car_config();
+    can_router_init();
+
+    can_frame_t sent;
+
+    /* 1. Inject 0x221 press: C8 FF FF FF FF FF FF */
+    hal_can_native_clear_sent_frame();
+    can_frame_t f_press = { .id = 0x221, .dlc = 7, .data = { 0xC8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } };
+    can_router_process_can(&f_press);
+
+    /* 2. Inject 0x221 release: C0 FF FF FF FF FF FF */
+    hal_can_native_clear_sent_frame();
+    can_frame_t f_rel = { .id = 0x221, .dlc = 7, .data = { 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } };
+    can_router_process_can(&f_rel);
+
+    /* Verify 0x167 is immediately transmitted with 02 00 FF FF 00 00 00 00 (Trip 1) */
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent.dlc);
+    const uint8_t exp_p1[] = { 0x02, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_p1, sent.data, 8);
+    TEST_ASSERT_EQUAL_UINT8(0x02, psa_car_config_get_trip_page_mask());
+
+    /* 3. Repeat press/release -> advances to 04 00 FF FF 00 00 00 00 (Trip 2) */
+    can_router_process_can(&f_press);
+    hal_can_native_clear_sent_frame();
+    can_router_process_can(&f_rel);
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    const uint8_t exp_p2[] = { 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_p2, sent.data, 8);
+    TEST_ASSERT_EQUAL_UINT8(0x04, psa_car_config_get_trip_page_mask());
+
+    /* 4. Repeat press/release -> wraps to 01 00 FF FF 00 00 00 00 (Instant) */
+    can_router_process_can(&f_press);
+    hal_can_native_clear_sent_frame();
+    can_router_process_can(&f_rel);
+
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    const uint8_t exp_p0[] = { 0x01, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_p0, sent.data, 8);
+    TEST_ASSERT_EQUAL_UINT8(0x01, psa_car_config_get_trip_page_mask());
+}
+
+void test_peugeot_407_trip_reset_0x167(void) {
+    setUp_peugeot_407_car_config();
+
+    hal_can_native_clear_sent_frame();
+    TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(1));
+
+    can_frame_t sent;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x80, sent.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent.data[3]);
 }

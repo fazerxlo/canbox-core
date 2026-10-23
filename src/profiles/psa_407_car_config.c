@@ -11,6 +11,11 @@ static uint8_t  s_cached_profile1_raw[8] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0,
 static bool     s_cached_profile1_valid  = false;
 static uint32_t s_last_mdf_seen_ms       = 0;
 
+static uint8_t s_mdf_trip_page_mask    = 0x01; /* 0x01=Instant, 0x02=Trip1, 0x04=Trip2 */
+static uint8_t s_mdf_trip_reset_mask   = 0x00; /* 0x80=Reset Trip1, 0x40=Reset Trip2 */
+static uint8_t s_mdf_reset_ticks       = 0;
+static uint8_t s_periodic_1000ms_ticks = 0;
+
 /* Feature enables (Cmd 0x71 and Cmd 0x72) telecoded in BSI */
 static uint8_t s_feature_enable_1[2] = { 0x60, 0x12 };
 static uint8_t s_feature_enable_2[8] = { 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -48,6 +53,11 @@ void psa_car_config_init(void) {
     s_cached_profile1_valid  = false;
 
     s_last_mdf_seen_ms = 0;
+
+    s_mdf_trip_page_mask    = 0x01;
+    s_mdf_trip_reset_mask   = 0x00;
+    s_mdf_reset_ticks       = 0;
+    s_periodic_1000ms_ticks = 0;
 
     s_feature_enable_1[0] = 0x60;
     s_feature_enable_1[1] = 0x12;
@@ -277,21 +287,90 @@ void psa_car_config_get_cached(vehicle_config_t *cfg) {
     }
 }
 
+static hal_status_t psa_car_config_send_0x167(void) {
+    can_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.id      = PSA_CAN_ID_MDF_TRIP_CMD_167;
+    frame.dlc     = 8;
+    frame.data[0] = s_mdf_trip_page_mask;
+    frame.data[1] = s_mdf_trip_reset_mask;
+    frame.data[2] = 0xFF;
+    frame.data[3] = 0xFF;
+    return hal_can_send(&frame);
+}
+
+uint8_t psa_car_config_get_trip_page_mask(void) {
+    return s_mdf_trip_page_mask;
+}
+
+void psa_car_config_set_trip_reset(uint8_t trip_index) {
+    if (trip_index == 1) {
+        s_mdf_trip_reset_mask = 0x80;
+        s_mdf_reset_ticks = 5;
+    } else if (trip_index == 2) {
+        s_mdf_trip_reset_mask = 0x40;
+        s_mdf_reset_ticks = 5;
+    }
+}
+
+void psa_car_config_cycle_trip_page(void) {
+    if (psa_car_config_is_mdf_present()) return;
+    if (s_mdf_trip_page_mask == 0x01) {
+        s_mdf_trip_page_mask = 0x02;
+    } else if (s_mdf_trip_page_mask == 0x02) {
+        s_mdf_trip_page_mask = 0x04;
+    } else {
+        s_mdf_trip_page_mask = 0x01;
+    }
+    psa_car_config_send_0x167();
+}
+
 void psa_car_config_periodic_100ms(void) {
-    /* Virtual MDF mode: broadcast 0x15B periodically only when no external physical MDF is on bus */
-    if (psa_car_config_is_mdf_present() || !s_cached_profile1_valid) {
+    if (psa_car_config_is_mdf_present()) {
         return;
     }
 
-    static uint8_t s_timer_15b = 0;
-    if (++s_timer_15b >= 5) { /* Every 500 ms (matching Hiworld PA12.20 OEM timing) */
-        s_timer_15b = 0;
-        can_frame_t frame;
-        memset(&frame, 0, sizeof(frame));
-        frame.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B;
-        frame.dlc = 8;
-        memcpy(frame.data, s_cached_profile1_raw, 8);
-        frame.data[0] = 0x01;
-        hal_can_send(&frame);
+    if (s_mdf_reset_ticks > 0) {
+        s_mdf_reset_ticks--;
+        if (s_mdf_reset_ticks == 0) {
+            s_mdf_trip_reset_mask = 0x00;
+        }
+    }
+
+    if (++s_periodic_1000ms_ticks >= 10) {
+        s_periodic_1000ms_ticks = 0;
+
+        /* 0x3F6 (DLC 7): 00 00 00 00 00 80 0B */
+        can_frame_t frame_3f6;
+        memset(&frame_3f6, 0, sizeof(frame_3f6));
+        frame_3f6.id = PSA_CAN_ID_MDF_TRIP_3F6;
+        frame_3f6.dlc = 7;
+        frame_3f6.data[5] = 0x80;
+        frame_3f6.data[6] = 0x0B;
+        hal_can_send(&frame_3f6);
+
+        /* 0x0DF (DLC 3): 10 00 50 */
+        can_frame_t frame_0df;
+        memset(&frame_0df, 0, sizeof(frame_0df));
+        frame_0df.id = PSA_CAN_ID_MDF_STATUS_0DF;
+        frame_0df.dlc = 3;
+        frame_0df.data[0] = 0x10;
+        frame_0df.data[1] = 0x00;
+        frame_0df.data[2] = 0x50;
+        hal_can_send(&frame_0df);
+
+        /* 0x167 (DLC 8): Trip Page & Reset */
+        psa_car_config_send_0x167();
+
+        /* 0x15B (DLC 8): Personalization State (if valid) */
+        if (s_cached_profile1_valid) {
+            can_frame_t frame_15b;
+            memset(&frame_15b, 0, sizeof(frame_15b));
+            frame_15b.id = PSA_CAN_ID_BSI_PERSO_REQ_15B;
+            frame_15b.dlc = 8;
+            memcpy(frame_15b.data, s_cached_profile1_raw, 8);
+            frame_15b.data[0] = 0x01;
+            hal_can_send(&frame_15b);
+        }
     }
 }
