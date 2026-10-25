@@ -442,18 +442,17 @@ static bool rd_feed(uint32_t id, uint8_t dlc, const uint8_t *d) {
 void test_peugeot_407_rear_defrost_detection(void) {
     can_router_init();
 
-    /* 0x1D0: Byte 4 Bit 6 */
-    const uint8_t h_on[]  = { 0x00, 0x00, 0x00, 0x00, 0x40, 0x0A, 0x0A };
-    const uint8_t h_off[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x0A };
-    const uint8_t h_old[] = { 0x00, 0x00, 0x00, 0x00, 0x01, 0x0A, 0x0A };
+    /* 0x1D0: Byte 0 Bit 6 (0x40) verified on Peugeot 407 workbench */
+    const uint8_t h_on[]  = { 0x69, 0x80, 0x00, 0x11, 0x20, 0x0B, 0x0B };
+    const uint8_t h_off[] = { 0x29, 0x80, 0x00, 0x11, 0x20, 0x0B, 0x0B };
+    const uint8_t h_old[] = { 0x29, 0x80, 0x00, 0x11, 0x40, 0x0B, 0x0B }; /* Byte 4 bit 6 is no longer rear defrost */
     TEST_ASSERT_TRUE(rd_feed(0x1D0, 7, h_on));
     TEST_ASSERT_FALSE(rd_feed(0x1D0, 7, h_off));
-    TEST_ASSERT_FALSE(rd_feed(0x1D0, 7, h_old)); /* bit 0 is no longer rear defrost */
+    TEST_ASSERT_FALSE(rd_feed(0x1D0, 7, h_old));
 
-    /* Short frames do not touch state */
-    const uint8_t s1[] = { 0x00, 0x00, 0x00, 0x00 };
-    TEST_ASSERT_TRUE(rd_feed(0x1D0, 7, h_on));
-    TEST_ASSERT_TRUE(rd_feed(0x1D0, 4, s1));
+    /* 0x1E3: Byte 1 Bit 3 (0x08) verified on Peugeot 407 workbench */
+    const uint8_t e_on[]  = { 0x01, 0x08, 0x0B, 0x0B, 0x10, 0x10, 0x00 };
+    TEST_ASSERT_TRUE(rd_feed(0x1E3, 7, e_on));
 }
 
 /* --------------------------------------------------------------------------

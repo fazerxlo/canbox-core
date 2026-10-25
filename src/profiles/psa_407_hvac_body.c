@@ -313,8 +313,10 @@ static const uint8_t psa_wind_to_hiworld[16] = {
 void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
     if (!climate || !data) return;
 
-    /* Rear defrost demand: Byte 4 Bit 6 (0x40) */
-    if (dlc >= 5) climate->rear_defrost = ((data[4] >> 6) & 0x01) != 0;
+    /* Rear defrost demand: Byte 0 Bit 6 (0x40) verified on physical Peugeot 407 workbench */
+    if (dlc >= 1) {
+        climate->rear_defrost = ((data[0] >> 6) & 0x01) != 0;
+    }
 
     if (dlc < 7) return;
 
@@ -363,6 +365,11 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
     climate->front_max_defrost = (data[1] & 0x80) != 0;
+
+    /* Rear defrost indicator from Climate ECU: Byte 1 Bit 3 (0x08) */
+    if ((data[1] & 0x08) != 0) {
+        climate->rear_defrost = true;
+    }
 
     if (climate->front_max_defrost) {
         climate->recirculate = false;

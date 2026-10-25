@@ -42,7 +42,7 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
 
 ### `update_canbox_usb.py`
 **Automated USB Flash Drive Firmware Updater for Head Unit**
-- **Purpose:** One-click script to compile the `raise_nuc131` target, convert the binary into the commercial Hiworld `can_app.iap` container format, discover connected USB drives containing a `canmcuupdata` directory, safely copy and sync the file, and verify checksum integrity.
+- **Purpose:** One-click script to compile the `raise_nuc131` target, convert the binary into the commercial Hiworld `can_app.iap` container format, discover connected USB drives containing a `canmcuupdata` directory, safely copy the file, verify checksum integrity, flush kernel caches (`sync`), and cleanly unmount the drive.
 - **Usage:**
   ```bash
   # Compile raise_nuc131, convert to can_app.iap, and write to connected USB drive:
@@ -59,6 +59,7 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
   - `--no-build`: Skip build step and use existing binary.
   - `-t`, `--target`: Manually specify target USB path or destination directory.
   - `--create-dir`: Automatically create `canmcuupdata/` on the USB drive if absent.
+  - `--no-unmount`: Keep the USB drive mounted after copying (default unmounts).
   - `--dry-run`: Test compilation and IAP conversion without writing to USB.
 
 ---
@@ -104,6 +105,24 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
 ---
 
 ## 2. Hardware-in-the-Loop (HIL) & E2E Testing
+
+### `workbench_defrost_verifier.py`
+**Peugeot 407 Rear Defrost CAN Discovery & Verification Harness**
+- **Purpose:** Discovers and validates which PSA CAN2004 frames control rear defrost on OEM Raise and Hiworld canboxes connected alongside an RD4 radio. Emulates background ignition/wake-up frames, sweeps candidate CAN IDs/bits, and performs a 3-cycle auto-verification upon detecting state change.
+- **Safety:** Hardcoded whitelist of broadcast comfort IDs. Strictly blocks diagnostic ranges (`0x5E0..0x5EF`, `0x600..0x7FF`) and RD4 write frames to completely protect attached RD4 hardware.
+- **Usage:**
+  ```bash
+  # Run auto-detect discovery across high-probability candidates:
+  ./tools/workbench_defrost_verifier.py --can can0 --port /dev/ttyUSB1
+
+  # Force Raise protocol on custom port:
+  ./tools/workbench_defrost_verifier.py --proto raise --port /dev/ttyUSB0
+
+  # Target a specific CAN ID directly:
+  ./tools/workbench_defrost_verifier.py --custom-id 0x1D0
+  ```
+
+---
 
 ### `test_bsi_workbench.py`
 **PSA 407 BSI & SLCAN Automated Workbench Verification Suite**

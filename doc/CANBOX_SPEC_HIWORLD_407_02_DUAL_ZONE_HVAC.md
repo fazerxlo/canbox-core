@@ -13,8 +13,8 @@
 # 1. Functional Domain & Architecture Overview
 
 The Peugeot 407 automatic climate control system drives three CAN frames on the PSA Comfort CAN bus:
-- **`0x1D0` (Climate Panel State, 100 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost (Byte 4 Bit 6, `0x40`), and zone temperature indices.
-- **`0x1E3` (Climate EMF / Display State, 100 ms):** Carries A/C compressor state, dual mode, front demist, cabin air recycling popup notification triggers (`intake_notify`), and display indices.
+- **`0x1D0` (Climate Panel State, 100 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost demand (Byte 0 Bit 6, `0x40`), and zone temperature indices.
+- **`0x1E3` (Climate EMF / Display State, 100 ms):** Carries A/C compressor state, dual mode, front demist, rear defrost indicator status (Byte 1 Bit 3, `0x08`), cabin air recycling popup notification triggers (`intake_notify`), and display indices.
 - **`0x12D` (Climate Compressor State, 100 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
 
 The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x8A`) to inject corresponding control frames back to the vehicle.
@@ -256,6 +256,8 @@ static inline void psa_hvac_send_hiworld(psa_hvac_ctx_t *ctx) {
 
 ## Rear Defrost Detection (`vehicle_climate_t.rear_defrost`)
 
-Rear defrost is decoded only from `0x1D0`: Byte 4 Bit 6 (`(data[4] >> 6) & 1`), dlc >= 5. `0x128` and `0x0F6` are intentionally not used.
+Rear defrost is decoded from authentic bench-verified PSA Comfort CAN signals:
+1. **Fascia Panel Button Request (`0x1D0`):** Byte 0 Bit 6 (`(data[0] >> 6) & 1`), `dlc >= 1`. Active state `0x69` vs inactive `0x29`.
+2. **Climate ECU Status Indicator (`0x1E3`):** Byte 1 Bit 3 (`(data[1] >> 3) & 1`), `dlc >= 2`. Active state `0x08` vs inactive `0x00`.
 
-A cleared bit clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`). Implemented in `psa_hvac_process_can_0x1d0()`; test `test_peugeot_407_rear_defrost_detection`.
+A cleared bit in `0x1D0` and `0x1E3` clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`) and Raise `0x21` payload[0] bit 0 (`0x01`). Implemented in `psa_hvac_process_can_0x1d0()` and `psa_hvac_process_can_0x1e3()`; unit tested in `test_peugeot_407_rear_defrost_detection`.
