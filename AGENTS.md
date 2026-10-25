@@ -18,6 +18,15 @@ Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004
 10. **Spec Implementation Fast Path:** Treat user specs (`doc/CANBOX_SPEC_*.md`) as pre-verified ground truth. Do not run exploratory greps or subagent audits on documented bitfields/formulas. Run `./tools/code_map.py <CAN_ID|Cmd>` + surgical reads in parallel (Turn 1), batch all code edits (Turn 2), and batch test + doc updates (Turn 3).
 11. **Pre-Diagnosed Bug Fast Path:** When the user provides target files, functions, log evidence, or root causes (or when resuming from a compacted summary with established RCA), execute strictly via the 3-turn pipeline: Turn 1 (parallel surgical reads of target function + test via `./tools/code_map.py`), Turn 2 (batch edits across source, builders, tests, and specs in a single turn), Turn 3 (run `./tools/test_fast.sh` with `WaitMsBeforeAsync=10000`, then `./tools/verify_all.sh` once with zero status polling). Never run broad exploratory greps, archive scans, or external decompiled codebase searches (`QF_Canbus_system/`) on diagnosed bugs.
 12. **External Firmware & Disassembly Audits (`research` Subagent):** When cross-checking external decompiled codebases or disassembly (`hiworld-canbus-PSA/`, `payload.asm`, `payload.bin`, `QF_Canbus_system/`) exceeding ~300 lines, delegate the binary/ASM audit to `invoke_subagent(TypeName="research")` so raw disassembly stays out of the main context window and avoids triggering `/compact`. Never dump multi-thousand-line annotated `.asm` files to `/tmp/*.txt` and page through them with `read_file`/`sed`.
+13. **Physical Workbench Verification Fast Path (`can0` & UART):**
+    - **Port & Bus Topology:** `can0` is PSA Comfort CAN @ **125 kbps** on `/dev/ttyUSB3` (held by `slcand`; **NEVER** probe or open `/dev/ttyUSB3` directly). Canbox UART is on `/dev/ttyUSB0` @ fixed **38,400 baud, 8N1** (Raise `0x2E` & Hiworld `0x5A`; **NEVER** toggle or drop baud to 19,200).
+    - **Sleeping Bus Keepalive & Interlocks:** Standalone workbench ECUs require 40 ms continuous keepalive (`0x036`, `0x0F6`, `0x128`, `0x15B`, `0x168`). Climate telemetry strictly requires **`0x1E3`** (`MSG_ETAT_CLIMAV_EMF`) alongside `0x1D0`. High-current heating loads (Rear Defrost / Heated Mirrors) require engine running simulation on **`0x0B6`** (900 RPM: `1C 20 00 00 00 00 00 D0`) and `0x12D` (`80 32 32 00 64 00 00 80`), otherwise the BSI interlock inhibits heating.
+    - **Rear Defrost Ground Truth:** Fascia button demand is `0x1D0` Byte 0 Bit 6 (`0x40`: `0x29` $\longleftrightarrow$ `0x69`); Climate ECU indicator is `0x1E3` Byte 1 Bit 3 (`0x08`: `0x00` $\longleftrightarrow$ `0x08`).
+    - **Standard Workbench Toolchain:** Never write ad-hoc Python test scripts when these proven tools exist:
+      - `python3 tools/probe_canbox_uart.py --port /dev/ttyUSB0` (Baud & protocol lock in <2s)
+      - `python3 tools/workbench_live_sniffer.py` (Real-time delta CAN + UART sniffer)
+      - `python3 tools/test_clima_canbox.py` (Climate telemetry sweep)
+      - `python3 tools/workbench_defrost_verifier.py --port /dev/ttyUSB0 -v` (Automated 3-cycle verifier)
 
 ---
 
