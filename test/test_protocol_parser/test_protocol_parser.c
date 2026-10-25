@@ -150,6 +150,7 @@ void test_peugeot_407_car_config_central_state2_builder(void);
 void test_peugeot_407_car_config_boundary_and_guards(void);
 void test_peugeot_407_car_config_disconnected_mdf_authority(void);
 void test_peugeot_407_virtual_mdf_periodic_broadcast(void);
+void test_peugeot_407_virtual_mdf_suppression_when_ign_off(void);
 void test_peugeot_407_mdf_coexistence_suppression(void);
 void test_peugeot_407_matrix_cluster_page_cycling(void);
 void test_peugeot_407_trip_reset_0x167(void);
@@ -167,6 +168,7 @@ void test_hiworld_connection_periodic_ping(void);
 void test_hiworld_car_mapping_lookup(void);
 void test_canbox_embedded_firmware_version(void);
 void test_hiworld_parse_downlink_cmd_f1(void);
+void test_hiworld_cmd_0x24_two_mode_handling(void);
 
 // Driver manager tests
 void test_hu_protocol_driver_switching(void) {
@@ -325,6 +327,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_car_config_boundary_and_guards);
     RUN_TEST(test_peugeot_407_car_config_disconnected_mdf_authority);
     RUN_TEST(test_peugeot_407_virtual_mdf_periodic_broadcast);
+    RUN_TEST(test_peugeot_407_virtual_mdf_suppression_when_ign_off);
     RUN_TEST(test_peugeot_407_mdf_coexistence_suppression);
     RUN_TEST(test_peugeot_407_matrix_cluster_page_cycling);
     RUN_TEST(test_peugeot_407_trip_reset_0x167);
@@ -342,6 +345,7 @@ int main(void) {
     RUN_TEST(test_hiworld_car_mapping_lookup);
     RUN_TEST(test_canbox_embedded_firmware_version);
     RUN_TEST(test_hiworld_parse_downlink_cmd_f1);
+    RUN_TEST(test_hiworld_cmd_0x24_two_mode_handling);
 
     return UNITY_END();
 }

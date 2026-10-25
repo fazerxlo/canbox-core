@@ -111,6 +111,9 @@ typedef struct {
 
     uint32_t             last_rx_millis;
     uint32_t             last_handshake_millis;
+    uint32_t             last_024_rx_ms;
+    bool                 first_024_received;
+    uint8_t              rr_step;
 
     hiworld_uart_tx_fn    uart_tx;
     hiworld_can_config_fn can_config;
@@ -145,6 +148,9 @@ void hiworld_conn_send_version(hiworld_connection_ctx_t *ctx);
 void hiworld_conn_send_feature_enables(hiworld_connection_ctx_t *ctx);
 void hiworld_conn_set_feature_enables(hiworld_connection_ctx_t *ctx, const uint8_t *feat1, const uint8_t *feat2);
 size_t hiworld_conn_build_frame(uint8_t cmd_id, const uint8_t *payload, uint8_t len, uint8_t *out_buf, size_t max_out);
+uint8_t hiworld_conn_get_024_rr_step(const hiworld_connection_ctx_t *ctx);
+void hiworld_conn_reset_024_state(hiworld_connection_ctx_t *ctx);
+hiworld_connection_ctx_t *proto_hiworld_get_connection_ctx(void);
 
 #ifdef __cplusplus
 }

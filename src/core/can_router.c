@@ -553,6 +553,29 @@ void can_router_trigger_full_state_push(void) {
     s_media_resync_timer = 0;
 }
 
+void can_router_push_central_settings(void) {
+    hu_protocol_send_central_state1(&s_current_state.config);
+    hu_protocol_send_central_state2(&s_current_state.config, &s_current_state);
+}
+
+void can_router_push_climate_doors_dsp(void) {
+    hu_protocol_send_climate(&s_current_state.climate);
+    hu_protocol_send_doors(&s_current_state.doors);
+    if (s_current_state.audio.valid) {
+        hu_protocol_send_audio_settings(&s_current_state.audio);
+    }
+}
+
+void can_router_push_media_header(void) {
+    if (!psa_source_arbiter_is_source_filtered()) {
+        hu_protocol_send_radio_state(&s_current_state.media.radio);
+        if (s_current_state.media.radio.source_mode == 0x20 ||
+            s_current_state.media.radio.source_mode == 0x30) {
+            hu_protocol_send_media_state(&s_current_state.media.cdc);
+        }
+    }
+}
+
 void can_router_process_uart_byte(uint8_t byte) {
     hu_protocol_feed_byte(byte);
 }

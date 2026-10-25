@@ -2,6 +2,7 @@
 #include "protocols/hiworld_car_mapping.h"
 #include "core/can_router.h"
 #include "hal/hal_can.h"
+#include "hal/hal_system.h"
 #include <string.h>
 
 #define HIWORLD_RX_BUF_SIZE 256
@@ -20,6 +21,7 @@ static uint8_t              s_rx_buf[HIWORLD_RX_BUF_SIZE];
 static uint8_t              s_payload_len = 0;
 static uint8_t              s_cmd_id = 0;
 static uint8_t              s_data_idx = 0;
+static uint8_t              s_024_rr_step = 0;
 
 size_t hiworld_conn_build_frame(uint8_t cmd_id, const uint8_t *payload, uint8_t len, uint8_t *out_buf, size_t max_out) {
     if (!out_buf || (size_t)(len + 5) > max_out) {
@@ -68,6 +70,10 @@ void hiworld_conn_init(hiworld_connection_ctx_t *ctx,
     ctx->feat2[0] = 0x00;
     ctx->feat2[1] = 0x01;
     ctx->feat2[2] = 0x80;
+    ctx->first_024_received = false;
+    ctx->last_024_rx_ms = 0;
+    ctx->rr_step = 0;
+    s_024_rr_step = 0;
     s_step = HW_PARSE_SOF1;
     s_payload_len = 0;
     s_cmd_id = 0;
@@ -99,17 +105,22 @@ void hiworld_conn_send_feature_enables(hiworld_connection_ctx_t *ctx) {
     /* Feature Enable 2 (Cmd 0x72): 8 bytes */
     send_hiworld_frame(ctx, HIWORLD_CMD_FEATURE_ENABLE2, ctx->feat2, 8);
 
-    /* Central State 1 (Cmd 0x76): 2 bytes */
-    uint8_t state1[2] = { 0x00, 0x00 };
-    send_hiworld_frame(ctx, HIWORLD_CMD_CENTRAL_STATE1, state1, 2);
-
-    /* Central State 2 (Cmd 0x79): 8 bytes (Byte 6: 0x00 = Dual Zone Independent) */
-    uint8_t state2[8] = { 0x00, 0x06, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x00 };
-    send_hiworld_frame(ctx, HIWORLD_CMD_CENTRAL_STATE2, state2, 8);
-
     /* Unit Info (Cmd 0xC1): 3 bytes (0x28, 0x20, 0x00) - distance/temp/fuel units */
     uint8_t units[3] = { 0x28, 0x20, 0x00 };
     send_hiworld_frame(ctx, HIWORLD_CMD_UNIT_INFO, units, 3);
+}
+
+uint8_t hiworld_conn_get_024_rr_step(const hiworld_connection_ctx_t *ctx) {
+    return ctx ? ctx->rr_step : s_024_rr_step;
+}
+
+void hiworld_conn_reset_024_state(hiworld_connection_ctx_t *ctx) {
+    s_024_rr_step = 0;
+    if (ctx) {
+        ctx->first_024_received = false;
+        ctx->last_024_rx_ms = 0;
+        ctx->rr_step = 0;
+    }
 }
 
 static void handle_parsed_command(hiworld_connection_ctx_t *ctx, uint8_t cmd_id, const uint8_t *payload, uint8_t len) {
@@ -125,33 +136,70 @@ static void handle_parsed_command(hiworld_connection_ctx_t *ctx, uint8_t cmd_id,
                 const uint8_t ack_payload[1] = { HIWORLD_CMD_CAR_TYPE_SET };
                 send_hiworld_frame(ctx, HIWORLD_CMD_HEARTBEAT, ack_payload, 1);
 
-                /* Do not re-blast entire 6-frame block if already active and unchanged */
-                if (ctx->state == HIWORLD_LINK_ACTIVE &&
-                    ctx->car_model_id == new_model_id &&
-                    ctx->car_variant == new_variant) {
-                    break;
+                uint32_t now_ms = hal_get_tick_ms();
+                bool model_changed = (ctx->state != HIWORLD_LINK_ACTIVE) ||
+                                     (ctx->car_model_id != new_model_id) ||
+                                     (ctx->car_variant != new_variant);
+                bool gap_exceeded = ctx->first_024_received &&
+                                    ((uint32_t)(now_ms - ctx->last_024_rx_ms) > 4500U);
+
+                if (!ctx->first_024_received || model_changed || gap_exceeded) {
+                    /* Case A — Initial Boot, Model Change, or Detected HU Reboot (> 4500 ms) */
+                    ctx->car_model_id = new_model_id;
+                    ctx->car_variant  = new_variant;
+                    ctx->state = HIWORLD_LINK_INITIALIZED;
+
+                    /* Look up car profile and baud rate */
+                    vehicle_profile_id_t profile_id;
+                    if (hiworld_car_mapping_get_profile(ctx->car_model_id, &profile_id)) {
+                        vehicle_profile_set_active(profile_id);
+                    }
+
+                    uint32_t baud = hiworld_car_mapping_get_baud_rate(ctx->car_model_id);
+                    if (ctx->can_config) {
+                        ctx->can_config(ctx->car_model_id, baud);
+                    }
+
+                    /* Send Version and Feature Enables (0xF0, 0x71, 0x72, 0xC1) */
+                    hiworld_conn_send_version(ctx);
+                    hiworld_conn_send_feature_enables(ctx);
+
+                    ctx->state = HIWORLD_LINK_ACTIVE;
+                    ctx->first_024_received = true;
+                    ctx->last_024_rx_ms = now_ms;
+                    s_024_rr_step = 0;
+                    ctx->rr_step = 0;
+
+                    can_router_trigger_full_state_push();
+                } else {
+                    /* Case B — Steady-State 3-Second Heartbeat */
+                    ctx->last_024_rx_ms = now_ms;
+                    uint8_t step = s_024_rr_step & 0x03U;
+                    s_024_rr_step = (uint8_t)((s_024_rr_step + 1U) & 0x03U);
+                    ctx->rr_step = s_024_rr_step;
+
+                    switch (step) {
+                        case 0:
+                            /* Step 0 (t + 3s): Send static discovery frames (0xF0, 0x71, 0x72, 0xC1) */
+                            hiworld_conn_send_version(ctx);
+                            hiworld_conn_send_feature_enables(ctx);
+                            break;
+                        case 1:
+                            /* Step 1 (t + 6s): Push Central Vehicle Settings (0x76 & 0x79) */
+                            can_router_push_central_settings();
+                            break;
+                        case 2:
+                            /* Step 2 (t + 9s): Push Climate (0x31), Doors (0x12), and Audio DSP (0x56) */
+                            can_router_push_climate_doors_dsp();
+                            break;
+                        case 3:
+                            /* Step 3 (t + 12s): Push lightweight active Radio/CD header status (0x84 / 0x82) */
+                            can_router_push_media_header();
+                            break;
+                        default:
+                            break;
+                    }
                 }
-
-                ctx->car_model_id = new_model_id;
-                ctx->car_variant  = new_variant;
-                ctx->state = HIWORLD_LINK_INITIALIZED;
-
-                /* Look up car profile and baud rate */
-                vehicle_profile_id_t profile_id;
-                if (hiworld_car_mapping_get_profile(ctx->car_model_id, &profile_id)) {
-                    vehicle_profile_set_active(profile_id);
-                }
-
-                uint32_t baud = hiworld_car_mapping_get_baud_rate(ctx->car_model_id);
-                if (ctx->can_config) {
-                    ctx->can_config(ctx->car_model_id, baud);
-                }
-
-                /* Acknowledge connection: Send Version and Feature Enables */
-                hiworld_conn_send_version(ctx);
-                hiworld_conn_send_feature_enables(ctx);
-
-                ctx->state = HIWORLD_LINK_ACTIVE;
             }
             break;
         }

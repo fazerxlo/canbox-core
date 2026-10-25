@@ -94,7 +94,7 @@ When the CAN box micro-controller powers on:
 2. While awaiting initial vehicle model assignment from the Android Head Unit, the CAN box emits a periodic firmware version beacon (`Cmd 0xF0`) once every 1000 ms (`hiworld_conn_task_periodic`). This serves as a link-discovery announcement.
 3. When Android boots or the USB/UART serial interface binds, Android's `QF_Canbus.apk` (`WcVehicleDataRuleHead5aa5`) opens the serial stream at 38,400 baud.
 4. The Head Unit begins dispatching the vehicle model configuration frame `0x24` (`forwardCurrentCarType`).
-5. **3000 ms Timeout / Retry Rule:** If Android receives no valid ACK response (`0xFF` with payload `0x24`) within 3000 ms, `QF_Canbus.apk` periodically resends `0x24` every 3000 ms until an acknowledgment is received.
+5. **Unconditional 3000 ms Heartbeat Rule:** Reverse engineering of `QF_Canbus.apk` (`PeugeotDataController$1.smali`) demonstrates that `0x24` is an ongoing unconditional heartbeat emitted via `sendEmptyMessageDelayed(1, 3000)` (`getIsWriteACK() == false`). The Head Unit emits `0x24` every 3000 ms indefinitely as long as the service is running. It is not a retry loop that halts upon ACK.
 
 ---
 
@@ -130,20 +130,26 @@ Upon receiving `Cmd 0x24`, the CAN box MUST immediately acknowledge receipt to s
   - Payload Byte 0: `0x24` (Acknowledged Downlink Command ID)
   - Checksum: `(0x01 + 0xFF + 0x24 - 1) & 0xFF = 0x23`
 
-#### Handshake De-duplication & Burst Suppression Rule:
-To prevent serial buffer overflows on Android head units and avoid UI redraw stuttering:
-1. **Unchanged Model in `HIWORLD_LINK_ACTIVE`:**
-   If the CAN box is already in `HIWORLD_LINK_ACTIVE` state and receives a `0x24` frame whose `car_model_id` and `car_variant` match the active configuration:
-   - The CAN box returns the 6-byte ACK `5A A5 01 FF 24 23`.
-   - The redundant ~70-byte initialization block (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`) is **suppressed**.
-   - Triggers an immediate full state push (`can_router_trigger_full_state_push()`) to synchronize radio/media telemetry (`0x84`, `0x85`, `0x86`), doors (`0x12`), climate (`0x31`), and DSP settings without waiting for CAN delta transitions.
-2. **Initial Handshake or Model Change:**
-   If the CAN box is in `HIWORLD_LINK_WAIT_MODEL` state OR the received `car_model_id` / `car_variant` differs from the current configuration:
-   - Returns ACK `5A A5 01 FF 24 23`.
+#### Two-Mode Synchronization Architecture:
+To prevent serial buffer overflows on Android head units (160+ bytes every 3 seconds) while ensuring rapid recovery after head unit reboots or app crashes:
+
+1. **Case A: Initial Boot, Model Change, or Detected HU Reboot (`gap > 4500 ms`):**
+   Triggered on first `0x24` after power-on, when car model/variant changes, or when no `0x24` arrived for $> 4500\text{ ms}$ (Android OS reboot):
+   - Returns immediate ACK: `5A A5 01 FF 24 23`.
    - Dynamically reconfigures CAN controller hardware (e.g., 125 kbps for CAN2004 vs 500 kbps for EMP2) and switches active profile (`vehicle_profile_set_active`).
-   - Transmits full initialization sequence: `0xF0` (Version), `0x71` & `0x72` (Feature Enable Masks), `0x76` & `0x79` (Central States), and `0xC1` (Measurement Units).
-   - Triggers an immediate full state push (`can_router_trigger_full_state_push()`) ensuring all current vehicle and media states are forwarded to Android.
+   - Transmits full static discovery burst: `0xF0` (Version), `0x71` & `0x72` (Feature Enable Masks), and `0xC1` (Measurement Units).
+   - Triggers an immediate full state push (`can_router_trigger_full_state_push()`) in $< 50\text{ ms}$: radio/media telemetry (`0x84`, `0x85`, `0x86`), doors (`0x12`), climate (`0x31`), central config (`0x76`, `0x79`), and DSP settings (`0x56`).
+   - Resets steady-state round-robin counter: `s_024_rr_step = 0`.
    - Sets state to `HIWORLD_LINK_ACTIVE`.
+
+2. **Case B: Steady-State 3-Second Heartbeat (`gap \le 4500 ms`):**
+   When `0x24` arrives while already in `HIWORLD_LINK_ACTIVE` with unchanged model code:
+   - Returns immediate ACK: `5A A5 01 FF 24 23`.
+   - Advances a 4-step round-robin counter (`s_024_rr_step++ & 0x03U`) to distribute synchronization evenly with zero UART bursts:
+     - **Step 0 ($t + 3\text{ s}$):** Static capabilities (`0xF0`, `0x71` `5A A5 02 71 60 12 E4`, `0x72` `5A A5 08 72 00 01 80 00 00 00 00 00 FA`, and `0xC1`).
+     - **Step 1 ($t + 6\text{ s}$):** Central Vehicle Settings (`0x76` and `0x79`).
+     - **Step 2 ($t + 9\text{ s}$):** Body & Cabin Telemetry (`0x31` Climate, `0x12` Doors, `0x56` Audio DSP).
+     - **Step 3 ($t + 12\text{ s}$):** Lightweight Media Header (`0x84` Radio State or `0x82` CDC State; excludes heavy 52-byte preset lists `0x85` and 68-byte RadioText `0x86`).
 
 ---
 
@@ -687,11 +693,11 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
 ### Vector 4: CAN Box Broadcasts Feature Enable Bitmasks
 - **Uplink Serial Transmitted (`Cmd 0x71` & `0x72`):**
   ```
-  Frame 1: 5A A5 02 71 FF FF 71
-  Frame 2: 5A A5 02 72 FB FF 6E
+  Frame 1: 5A A5 02 71 FF FF 70
+  Frame 2: 5A A5 02 72 FB FF 6D
   ```
-  - Checksum 1: `(0x02 + 0x71 + 0xFF + 0xFF - 1) & 0xFF = 0x71`
-  - Checksum 2: `(0x02 + 0x72 + 0xFB + 0xFF - 1) & 0xFF = 0x6E`
+  - Checksum 1: `(0x02 + 0x71 + 0xFF + 0xFF - 1) & 0xFF = 0x70`
+  - Checksum 2: `(0x02 + 0x72 + 0xFB + 0xFF - 1) & 0xFF = 0x6D`
 
 ### Vector 5: Periodic 1.0 Hz Protocol Keep-Alive Heartbeat
 - **Uplink Serial Transmitted (Every 1000 ms):**
@@ -706,17 +712,23 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
   - Checksum: `(0x01 + 0xFF + 0x01 - 1) & 0xFF = 0x00`
   - **Rate:** Exactly 1.0 Hz (1000 ms cadence). Prevents UART link timeout on Head Unit without choking the 38,400 baud serial bus.
 
-### Vector 6: Handshake De-duplication on Repeated Model Set (Model Unchanged)
-- **Downlink Serial Received (Host $\to$ CAN Box):**
+### Vector 6: Steady-State 3-Second Heartbeat Synchronization (4-Step Round-Robin)
+- **Downlink Serial Received (Host $\to$ CAN Box, Every 3000 ms):**
   ```
   Hex Trace: 5A A5 02 24 22 00 47
   ```
 - **Uplink Serial Transmitted (CAN Box $\to$ Host):**
   ```
-  Hex Trace: 5A A5 01 FF 24 23
+  Hex Trace: 5A A5 01 FF 24 23  (ACK frame always emitted first)
   ```
-  - **Expected Outcome:** Exactly **one** 6-byte ACK frame is emitted.
-  - The redundant 6-frame block (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`) is **suppressed**. Zero dropped frames, zero Android UI stutter.
+  - **Expected Outcome:** Immediate ACK frame `5A A5 01 FF 24 23` is always returned.
+  - Full state burst (160+ bytes) is **suppressed**.
+  - Pings advance a 4-step round-robin counter:
+    - Step 0 ($t + 3\text{ s}$): Static capabilities (`0xF0`, `0x71`, `0x72`, `0xC1`).
+    - Step 1 ($t + 6\text{ s}$): Central Vehicle Settings (`0x76` & `0x79`).
+    - Step 2 ($t + 9\text{ s}$): Cabin & Body Telemetry (`0x31` Climate, `0x12` Doors, `0x56` DSP).
+    - Step 3 ($t + 12\text{ s}$): Lightweight active Radio/CD header (`0x84` / `0x82`).
+  - Zero dropped frames, zero UART congestion, $< 50\text{ bytes}$ per ping.
 
 ### Vector 7: Headunit Synchronizes GPS Clock (22 Sept 2026, 15:30, 24H)
 - **Downlink Serial Received (Host $\to$ CAN Box):**

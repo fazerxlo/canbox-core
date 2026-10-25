@@ -4,6 +4,7 @@
 #include "protocols/proto_hiworld.h"
 #include "protocols/hiworld_connection.h"
 #include "hal/hal_gpio.h"
+#include "hal/hal_system.h"
 
 void test_integration_hiworld_steering_wheel_volume_up_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
@@ -149,50 +150,168 @@ void test_integration_hiworld_telemetry_periodic_pipeline(void) {
 
 void test_integration_hiworld_runtime_car_selection_and_handshake(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    hiworld_conn_reset_024_state(proto_hiworld_get_connection_ctx());
 
-    // Feed downlink car model selection packet: 5A A5 02 24 22 00 47 (Peugeot 407)
+    uint8_t rx_buf[256];
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 1. Initial 0x24 (Case A - Initial Boot / Model Configuration):
+     * 5A A5 02 24 22 00 47 (Peugeot 407) */
     const uint8_t stream[] = { 0x5A, 0xA5, 0x02, 0x24, 0x22, 0x00, 0x47 };
     for (size_t i = 0; i < sizeof(stream); i++) {
         hu_protocol_get_active()->feed_byte(stream[i]);
     }
 
-    uint8_t rx_buf[128];
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-
-    // Expect response with ACK (0xFF, payload 0x24) + Version (0xF0) + Feature Enables
-    TEST_ASSERT_TRUE(rx_len >= 6);
-
-    // Verify first response is ACK frame: 5A A5 01 FF 24 23
+    /* Expect response with ACK (0xFF, payload 0x24) + Version (0xF0) + Feature Enables + Full State */
     const uint8_t expected_ack[] = { 0x5A, 0xA5, 0x01, 0xFF, 0x24, 0x23 };
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
 
-    // Verify subsequent frame is Version Report (0xF0)
+    /* Verify subsequent frame is Version Report (0xF0) */
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF1, rx_buf[6]);
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_SOF2, rx_buf[7]);
     TEST_ASSERT_EQUAL_HEX8(HIWORLD_CMD_VERSION_REPORT, rx_buf[9]);
 
-    // Drain all remaining bytes from initial handshake burst
-    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
-
-    // Feed downlink car model selection packet again (repeated handshake with unchanged model)
-    for (size_t i = 0; i < sizeof(stream); i++) {
-        hu_protocol_get_active()->feed_byte(stream[i]);
-    }
-
-    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
-    // Verify first frame is ACK (5A A5 01 FF 24 23)
-    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
-
-    // Verify 70-byte handshake configuration burst (0xF0 Version, 0x71/0x72 Feature Enables) is suppressed
-    bool found_version = false;
+    /* Verify full state push includes doors (0x12) */
+    bool found_doors = false;
     for (size_t i = 0; i + 3 < rx_len; i++) {
-        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
-            found_version = true;
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_DOOR_WINDOW_STATE) {
+            found_doors = true;
             break;
         }
     }
+    TEST_ASSERT_TRUE(found_doors);
+
+    /* Drain all remaining bytes from initial handshake burst */
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 2. Steady-State Ping 1 (Case B, Step 0 @ t+3s):
+     * Emits ACK + static discovery (0xF0, 0x71, 0x72, 0xC1).
+     * Must NOT perform full state push (no doors 0x12). */
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        hu_protocol_get_active()->feed_byte(stream[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    bool found_version = false;
+    found_doors = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+        }
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_DOOR_WINDOW_STATE) {
+            found_doors = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_version);
+    TEST_ASSERT_FALSE(found_doors);
+
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 3. Steady-State Ping 2 (Case B, Step 1 @ t+6s):
+     * Emits ACK + Central Vehicle Settings (0x76 & 0x79).
+     * Must NOT send 0xF0, 0x12, or 0x31. */
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        hu_protocol_get_active()->feed_byte(stream[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    bool found_central = false;
+    found_version = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_CENTRAL_STATE1) {
+            found_central = true;
+        }
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_central);
     TEST_ASSERT_FALSE(found_version);
+
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 4. Steady-State Ping 3 (Case B, Step 2 @ t+9s):
+     * Emits ACK + Climate (0x31) + Doors (0x12).
+     * Must NOT send 0xF0 or Central State 0x76. */
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        hu_protocol_get_active()->feed_byte(stream[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    bool found_climate = false;
+    found_central = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_AIR_CON) {
+            found_climate = true;
+        }
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_CENTRAL_STATE1) {
+            found_central = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_climate);
+    TEST_ASSERT_FALSE(found_central);
+
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 5. Steady-State Ping 4 (Case B, Step 3 @ t+12s):
+     * Emits ACK + Radio State (0x84).
+     * Must NOT send 0x85 (presets), 0xF0, or 0x31. */
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        hu_protocol_get_active()->feed_byte(stream[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    bool found_radio = false;
+    bool found_presets = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_CAR_RADIO_STATE) {
+            found_radio = true;
+        }
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_CAR_RADIO_PRESET_FREQ) {
+            found_presets = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_radio);
+    TEST_ASSERT_FALSE(found_presets);
+
+    while (read_uart_output(rx_buf, sizeof(rx_buf)) > 0) {}
+
+    /* 6. Simulated HU Reboot Gap (> 4500 ms):
+     * Simulate that Android restarted and no 0x24 was seen for 5000 ms.
+     * Must trigger Case A again (Instant Full State Push). */
+    hiworld_connection_ctx_t *ctx = proto_hiworld_get_connection_ctx();
+    TEST_ASSERT_NOT_NULL(ctx);
+    ctx->last_024_rx_ms = hal_get_tick_ms() - 5000;
+
+    for (size_t i = 0; i < sizeof(stream); i++) {
+        hu_protocol_get_active()->feed_byte(stream[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len >= sizeof(expected_ack));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, rx_buf, sizeof(expected_ack));
+
+    found_version = false;
+    found_doors = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+        }
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == HIWORLD_CMD_DOOR_WINDOW_STATE) {
+            found_doors = true;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_version, "Expected full discovery burst (0xF0) after reboot gap");
+    TEST_ASSERT_TRUE_MESSAGE(found_doors, "Expected full state push (doors) after reboot gap");
 }
 
 void test_integration_hiworld_tpms_pipeline(void) {

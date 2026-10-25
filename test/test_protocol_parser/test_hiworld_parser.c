@@ -291,3 +291,117 @@ void test_hiworld_parse_downlink_cmd_f1(void) {
     TEST_ASSERT_EQUAL_HEX8(0x0F, s_last_packet.cmd);
     TEST_ASSERT_EQUAL_UINT8(0, s_last_packet.payload_len);
 }
+
+void test_hiworld_cmd_0x24_two_mode_handling(void) {
+    hiworld_connection_ctx_t ctx;
+    hiworld_conn_init(&ctx, "HW_PSA_V2.04", mock_uart_tx, mock_can_config);
+
+    const uint8_t cmd_024_407[] = { 0x5A, 0xA5, 0x02, 0x24, 0x22, 0x00, 0x47 };
+    const uint8_t expected_ack[] = { 0x5A, 0xA5, 0x01, 0xFF, 0x24, 0x23 };
+
+    /* 1. Initial 0x24 reception (Case A: Boot):
+     * Emits ACK + full static discovery burst (0xF0, 0x71, 0x72, 0xC1). */
+    s_mock_uart_tx_len = 0;
+    for (size_t i = 0; i < sizeof(cmd_024_407); i++) {
+        hiworld_conn_process_rx_byte(&ctx, cmd_024_407[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(HIWORLD_LINK_ACTIVE, ctx.state);
+    TEST_ASSERT_TRUE(ctx.first_024_received);
+    TEST_ASSERT_EQUAL_UINT8(0, hiworld_conn_get_024_rr_step(&ctx));
+    TEST_ASSERT_TRUE(s_mock_uart_tx_len >= sizeof(expected_ack));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, s_mock_uart_tx_buf, sizeof(expected_ack));
+
+    /* Verify 0xF0 version is in UART output */
+    bool found_version = false;
+    for (size_t i = 0; i + 3 < s_mock_uart_tx_len; i++) {
+        if (s_mock_uart_tx_buf[i] == 0x5A && s_mock_uart_tx_buf[i+1] == 0xA5 && s_mock_uart_tx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_version);
+
+    /* 2. Steady-State Ping 1 (Case B, Step 0 @ t+3s):
+     * Emits ACK + static discovery frames (0xF0, 0x71, 0x72, 0xC1). */
+    s_mock_uart_tx_len = 0;
+    for (size_t i = 0; i < sizeof(cmd_024_407); i++) {
+        hiworld_conn_process_rx_byte(&ctx, cmd_024_407[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT8(1, hiworld_conn_get_024_rr_step(&ctx));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, s_mock_uart_tx_buf, sizeof(expected_ack));
+
+    found_version = false;
+    for (size_t i = 0; i + 3 < s_mock_uart_tx_len; i++) {
+        if (s_mock_uart_tx_buf[i] == 0x5A && s_mock_uart_tx_buf[i+1] == 0xA5 && s_mock_uart_tx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_version);
+
+    /* 3. Steady-State Ping 2 (Case B, Step 1 @ t+6s):
+     * On hiworld_connection UART TX, emits ONLY ACK frame (Central settings pushed via can_router). */
+    s_mock_uart_tx_len = 0;
+    for (size_t i = 0; i < sizeof(cmd_024_407); i++) {
+        hiworld_conn_process_rx_byte(&ctx, cmd_024_407[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT8(2, hiworld_conn_get_024_rr_step(&ctx));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_ack), s_mock_uart_tx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, s_mock_uart_tx_buf, sizeof(expected_ack));
+
+    /* 4. Steady-State Ping 3 (Case B, Step 2 @ t+9s):
+     * Emits ONLY ACK frame on ctx->uart_tx. */
+    s_mock_uart_tx_len = 0;
+    for (size_t i = 0; i < sizeof(cmd_024_407); i++) {
+        hiworld_conn_process_rx_byte(&ctx, cmd_024_407[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT8(3, hiworld_conn_get_024_rr_step(&ctx));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_ack), s_mock_uart_tx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, s_mock_uart_tx_buf, sizeof(expected_ack));
+
+    /* 5. Steady-State Ping 4 (Case B, Step 3 @ t+12s):
+     * Emits ONLY ACK frame on ctx->uart_tx. Wraps rr_step back to 0. */
+    s_mock_uart_tx_len = 0;
+    for (size_t i = 0; i < sizeof(cmd_024_407); i++) {
+        hiworld_conn_process_rx_byte(&ctx, cmd_024_407[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, hiworld_conn_get_024_rr_step(&ctx));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_ack), s_mock_uart_tx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_ack, s_mock_uart_tx_buf, sizeof(expected_ack));
+
+    /* 6. Simulated HU Reboot Gap (> 4500 ms):
+     * Simulate gap > 4500 ms. Must trigger Case A again. */
+    ctx.last_024_rx_ms = hal_get_tick_ms() - 5000;
+    s_mock_uart_tx_len = 0;
+    for (size_t i = 0; i < sizeof(cmd_024_407); i++) {
+        hiworld_conn_process_rx_byte(&ctx, cmd_024_407[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, hiworld_conn_get_024_rr_step(&ctx));
+    found_version = false;
+    for (size_t i = 0; i + 3 < s_mock_uart_tx_len; i++) {
+        if (s_mock_uart_tx_buf[i] == 0x5A && s_mock_uart_tx_buf[i+1] == 0xA5 && s_mock_uart_tx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_version);
+
+    /* 7. Model Change (Switch to Model 6 / Peugeot 307):
+     * 5A A5 02 24 06 00 2B (CS = (2 + 0x24 + 6 + 0 - 1) = 0x2B) */
+    const uint8_t cmd_024_307[] = { 0x5A, 0xA5, 0x02, 0x24, 0x06, 0x00, 0x2B };
+    s_mock_uart_tx_len = 0;
+    for (size_t i = 0; i < sizeof(cmd_024_307); i++) {
+        hiworld_conn_process_rx_byte(&ctx, cmd_024_307[i]);
+    }
+    TEST_ASSERT_EQUAL_HEX8(0x06, ctx.car_model_id);
+    TEST_ASSERT_EQUAL_HEX8(6, s_mock_last_model_id);
+    TEST_ASSERT_EQUAL_UINT8(0, hiworld_conn_get_024_rr_step(&ctx));
+    found_version = false;
+    for (size_t i = 0; i + 3 < s_mock_uart_tx_len; i++) {
+        if (s_mock_uart_tx_buf[i] == 0x5A && s_mock_uart_tx_buf[i+1] == 0xA5 && s_mock_uart_tx_buf[i+3] == HIWORLD_CMD_VERSION_REPORT) {
+            found_version = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_version);
+}

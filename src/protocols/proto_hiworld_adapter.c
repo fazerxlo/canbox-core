@@ -17,6 +17,10 @@ static hiworld_connection_ctx_t s_hw_conn_ctx;
 static bool s_hiworld_initialized = false;
 static uint8_t s_hiworld_hb_tick = 0;
 
+hiworld_connection_ctx_t *proto_hiworld_get_connection_ctx(void) {
+    return &s_hw_conn_ctx;
+}
+
 static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
     (void)car_model_id;
     can_baudrate_t baud = CAN_BAUD_125K;
@@ -47,7 +51,7 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     }
 
     if (packet->cmd == HIWORLD_CMD_CAR_TYPE_SET) {
-        can_router_trigger_full_state_push();
+        /* Handled in hiworld_connection.c via two-mode architecture */
     } else if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
         /* ForwardEcuSetting:
          * 4-byte variant (standard Android QF/Hiworld APK):

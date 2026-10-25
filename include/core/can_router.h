@@ -289,6 +289,9 @@ bool can_router_is_bus_sleeping(void);
 void can_router_notify_wake(void);
 void can_router_push_radio_and_media_state(void);
 void can_router_trigger_full_state_push(void);
+void can_router_push_central_settings(void);
+void can_router_push_climate_doors_dsp(void);
+void can_router_push_media_header(void);
 
 #ifdef __cplusplus
 }
