@@ -285,11 +285,11 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
 void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 5) return;
 
-    /* Indicator flags: preserve TA (bit 7) if already set by 0x265 or set by 0x225 bit 2 */
-    uint8_t ta_flag = (radio->indicators & 0x80);
-    if (data[0] & 0x04) ta_flag = 0x80; /* TA from 0x225 */
+    /* Indicator flags: preserve TA (bit 7) and Stereo (bit 6) from 0x265 or set by 0x225 bit 2 */
+    uint8_t flags = (radio->indicators & 0xC0);
+    if (data[0] & 0x04) flags |= 0x80; /* TA from 0x225 */
 
-    radio->indicators = ta_flag;
+    radio->indicators = flags;
     if (data[0] & 0x20) radio->indicators |= 0x20; /* RDS */
     if (data[0] & 0x40) radio->indicators |= 0x10; /* SCAN */
     if (radio->radio_text_len > 0) radio->indicators |= 0x04; /* RDTEXT */
@@ -368,14 +368,19 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
 
 void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 1) return;
-    if (data[0] & 0x20) {
-        if (!(radio->indicators & 0x80)) {
-            radio->indicators |= 0x80;
-        }
+
+    /* Bit 4 (0x10): TA (Traffic Announcement) -> Hiworld bit 7 (0x80) */
+    if (data[0] & 0x10) {
+        radio->indicators |= 0x80;
     } else {
-        if (radio->indicators & 0x80) {
-            radio->indicators &= ~0x80;
-        }
+        radio->indicators &= ~0x80;
+    }
+
+    /* Bit 5 (0x20): Stereo Reception (ST) -> Hiworld bit 6 (0x40) */
+    if (data[0] & 0x20) {
+        radio->indicators |= 0x40;
+    } else {
+        radio->indicators &= ~0x40;
     }
 }
 

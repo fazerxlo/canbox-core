@@ -529,11 +529,18 @@ static inline void psa_rd4_process_can_0x225(psa_rd4_media_ctx_t *ctx, const uin
 static inline void psa_rd4_process_can_0x265(psa_rd4_media_ctx_t *ctx, const uint8_t *d, uint8_t dlc) {
     if (!ctx || !d || dlc < 1) return;
 
-    /* Byte 0 Bit 5: TA (Traffic Announcement) */
-    if (d[0] & 0x20) {
-        ctx->radio.indicators |= 0x80; /* TA bit in Hiworld */
+    /* Byte 0 Bit 4 (0x10): TA (Traffic Announcement priority) -> Hiworld Indicator bit 7 (0x80) */
+    if (d[0] & 0x10) {
+        ctx->radio.indicators |= 0x80;
     } else {
         ctx->radio.indicators &= ~0x80;
+    }
+
+    /* Byte 0 Bit 5 (0x20): Stereo Reception (ST) -> Hiworld Indicator bit 6 (0x40) */
+    if (d[0] & 0x20) {
+        ctx->radio.indicators |= 0x40;
+    } else {
+        ctx->radio.indicators &= ~0x40;
     }
 }
 
@@ -736,9 +743,13 @@ The following edge cases and protocol interactions require bench testing with ph
 2. **AM Waveband Frequency Representation on CAN `0x225`:**
    - In FM mode, $f_{\text{MHz}} = \text{raw} \times 0.05 + 50.0$.
    - *Manual Check:* Verify if Medium Wave (AM) raw values on CAN `0x225` directly represent frequency in kHz, or if a different linear scaling formula applies.
-3. **Stereo Reception Indicator Bit:**
-   - Bit 6 of Hiworld `Cmd 0x84 Data[4]` is the `ST` (Stereo) indicator.
-   - *Manual Check:* Determine whether PSA `0x225` or `0x265` carries a distinct Stereo flag, or whether Hiworld Head Units expect bit 6 to mirror the `RDS` locked flag (`0x20`).
+3. **Stereo Reception & TA Indicator Bits (Resolved):**
+   - Bit 7 of Hiworld `Cmd 0x84 Data[4]` is `TA` (Traffic Announcement).
+   - Bit 6 of Hiworld `Cmd 0x84 Data[4]` is `ST` (Stereo reception).
+   - Verified via physical RD4 capture `rd4_tuner_TA_switching_log.csv`:
+     - PSA CAN `0x265` Byte 0 Bit 4 (`0x10`) is the dynamic `TA` toggle (`0xA4` $\longleftrightarrow$ `0xB4`).
+     - PSA CAN `0x265` Byte 0 Bit 5 (`0x20`) is `ST` (Stereo reception), active on stereo FM broadcasts.
+     - Previous versions mistakenly checked `data[0] & 0x20` for TA, locking TA ON whenever Stereo reception was active. Resolved by mapping Bit 4 to TA (`0x80`) and Bit 5 to ST (`0x40`).
 4. **CDC Multi-Disc Loaded Bitmask Synthesis:**
    - PSA CAN `0x3A6` only explicitly reports the active disc index.
    - *Manual Check:* Verify whether external CD changers broadcast the full multi-disc magazine presence mask on auxiliary CDC bus frames (`0x131` / `0x1A0`), or whether synthesizing `1 << (active_disc - 1)` is sufficient for the Android media player.

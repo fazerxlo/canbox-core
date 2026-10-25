@@ -684,14 +684,23 @@ void test_peugeot_407_rd4_frequency_and_ta_stability(void) {
     TEST_ASSERT_EQUAL_UINT16(960, media.radio.freq_0_1mhz);
     TEST_ASSERT_EQUAL_UINT8(1, media.radio.preset_slot);
 
-    // 4. TA set by 0x265 (Byte 0 bit 5 = 0x20): payload b4 10 00 01
+    // 4. TA set by 0x265 (Byte 0 bit 4 = 0x10, bit 5 = 0x20 Stereo): payload b4 10 00 01
     const uint8_t can_265[] = { 0xB4, 0x10, 0x00, 0x01 };
     psa_rd4_process_can_0x265(&media.radio, can_265, sizeof(can_265));
-    TEST_ASSERT_EQUAL_HEX8(0xA0, media.radio.indicators & 0xA0); /* Both TA (0x80) and RDS (0x20) set */
+    TEST_ASSERT_EQUAL_HEX8(0xE0, media.radio.indicators & 0xE0); /* TA (0x80), Stereo (0x40), RDS (0x20) */
 
-    // 5. Subsequent 0x225 arrival: must NOT clear TA set by 0x265!
+    // 5. Subsequent 0x225 arrival: must NOT clear TA or Stereo set by 0x265!
     psa_rd4_process_can_0x225(&media.radio, can_225, sizeof(can_225));
-    TEST_ASSERT_EQUAL_HEX8(0xA0, media.radio.indicators & 0xA0); /* TA remains set (no flickering!) */
+    TEST_ASSERT_EQUAL_HEX8(0xE0, media.radio.indicators & 0xE0); /* TA & ST remain set (no flickering!) */
+
+    // 5b. TA toggle OFF by 0x265 (A4 10 00 01): clears TA (0x80) while preserving Stereo (0x40)
+    const uint8_t can_265_off[] = { 0xA4, 0x10, 0x00, 0x01 };
+    psa_rd4_process_can_0x265(&media.radio, can_265_off, sizeof(can_265_off));
+    TEST_ASSERT_EQUAL_HEX8(0x00, media.radio.indicators & 0x80); /* TA cleared */
+    TEST_ASSERT_EQUAL_HEX8(0x60, media.radio.indicators & 0x60); /* Stereo (0x40) and RDS (0x20) active */
+
+    // Turn TA back on for subsequent checks
+    psa_rd4_process_can_0x265(&media.radio, can_265, sizeof(can_265));
 
     // 6. Hiworld Serialization (Cmd 0x84): verify Little-Endian frequency bytes & FM1 band
     uint8_t out[32];
@@ -701,7 +710,7 @@ void test_peugeot_407_rd4_frequency_and_ta_stability(void) {
     // 960 (0x03C0) in Little Endian: out[5] = 0xC0, out[6] = 0x03
     TEST_ASSERT_EQUAL_HEX8(0xC0, out[5]);
     TEST_ASSERT_EQUAL_HEX8(0x03, out[6]);
-    TEST_ASSERT_EQUAL_HEX8(0xA0, out[8]); /* Indicators: TA + RDS */
+    TEST_ASSERT_EQUAL_HEX8(0xE0, out[8]); /* Indicators: TA (0x80) + ST (0x40) + RDS (0x20) */
 
     // 7. Test FM2 frame from real dump (dump_2026-10-09_21-41-25.log):
     // CAN 0x225: 20 50 20 02 ee (Preset 5, Band 0x20 = FM2, Freq 750 = 87.5 MHz)
