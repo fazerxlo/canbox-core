@@ -203,7 +203,8 @@ void test_integration_raise_downlink_trip_reset_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[1]); // Bit 7: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent_frame.data[0]); // 0x80 | 0x0A: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
@@ -217,7 +218,8 @@ void test_integration_raise_downlink_trip_reset_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x40, sent_frame.data[1]); // Bit 6: Trip 2 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x4C, sent_frame.data[0]); // 0x40 | 0x0C: Trip 2 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 }

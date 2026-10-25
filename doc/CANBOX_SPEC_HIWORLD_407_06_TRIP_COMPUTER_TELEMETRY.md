@@ -115,8 +115,8 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
   - View Instant: `5A A5 04 1B 01 00 01 FF 1F` (No CAN action)
   - View Trip 1: `5A A5 04 1B 02 00 01 FF 20` (No CAN action)
   - View Trip 2: `5A A5 04 1B 03 00 01 FF 21` (No CAN action)
-  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x221` with `0x80`
-  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x221` with `0x40`
+  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0A 06 FF FF 00 00 00 00`)
+  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0C 06 FF FF 00 00 00 00`)
 
 ---
 

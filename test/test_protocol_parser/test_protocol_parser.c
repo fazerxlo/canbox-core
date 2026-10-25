@@ -153,6 +153,7 @@ void test_peugeot_407_virtual_mdf_periodic_broadcast(void);
 void test_peugeot_407_virtual_mdf_suppression_when_ign_off(void);
 void test_peugeot_407_mdf_coexistence_suppression(void);
 void test_peugeot_407_matrix_cluster_page_cycling(void);
+void test_peugeot_407_matrix_cluster_inactivity_timeout(void);
 void test_peugeot_407_trip_reset_0x167(void);
 
 // Hiworld protocol test declarations
@@ -330,6 +331,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_virtual_mdf_suppression_when_ign_off);
     RUN_TEST(test_peugeot_407_mdf_coexistence_suppression);
     RUN_TEST(test_peugeot_407_matrix_cluster_page_cycling);
+    RUN_TEST(test_peugeot_407_matrix_cluster_inactivity_timeout);
     RUN_TEST(test_peugeot_407_trip_reset_0x167);
 
     // Hiworld Protocol Unit Tests

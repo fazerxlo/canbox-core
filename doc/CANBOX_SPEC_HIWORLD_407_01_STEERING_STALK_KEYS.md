@@ -123,7 +123,8 @@ Directly verified against real OEM Hiworld transmissions and Android `com.qf.veh
 | **Rotary Scroll Up** | `0x21F` Byte 1 Counter $+1$ | `0x12` | Scroll Up (Pulse) | `0x42` | `0x13` |
 | **Rotary Scroll Down** | `0x21F` Byte 1 Counter $-1$ | `0x11` | Scroll Down (Pulse) | `0x43` | `0x14` |
 | **Stalk Tip Trip Button (ODB)** | `0x221` Byte 0: `0x08` (`0xC8`) | `0x14` | Trip Page Cycle / Stalk Key `0x14` | — | — |
-| **Key Released (Idle)** | `0x21F` Byte 0: `0x00` / `0x221` Bit 3: `0` | `0x00` | All Keys Released | `0x00` | `0x00` |
+| **Left Stalk Tip Button** | `0x221` Byte 0: `0x01` (`0xC1`) | `0x40` | Left Stalk Tip / Key `0x40` | — | — |
+| **Key Released (Idle)** | `0x21F` Byte 0: `0x00` / `0x221` Bits 3,0: `0` | `0x00` | All Keys Released | `0x00` | `0x00` |
 
 ---
 

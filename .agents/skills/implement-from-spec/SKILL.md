@@ -21,25 +21,25 @@ Activate this workflow whenever:
 1. **Spec is Verified Ground Truth:** Treat bitfields, CAN IDs, byte layouts, scaling formulas, sentinels, and enum values in the document as pre-verified ground truth.
 2. **Zero Exploratory Research:** Do NOT audit, second-guess, or cross-check documented details against raw CAN dumps, git history, or web search.
 3. **No Subagent Audits:** Do NOT launch subagents or run multi-turn audits to re-validate documented logic.
-4. **Targeted Symbol Lookup:** Never run unconstrained broad greps. Locate symbols with targeted `grep -n` capped with `-m 10` or direct paths.
+4. **Targeted Symbol Lookup:** Never run unconstrained broad greps. Run `./tools/code_map.py <CAN_ID|Cmd|symbol>` to get exact function `[StartLine-EndLine]` spans across headers, decoders, builders, tests, and specs in one call.
 
 ---
 
 ## The 3-Turn Fast Pipeline
 
 ### Turn 1: Surgical Scope & Parallel Read
-1. **Spec Scope:** Read only the relevant sections of the target document if not already in context.
+1. **Spec Scope:** Read only the relevant sections of the target document (using `./tools/code_map.py` and the Subsystem Lookup Table in `AGENTS.md`) if not already in context.
 2. **Locate Code Touchpoints:** Identify the specific files across the architecture layers:
-   - State definitions: `include/core/vehicle_state.h`
+   - State definitions: `include/core/can_router.h` and `include/profiles/peugeot_407.h`
    - L2 Decoder: `src/profiles/psa_407_*.c` and routing table in `src/profiles/profile_psa.c`
-   - L4/L5 Wire Builder: `include/protocols/hiworld_psa_builders.h` and `src/protocols/hiworld_psa_builders.c`
+   - L4/L5 Wire Builder: `include/protocols/hiworld_psa_builders.h`, `src/protocols/hiworld_psa_builders.c`, and `src/protocols/proto_hiworld*.c`
    - Core Router: `src/core/can_router.c` (dirty flags / dispatch)
    - Unit tests: `test/test_protocol_parser/test_407_*.c`
-3. **Parallel Range Reads:** Batch `read_file` calls in a single turn for only the target functions/structs using bounded line ranges (80–150 lines).
+3. **Parallel Range Reads:** Batch `read_file` calls in a single turn for only the target functions/structs using bounded line ranges ($\le 120$ lines).
 
 ### Turn 2: Atomic Batch Code & Test Edits
 Apply all implementation changes in parallel in a single turn using `edit_file` / `write_file`:
-1. **State & Structs:** Update `vehicle_state_t` fields in `include/core/vehicle_state.h` as specified.
+1. **State & Structs:** Update `vehicle_state_t` fields in `include/core/can_router.h` (or profile structs in `include/profiles/peugeot_407.h`) as specified.
 2. **L2 Decoder:** Implement CAN unpacking in `src/profiles/psa_407_*.c`:
    - Enforce bounds check: `if (frame->dlc < EXPECTED_DLC) return false;`
    - Use `read_be16()` / `read_le16()` for multi-byte values (PSA CAN is Big-Endian).

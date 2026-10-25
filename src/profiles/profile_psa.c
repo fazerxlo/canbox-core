@@ -56,6 +56,9 @@ static void stalk_key_cb(uint8_t key_id, uint8_t state) {
         case PSA_STALK_KEY_TRIP:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_TRIP;
             break;
+        case PSA_STALK_KEY_LEFT_TIP:
+            s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_STALK_LEFT;
+            break;
         default:
             s_active_state_for_stalk->wheel.active_key = WHEEL_KEY_NONE;
             break;

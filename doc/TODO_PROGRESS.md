@@ -21,7 +21,7 @@
 | **10. Date, Time & Units Synchronization** | 3 | 1 | 1 | 1 | 33% |
 | **11. RD4 Audio, Media, CDC & DSP** | 10 | 8 | 0 | 2 | 80% |
 | **12. Dynamic Guidelines & Steering SAS** | 1 | 1 | 0 | 0 | 100% |
-| **13. Powertrain & Telemetry Gauges** | 3 | 0 | 3 | 0 | 0% |
+| **13. Cruise/Limiter Presets & Powertrain** | 3 | 0 | 3 | 0 | 0% |
 | **14. Secondary Display & ID3 Navigation** | 2 | 0 | 0 | 2 | 0% |
 | **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 100% |
 | **Overall** | **57** | **39** | **6** | **12** | **68%** |
@@ -55,8 +55,8 @@
 | `[x]` | `0x79` | Central Convenience 2 | `0x09` | Fixed / BSI | `hiworld_connection.c`, `psa_407_car_config.c` | Guide-me-home delay, cluster dimmer level from `0x260` Profile 1 |
 | `[-]` | `0x7B` | Convenience Settings | `0x03` | `0x39B`, `0x2A8` | `hiworld_connection.c` | Uplink decoded; downlink handled via `0x15B` |
 | `[ ]` | `0x7D` | TPMS Calibration State | `0x03` | `0x1E1` | `proto_hiworld_adapter.c` | Planned calibration learning state uplink |
-| `[-]` | `0x81` | Speed & RPM Telemetry | `0x06` | `0x0B6`, `0x165` | `psa_407_telemetry.c` | Decoded internally; Hiworld `0x81` frame serializer pending |
-| `[-]` | `0x82` | Cruise & Limiter Info | `0x06` | `0x1A8` | `psa_407_telemetry.c` | Decoded internally; Hiworld `0x82` frame serializer pending |
+| `[-]` | `0x81` | Speed Limiter Memory Presets | `0x0A` | `0x39B` | `psa_407_car_config.c` | Speed limiter memory slots $M_1 \dots M_5$; downlinked via `0x8A` (`CruiseSpeedFrgment`) |
+| `[-]` | `0x82` | Cruise Memory Presets | `0x0A` | `0x39B` | `psa_407_car_config.c` | Cruise speed memory slots $M_1 \dots M_5$; downlinked via `0x8B` (`CruiseSpeedFrgment`) |
 | `[x]` | `0x84` | RD4 Radio / Source State | `0x0E` | `0x165`, `0x225`, `0x2A5`, `0x265` | `psa_407_rd4_audio.c`, `can_router.c` | Tuner band, frequency, presets 1..6, stereo, 8-char RDS PS name |
 | `[x]` | `0x85` | RD4 Preset Memory List | `0x0D`/`0x31` | `0x225`, `0x125` | `psa_407_rd4_audio.c`, `can_router.c` | Freqs (13B) & ISO-TP Station Names (49B); AMVAR status pending |
 | `[x]` | `0x86` | RDS RadioText Marquee | `1..64` | `0x0A4` | `psa_407_rd4_audio.c`, `can_router.c` | ISO-TP reassembly, strips `10 00 00 00`, up to 64 chars |
@@ -87,7 +87,7 @@
 | `[ ]` | `0x79` | Navigation MFD Guidance | `0x08` | `0x3B6` | `CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md` | Turn arrows & distance to amber EMF-C |
 | `[x]` | `0x7B` | Central Setting Req 1 | `0x03` | `0x15B` | `psa_407_car_config.c` | Rear wiper, selective unlock, DRL, follow-me-home |
 | `[x]` | `0x7D` | Central Setting Req 2 | `0x03` | `0x15B`/`0x221` | `psa_407_car_config.c` | Remote boot mode, directional xenon, driver profile, TPMS learn |
-| `[-]` | `0x8A`/`0x8B` | Cruise Presets Setup | `0x0A` | `0x39B` | `PEUGEOT_HIWORLD_COMMANDS.md` | Speed memory slots $M_1 \dots M_5$ configuration |
+| `[-]` | `0x8A`/`0x8B` | Speed Limiter & Cruise Presets | `0x0A` | `0x39B` | `psa_407_car_config.c` | Speed limiter (`0x8A` $\leftrightarrow$ `0x81`) & cruise (`0x8B` $\leftrightarrow$ `0x82`) slots $M_1 \dots M_5$ (`CruiseSpeedFrgment`) |
 | `[ ]` | `0x8C` | AMVAR Sport Mode Switch | `0x02` | `0x39B` | `PEUGEOT_HIWORLD_COMMANDS.md` | Electronically controlled suspension toggle (407 V6) |
 | `[x]` | `0x85` | Alarm Replay Query | `0x02` | `0x39B` | `proto_hiworld_adapter.c` | Replays active alert journal |
 | `[x]` | `0x94` | Software Reset / Ping | `0x01` | N/A | `hiworld_connection.c` | Link liveness / reboot |

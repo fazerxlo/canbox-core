@@ -185,6 +185,7 @@ static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
         case WHEEL_KEY_PHONE_REJECT: hw_key_code = 0x0A; break;
         case WHEEL_KEY_VOICE:        hw_key_code = 0x05; break;
         case WHEEL_KEY_TRIP:         hw_key_code = 0x14; break;
+        case WHEEL_KEY_STALK_LEFT:   hw_key_code = 0x40; break;
         default:                     hw_key_code = 0x00; break;
     }
 

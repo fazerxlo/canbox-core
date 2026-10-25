@@ -476,6 +476,9 @@ void test_peugeot_407_matrix_cluster_page_cycling(void) {
 
     can_frame_t sent;
 
+    /* Initial state defaults to Instant (0x09) */
+    TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_INSTANT, psa_car_config_get_trip_page_mask());
+
     /* 1. Inject 0x221 press: C8 FF FF FF FF FF FF */
     hal_can_native_clear_sent_frame();
     can_frame_t f_press = { .id = 0x221, .dlc = 7, .data = { 0xC8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } };
@@ -486,39 +489,75 @@ void test_peugeot_407_matrix_cluster_page_cycling(void) {
     can_frame_t f_rel = { .id = 0x221, .dlc = 7, .data = { 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } };
     can_router_process_can(&f_rel);
 
-    /* Verify 0x167 is immediately transmitted with 02 00 FF FF 00 00 00 00 (Trip 1) */
+    /* Verify 0x167 is immediately transmitted with 0A 06 FF FF 00 00 00 00 (Trip 1) */
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent.dlc);
-    const uint8_t exp_p1[] = { 0x02, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t exp_p1[] = { 0x0A, 0x06, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_p1, sent.data, 8);
-    TEST_ASSERT_EQUAL_UINT8(0x02, psa_car_config_get_trip_page_mask());
+    TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_TRIP1, psa_car_config_get_trip_page_mask());
 
-    /* 3. Repeat press/release -> advances to 04 00 FF FF 00 00 00 00 (Trip 2) */
+    /* 3. Repeat press/release -> advances to 0C 06 FF FF 00 00 00 00 (Trip 2) */
     can_router_process_can(&f_press);
     hal_can_native_clear_sent_frame();
     can_router_process_can(&f_rel);
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
-    const uint8_t exp_p2[] = { 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t exp_p2[] = { 0x0C, 0x06, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_p2, sent.data, 8);
-    TEST_ASSERT_EQUAL_UINT8(0x04, psa_car_config_get_trip_page_mask());
+    TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_TRIP2, psa_car_config_get_trip_page_mask());
 
-    /* 4. Repeat press/release -> wraps to 01 00 FF FF 00 00 00 00 (Instant) */
+    /* 4. Repeat press/release -> wraps to 09 06 FF FF 00 00 00 00 (Instant) */
     can_router_process_can(&f_press);
     hal_can_native_clear_sent_frame();
     can_router_process_can(&f_rel);
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
-    const uint8_t exp_p0[] = { 0x01, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    const uint8_t exp_p0[] = { 0x09, 0x06, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_p0, sent.data, 8);
-    TEST_ASSERT_EQUAL_UINT8(0x01, psa_car_config_get_trip_page_mask());
+    TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_INSTANT, psa_car_config_get_trip_page_mask());
+}
+
+void test_peugeot_407_matrix_cluster_inactivity_timeout(void) {
+    setUp_peugeot_407_car_config();
+    can_router_init();
+
+    /* Turn ignition ON */
+    can_frame_t f_ign = { .id = PSA_CAN_ID_REVERSE_IGNITION, .dlc = 8, .data = { 0, 0, 0, 0, 0x01 } };
+    can_router_process_can(&f_ign);
+
+    /* Cycle to Trip 1 */
+    psa_car_config_cycle_trip_page();
+    TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_TRIP1, psa_car_config_get_trip_page_mask());
+
+    /* 69 ticks (6.9s): still on Trip 1 */
+    for (int i = 0; i < 69; i++) {
+        psa_car_config_periodic_100ms();
+    }
+    TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_TRIP1, psa_car_config_get_trip_page_mask());
+
+    /* 70th tick (7.0s): automatically reverts to default Instant (0x09) */
+    hal_can_native_clear_sent_frame();
+    psa_car_config_periodic_100ms();
+    TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_INSTANT, psa_car_config_get_trip_page_mask());
+
+    can_frame_t history[4];
+    size_t count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_TRUE(count >= 1);
+    TEST_ASSERT_EQUAL_HEX32(0x167, history[0].id);
+    const uint8_t exp_inst[] = { 0x09, 0x06, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_inst, history[0].data, 8);
 }
 
 void test_peugeot_407_trip_reset_0x167(void) {
     setUp_peugeot_407_car_config();
+    can_router_init();
+
+    /* Turn ignition ON so periodic 100ms tick runs */
+    can_frame_t f_ign = { .id = PSA_CAN_ID_REVERSE_IGNITION, .dlc = 8, .data = { 0, 0, 0, 0, 0x01 } };
+    can_router_process_can(&f_ign);
 
     hal_can_native_clear_sent_frame();
     TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(1));
@@ -527,7 +566,35 @@ void test_peugeot_407_trip_reset_0x167(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent.data[0]); /* 0x80 | 0x0A */
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent.data[3]);
+
+    /* Verify sustained 300ms pulse (ticks 1 & 2 keep 0x8A, tick 3 clears reset bit to 0x0A) */
+    hal_can_native_clear_sent_frame();
+    psa_car_config_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent.data[0]);
+
+    hal_can_native_clear_sent_frame();
+    psa_car_config_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent.data[0]);
+
+    hal_can_native_clear_sent_frame();
+    psa_car_config_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x0A, sent.data[0]); /* Reset bit cleared, remains on Trip 1 page */
+
+    hal_can_native_clear_sent_frame();
+    TEST_ASSERT_EQUAL(HAL_STATUS_OK, psa_trip_send_reset(2));
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+    TEST_ASSERT_EQUAL_UINT8(8, sent.dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x4C, sent.data[0]); /* 0x40 | 0x0C */
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent.data[1]);
 }

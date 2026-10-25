@@ -555,7 +555,8 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[1]); // Bit 7: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent_frame.data[0]); // 0x80 | 0x0A: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
@@ -569,7 +570,8 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[1]); // Bit 7: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent_frame.data[0]); // 0x80 | 0x0A: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
@@ -583,7 +585,8 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[1]); // Bit 7: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent_frame.data[0]); // 0x80 | 0x0A: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
@@ -597,7 +600,8 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x40, sent_frame.data[1]); // Bit 6: Trip 2 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x4C, sent_frame.data[0]); // 0x40 | 0x0C: Trip 2 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
@@ -951,9 +955,26 @@ void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x02, sent_frame.data[0]); // Advance to Trip 1
-    TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x0A, sent_frame.data[0]); // Advance from Instant (0x09) to Trip 1 (0x0A)
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
+
+    // Left Stalk Tip Button Press (CAN ID 0x221: Byte 0 Bit 0 = 0x01, 0xC1) -> Cmd 0x11 Key 0x40
+    frame_221.data[0] = 0xC1;
+    can_router_process_can(&frame_221);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    const uint8_t expected_left_stalk_press[] = {
+        0x5A, 0xA5, 0x0A, 0x11, 0x23, 0x00, 0x40, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22, 0x08
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_left_stalk_press), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_left_stalk_press, rx_buf, sizeof(expected_left_stalk_press));
+
+    // Left Stalk Tip Button Release (0xC0)
+    frame_221.data[0] = 0xC0;
+    can_router_process_can(&frame_221);
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stalk_trip_release), rx_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_release, rx_buf, sizeof(expected_stalk_trip_release));
 }
 

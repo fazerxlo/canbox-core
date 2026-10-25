@@ -135,9 +135,9 @@ void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
                         s_trip_long_press_handled = true;
                         if (!psa_car_config_is_mdf_present()) {
                             uint8_t page_mask = psa_car_config_get_trip_page_mask();
-                            if (page_mask == 0x02) {
+                            if (page_mask == PSA_MDF_TRIP_PAGE_TRIP1) {
                                 psa_trip_send_reset(1);
-                            } else if (page_mask == 0x04) {
+                            } else if (page_mask == PSA_MDF_TRIP_PAGE_TRIP2) {
                                 psa_trip_send_reset(2);
                             }
                         }
@@ -147,11 +147,11 @@ void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
                     if (!s_trip_long_press_handled && !psa_car_config_is_mdf_present()) {
                         psa_car_config_cycle_trip_page();
                         uint8_t page_mask = psa_car_config_get_trip_page_mask();
-                        if (page_mask == 0x01) {
+                        if (page_mask == PSA_MDF_TRIP_PAGE_INSTANT) {
                             state->dirty.trip_page = 1;
-                        } else if (page_mask == 0x02) {
+                        } else if (page_mask == PSA_MDF_TRIP_PAGE_TRIP1) {
                             state->dirty.trip_page = 2;
-                        } else if (page_mask == 0x04) {
+                        } else if (page_mask == PSA_MDF_TRIP_PAGE_TRIP2) {
                             state->dirty.trip_page = 3;
                         }
                     }
@@ -191,8 +191,11 @@ bool build_psa_trip_reset_frame(uint8_t trip_index, can_frame_t *out_frame) {
     out_frame->is_extended = false;
     out_frame->is_remote   = false;
 
-    out_frame->data[0] = psa_car_config_get_trip_page_mask();
-    out_frame->data[1] = (trip_index == 1) ? 0x80 : 0x40;
+    uint8_t page = (trip_index == 1) ? PSA_MDF_TRIP_PAGE_TRIP1 : PSA_MDF_TRIP_PAGE_TRIP2;
+    uint8_t reset_bit = (trip_index == 1) ? 0x80 : 0x40;
+
+    out_frame->data[0] = (uint8_t)(page | reset_bit);
+    out_frame->data[1] = 0x06;
     out_frame->data[2] = 0xFF;
     out_frame->data[3] = 0xFF;
 

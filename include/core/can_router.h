@@ -24,7 +24,8 @@ typedef enum {
     WHEEL_KEY_PHONE_REJECT = WHEEL_KEY_PHONE_HANGUP,
     WHEEL_KEY_SCROLL_UP,
     WHEEL_KEY_SCROLL_DOWN,
-    WHEEL_KEY_TRIP
+    WHEEL_KEY_TRIP,
+    WHEEL_KEY_STALK_LEFT
 } wheel_key_t;
 
 typedef wheel_key_t steering_key_t;

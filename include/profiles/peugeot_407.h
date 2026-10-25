@@ -48,6 +48,11 @@ extern "C" {
 #define PSA_CAN_ID_MDF_TRIP_CMD_167 0x167
 #define PSA_CAN_ID_MDF_TRIP_3F6     0x3F6
 #define PSA_CAN_ID_MDF_DIAG_525     0x525
+
+/* Virtual MDF / Cluster Matrix Trip Page Masks (0x167 Byte 0) */
+#define PSA_MDF_TRIP_PAGE_INSTANT   0x09
+#define PSA_MDF_TRIP_PAGE_TRIP1     0x0A
+#define PSA_MDF_TRIP_PAGE_TRIP2     0x0C
 #define PSA_CAN_ID_TRIP2_ODB        0x261
 #define PSA_CAN_ID_INFO_TUNER       0x265
 #define PSA_CAN_ID_FRONT_RADAR_AAS  0x270
@@ -82,7 +87,8 @@ typedef enum {
     PSA_STALK_KEY_SCROLL_DOWN  = 0x43,
     PSA_STALK_KEY_MENU         = 0x54,
     PSA_STALK_KEY_ESC          = 0x60,
-    PSA_STALK_KEY_TRIP         = 0x07
+    PSA_STALK_KEY_TRIP         = 0x07,
+    PSA_STALK_KEY_LEFT_TIP     = 0x40
 } psa_stalk_key_id_t;
 
 typedef struct {
@@ -92,6 +98,7 @@ typedef struct {
     uint8_t prev_rotary;
     bool    rotary_init;
     uint8_t prev_trip_tip;
+    uint8_t prev_left_tip;
 } psa_stalk_state_t;
 
 typedef void (*psa_stalk_key_callback_t)(uint8_t key_id, uint8_t state);

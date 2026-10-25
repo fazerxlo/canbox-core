@@ -141,6 +141,7 @@ void psa_decode_stalk_tip_0x221_ex(psa_stalk_state_t *st, const uint8_t *data, u
     /* Stalk Tip Trip button on Byte 0 Bit 3 (0x08).
      * Idle: 0xC0 (bit 3 = 0), Pressed: 0xC8 (bit 3 = 1).
      * Proven in vehicle dump dump_2026-10-06_20-27-16.log and dump_2026-10-06_20-45-34.log.
+     * Left Stalk Tip button on Byte 0 Bit 0 (0x01) -> Hiworld Key 0x40 (H1H2PAF23A 0x080081EE).
      */
     bool curr_trip = (data[0] & 0x08) != 0;
     bool prev_trip = (st->prev_trip_tip != 0);
@@ -152,6 +153,17 @@ void psa_decode_stalk_tip_0x221_ex(psa_stalk_state_t *st, const uint8_t *data, u
     }
 
     st->prev_trip_tip = curr_trip ? 1 : 0;
+
+    bool curr_left = (data[0] & 0x01) != 0;
+    bool prev_left = (st->prev_left_tip != 0);
+
+    if (curr_left && !prev_left) {
+        send_key(PSA_STALK_KEY_LEFT_TIP, 1);
+    } else if (!curr_left && prev_left) {
+        send_key(PSA_STALK_KEY_LEFT_TIP, 0);
+    }
+
+    st->prev_left_tip = curr_left ? 1 : 0;
 }
 
 void psa_decode_stalk_tip_0x221(const uint8_t *data, uint8_t dlc, psa_stalk_key_callback_t send_key) {
@@ -488,15 +500,21 @@ void psa_radar_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
 void psa_stalk_process_tip_0x221(vehicle_wheel_t *wheel, const uint8_t *data, uint8_t dlc) {
     if (!wheel || !data || dlc < 1) return;
     bool curr_trip = (data[0] & 0x08) != 0;
+    bool curr_left = (data[0] & 0x01) != 0;
 
     if (curr_trip) {
         wheel->active_key = WHEEL_KEY_TRIP;
         wheel->press_state = 1;
-    } else if (g_stalk_state.prev_trip_tip != 0 || wheel->active_key == WHEEL_KEY_TRIP) {
+    } else if (curr_left) {
+        wheel->active_key = WHEEL_KEY_STALK_LEFT;
+        wheel->press_state = 1;
+    } else if (g_stalk_state.prev_trip_tip != 0 || g_stalk_state.prev_left_tip != 0 ||
+               wheel->active_key == WHEEL_KEY_TRIP || wheel->active_key == WHEEL_KEY_STALK_LEFT) {
         wheel->active_key = WHEEL_KEY_NONE;
         wheel->press_state = 0;
     }
     g_stalk_state.prev_trip_tip = curr_trip ? 1 : 0;
+    g_stalk_state.prev_left_tip = curr_left ? 1 : 0;
 }
 
 

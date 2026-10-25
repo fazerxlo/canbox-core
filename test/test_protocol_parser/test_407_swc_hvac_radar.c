@@ -373,6 +373,17 @@ void test_peugeot_407_stalk_tip_0x221_trip_button(void) {
     psa_decode_stalk_tip_0x221_ex(&st, can_221_release, sizeof(can_221_release), test_stalk_key_callback);
     TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_TRIP, s_last_stalk_key_id);
     TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
+
+    // 3. Left Stalk Tip Press: CAN ID 0x221 Byte 0 Bit 0 = 0x01 (0xC1)
+    const uint8_t can_221_left_press[] = { 0xC1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    psa_decode_stalk_tip_0x221_ex(&st, can_221_left_press, sizeof(can_221_left_press), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_LEFT_TIP, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_stalk_key_state);
+
+    // 4. Left Stalk Tip Release: CAN ID 0x221 Byte 0 Bit 0 cleared (0xC0)
+    psa_decode_stalk_tip_0x221_ex(&st, can_221_release, sizeof(can_221_release), test_stalk_key_callback);
+    TEST_ASSERT_EQUAL_HEX8(PSA_STALK_KEY_LEFT_TIP, s_last_stalk_key_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_last_stalk_key_state);
 }
 
 /* --------------------------------------------------------------------------
