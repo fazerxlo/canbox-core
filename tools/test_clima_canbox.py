@@ -82,7 +82,11 @@ def main():
             pass
 
     # 2. Open UART
-    port = "/dev/ttyUSB0"
+    try:
+        from canbox_usb_ports import find_canbox_uart_device
+        port = find_canbox_uart_device()
+    except Exception:
+        port = "/dev/ttyUSB0"
     baud = 38400
     try:
         ser = serial.Serial(port, baud, timeout=0.02)

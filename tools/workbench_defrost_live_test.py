@@ -21,7 +21,11 @@ def calc_raise_cs(cmd: int, payload: bytes) -> int:
 
 def main():
     can_iface = "can0"
-    uart_port = "/dev/ttyUSB0"
+    try:
+        from canbox_usb_ports import find_canbox_uart_device
+        uart_port = find_canbox_uart_device()
+    except Exception:
+        uart_port = "/dev/ttyUSB0"
     baud_rate = 38400
 
     print("=" * 70)

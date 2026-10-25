@@ -49,25 +49,24 @@ WAKE_FRAMES = [
 TEST_BAUDRATES = [38400, 19200, 9600, 57600, 115200]
 
 
-def find_slcan_device() -> Optional[str]:
-    """Finds which ttyUSB device is currently held by slcand."""
-    try:
-        res = subprocess.run(["ps", "-eo", "args"], capture_output=True, text=True)
-        for line in res.stdout.splitlines():
-            if "slcand" in line:
-                m = re.search(r"(ttyUSB\d+|ttyACM\d+)", line)
-                if m:
-                    return f"/dev/{m.group(1)}"
-    except Exception:
-        pass
-    return None
+try:
+    from canbox_usb_ports import find_slcan_device, find_canbox_uart_device
+except ImportError:
+    import sys
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from canbox_usb_ports import find_slcan_device, find_canbox_uart_device
 
 
 def get_available_serial_ports() -> List[str]:
-    """Finds all available USB serial ports, skipping active slcand port."""
+    """Finds all available USB serial ports, prioritizing Canbox UART (FTDI 0403:6001)."""
     slcan_dev = find_slcan_device()
+    canbox_dev = find_canbox_uart_device()
     candidates = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
-    return [p for p in candidates if p != slcan_dev]
+    ports = [p for p in candidates if p != slcan_dev]
+    if canbox_dev in ports:
+        ports.remove(canbox_dev)
+        ports.insert(0, canbox_dev)
+    return ports
 
 
 def can_keepalive_worker(stop_event: threading.Event, can_iface: str):

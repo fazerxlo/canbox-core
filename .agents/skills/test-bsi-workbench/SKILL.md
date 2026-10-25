@@ -14,12 +14,15 @@ This skill guides testing and validating **any** OpenCanbox Core subsystem (Pers
 
 ## 0. Fast-Path Workbench Topology & Zero-Flounder Rules
 
-| Interface | Device / Port | Protocol & Parameters | Purpose & Notes |
+### Persistent USB Hardware Identification (Auto-Discovery by VID:PID)
+Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools resolve ports automatically via `tools/canbox_usb_ports.py` using persistent USB hardware IDs:
+
+| Role / Interface | Hardware Chip & USB VID:PID | Protocol & Parameters | Purpose & Auto-Discovery Behavior |
 | :--- | :--- | :--- | :--- |
-| **CAN Bus** | `can0` via `/dev/ttyUSB3` | PSA Comfort CAN @ **125 kbps** (`slcand -S 1000000 /dev/ttyUSB3 can0`) | Real Peugeot 407 BSI & RD4 radio bus. |
-| **Canbox UART** | `/dev/ttyUSB0` | **38,400 baud, 8N1** (Raise `0x2E` or Hiworld `0x5A`) | Physical canbox UART TX/RX connection. |
+| **CAN Bus (SLCAN)** | **QinHeng CH340 (`1A86:7523`)** | PSA Comfort CAN @ **125 kbps** (`slcand -S 1000000 <dev> can0`) | Real Peugeot 407 BSI & RD4 bus. Automatically detected and excluded from UART probers. |
+| **Canbox UART** | **FTDI FT232R (`0403:6001`)** | **38,400 baud, 8N1** (Raise `0x2E` or Hiworld `0x5A`) | Physical canbox UART TX/RX. Auto-selected by all tools when `--port` is omitted. |
+| **Head Unit UART** | **Prolific PL2303 (`067B:2303`)** | **38,400 baud, 8N1** (Hiworld / Raise) | Android Head Unit serial connection. |
 | **Baud Rate Rule** | Fixed **38,400 bps** | **NEVER toggle or probe down to 19,200 bps** | Peugeot 407 Raise & Hiworld canboxes operate strictly at 38,400 baud. Toggling baud causes framing break errors (`0x00` bytes). |
-| **SLCAN Exclusion** | `/dev/ttyUSB3` | **NEVER open with serial prober** | `/dev/ttyUSB3` is reserved exclusively for `slcand` (`can0`). |
 
 ### Essential CAN Keepalives & Interlocks (Autonomous Wakeup Baseline)
 1. **Sleeping ECUs Baseline:** If ECUs are asleep or the engine ECU is absent, broadcast continuously at 25–40 ms:

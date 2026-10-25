@@ -16,6 +16,12 @@ import struct
 import threading
 import datetime
 import serial
+try:
+    from canbox_usb_ports import find_canbox_uart_device
+except ImportError:
+    import os
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from canbox_usb_ports import find_canbox_uart_device
 
 def calc_raise_cs(cmd: int, payload: bytes) -> int:
     s = (cmd + len(payload) + sum(payload)) & 0xFF
@@ -26,7 +32,7 @@ def calc_hiworld_cs(length: int, cmd: int, payload: bytes) -> int:
 
 def main():
     can_iface = "can0"
-    uart_port = "/dev/ttyUSB0"
+    uart_port = find_canbox_uart_device()
     baud_rate = 38400
 
     log_filename = f"sniff_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"

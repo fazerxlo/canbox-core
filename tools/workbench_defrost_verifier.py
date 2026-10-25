@@ -689,27 +689,16 @@ class CanboxDefrostVerifier:
             else:
                 print("No confirmed defrost triggers found in this pass.")
 
-def find_slcan_device() -> Optional[str]:
-    """Finds which ttyUSB device is currently held by slcand."""
-    try:
-        res = subprocess.run(["ps", "-eo", "args"], capture_output=True, text=True)
-        for line in res.stdout.splitlines():
-            if "slcand" in line:
-                m = re.search(r"(ttyUSB\d+|ttyACM\d+)", line)
-                if m:
-                    return f"/dev/{m.group(1)}"
-    except Exception:
-        pass
-    return None
+try:
+    from canbox_usb_ports import find_slcan_device, find_canbox_uart_device
+except ImportError:
+    import sys
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from canbox_usb_ports import find_slcan_device, find_canbox_uart_device
 
 def get_default_uart_port() -> str:
-    """Selects the first available serial port that is NOT the slcand interface."""
-    slcan_dev = find_slcan_device()
-    candidates = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
-    for p in candidates:
-        if p != slcan_dev:
-            return p
-    return "/dev/ttyUSB0"
+    """Auto-detects Canbox UART port by USB hardware VID:PID signature (FTDI 0403:6001)."""
+    return find_canbox_uart_device()
 
 def main():
     parser = argparse.ArgumentParser(description="Workbench Peugeot 407 Rear Defrost CAN Discovery & Verification")
