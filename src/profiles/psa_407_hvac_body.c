@@ -321,7 +321,9 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
     if (dlc < 7) return;
 
     climate->power_on = (data[0] != 0xA8);
-    climate->ac_on = climate->power_on;
+    if (!climate->power_on) {
+        climate->ac_on = false;
+    }
     climate->front_max_defrost = (data[0] == 0x19);
 
     uint8_t fan = data[2] & 0x0F;
@@ -364,6 +366,7 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
 
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
+    climate->ac_on = ((data[0] & 0x40) == 0);
     climate->front_max_defrost = (data[1] & 0x80) != 0;
 
     /* Rear defrost indicator from Climate ECU: Byte 1 Bit 3 (0x08) */
@@ -392,6 +395,10 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
 
         climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
         climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
+    }
+
+    if (dlc >= 7) {
+        psa_clim_sync_1ed_from_1e3(data, dlc);
     }
 }
 

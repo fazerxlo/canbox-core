@@ -214,18 +214,20 @@ When the user taps an option on Android, the headunit sends a serial command to 
 | **TPMS Re-Learn Trigger** | `0x7D` | `0x03` | `3` | `1` = Pulse Trigger | `0x221` (Demands EMF) | Injects one-shot `0x221` with Byte 3 = `0x10` |
 | **Driver Profile Select** | `0x7D` | `0x0B` | `11` | `0` = Profile 1, `1` = Profile 2, `2` = Profile 3 | `0x15B` (`MSG_BSI_PERSO_REQ`) | Injects `0x15B#0[prof]...` (`prof` = `(val & 0x03) + 1`) |
 | **Backlight Dimmer** | `0x7D` | `0x0E` | `14` | `0 \dots 15` | `0x036` (Dimmer Level) | Update cluster dimmer state |
-| **Zone Temp Mono/Sync** | `0x7D` | `0x24` | `36` | `0` = Dual, `1` = Mono / SYNC | `0x1D0` (`MSG_CDE_CLIMAV`) | Injects `0x1D0` with Byte 0 Bit 0 (`0x01`) |
+| **Zone Temp Mono/Sync** | `0x7D` | `0x24` | `36` | `0` = Dual, `1` = Mono / SYNC | `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`) | Updates `0x1ED` Byte 0 Bit 4 (`0x10`) |
 
 ---
 
-### 3.3 Climate Dual/Mono Sync Settings (`Cmd 0x3B` / `0x7D`)
+### 3.3 Climate Dual/Mono Sync & A/C Settings (`Cmd 0x3B` / `0x7D`)
 
-The Android Climate UI sends `Cmd 0x3B` with sub-setting `0x0F` to toggle Mono / SYNC mode:
-- **Downlink Serial:** `5A A5 02 3B 0F [val] [CS]` (`val == 1` $\implies$ SYNC Mono, `val == 0` $\implies$ Dual).
-- **Injected PSA CAN Frame (`0x1D0` - DLC 7):**
-  - `Byte 0`: `0x01` (`DUAL_REQ`)
-  - `Byte 5`: Driver Temperature setpoint
-  - `Byte 6`: Passenger Temperature setpoint (when commanding Mono mode, Byte 6 **must strictly equal Byte 5**).
+The Android Climate UI sends `Cmd 0x3B` (or `Cmd 0x7D`) to control Mono / Dual and A/C compressor cut-off:
+- **Downlink Serial (Mono/Dual):** `5A A5 02 3B 0F [val] [CS]` or `5A A5 02 7D 24 [val] [CS]` (`val == 1` $\implies$ SYNC Mono, `val == 0` $\implies$ Dual).
+- **Downlink Serial (A/C Switch):** `5A A5 02 3B 02 [val] [CS]` (`val == 1` $\implies$ A/C ON, `val == 0` $\implies$ A/C OFF / Eco).
+- **Injected PSA CAN Frame (`0x1ED` - DLC 1, Periodic 500 ms + Event-Driven):**
+  - Controlled by Multifunction Display / Telematics unit (`DEMANDES_AFFICHEUR_CLIM`).
+  - **Bit 4 (`0x10`):** `1` = Dual Mode, `0` = Mono Mode.
+  - **Bit 3 (`0x08`):** `0` = A/C Compressor ON, `1` = A/C Compressor OFF (Eco).
+  - Prerequisites: `0x0DF` (`10 00 50`) must be actively broadcast every 500 ms for Climate ECU to accept `0x1ED`. Note that `0x1D0` is emitted by the Climate panel and is NOT used for A/C or Mono/Dual injection.
 
 ---
 
@@ -386,15 +388,18 @@ Byte 7: Profile options mask (0x10)
 
 ---
 
-### 5.5 Climate Dual/Mono Regulation (`0x1E3` Status & `0x1D0` Command)
-- **`0x1E3` (`MSG_ETAT_CLIMAV_EMF`, 100 ms, DLC 7):**
+### 5.5 Climate Dual/Mono & A/C Regulation (`0x1E3` Status & `0x1ED` / `0x0DF` Command)
+- **`0x1E3` (`MSG_ETAT_CLIMAV_EMF`, 200 ms, DLC 7 from Climate ECU):**
+  - `Byte 0 Bit 6`: `AC_OFF_STATUS` (`0` = A/C ON, `1` = A/C OFF / Eco).
   - `Byte 0 Bit 0`: `DUAL_ACTIVE` (`1` = Dual independent zones, `0` = Mono / SYNC mode).
   - `Byte 2`: Driver setpoint ($14.0 + \text{raw} \times 0.5\ ^\circ\text{C}$).
   - `Byte 3`: Passenger setpoint (in Mono mode, mirrors Driver setpoint).
-- **`0x1D0` (`MSG_CDE_CLIMAV`, Event, DLC 7):**
-  - `Byte 0 Bit 0`: `DUAL_REQ` (`0x01` = Toggle Dual/Mono mode).
-  - `Byte 5`: Driver setpoint.
-  - `Byte 6`: Passenger setpoint (must equal Byte 5 when commanding Mono mode).
+- **`0x0DF` (`ETAT_EMF`, 500 ms, DLC 3):**
+  - Payload: `10 00 50` (MDF display presence heartbeat; mandatory prerequisite for Climate ECU to accept `0x1ED`).
+- **`0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, 500 ms + Event, DLC 1):**
+  - `Byte 0 Bit 4`: `DUAL_MODE` (`1` = Dual, `0` = Mono).
+  - `Byte 0 Bit 3`: `AC_OFF_REQ` (`0` = A/C ON, `1` = A/C OFF / Eco).
+  - Four valid payloads: `0x00` (A/C ON, Mono), `0x08` (A/C OFF, Mono), `0x10` (A/C ON, Dual), `0x18` (A/C OFF, Dual). Note: `0x1D0` is broadcast by the climate console and is NOT injected for MDF A/C or Mono toggles.
 
 ---
 

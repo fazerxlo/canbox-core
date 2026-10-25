@@ -155,6 +155,11 @@ void test_peugeot_407_mdf_coexistence_suppression(void);
 void test_peugeot_407_matrix_cluster_page_cycling(void);
 void test_peugeot_407_matrix_cluster_inactivity_timeout(void);
 void test_peugeot_407_trip_reset_0x167(void);
+void test_peugeot_407_clim_1ed_ac_on_to_off(void);
+void test_peugeot_407_clim_1ed_ac_off_to_on(void);
+void test_peugeot_407_clim_1ed_dual_to_mono(void);
+void test_peugeot_407_clim_1ed_mono_to_dual(void);
+void test_peugeot_407_clim_1ed_combined_state_preservation(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -333,6 +338,11 @@ int main(void) {
     RUN_TEST(test_peugeot_407_matrix_cluster_page_cycling);
     RUN_TEST(test_peugeot_407_matrix_cluster_inactivity_timeout);
     RUN_TEST(test_peugeot_407_trip_reset_0x167);
+    RUN_TEST(test_peugeot_407_clim_1ed_ac_on_to_off);
+    RUN_TEST(test_peugeot_407_clim_1ed_ac_off_to_on);
+    RUN_TEST(test_peugeot_407_clim_1ed_dual_to_mono);
+    RUN_TEST(test_peugeot_407_clim_1ed_mono_to_dual);
+    RUN_TEST(test_peugeot_407_clim_1ed_combined_state_preservation);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

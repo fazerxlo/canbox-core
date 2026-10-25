@@ -41,6 +41,10 @@ static void on_raise_packet_received(const raise_packet_t *packet) {
                 can_router_reset_trip(2);
             }
         }
+    } else if (packet->cmd == 0x8A) {
+        if (packet->len >= 2) {
+            can_router_set_car_config(packet->cmd, packet->payload[0], packet->payload[1]);
+        }
     }
 }
 

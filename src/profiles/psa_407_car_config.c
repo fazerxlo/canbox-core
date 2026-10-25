@@ -16,8 +16,13 @@ static uint8_t s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_INSTANT; /* Defau
 static uint8_t s_mdf_trip_reset_mask       = 0x00; /* 0x80=Reset Trip1, 0x40=Reset Trip2 */
 static uint8_t s_mdf_reset_ticks           = 0;
 static uint8_t s_mdf_trip_inactivity_ticks = 0;    /* 7-second inactivity timeout (70 ticks of 100ms) */
+static uint8_t s_periodic_500ms_ticks      = 0;
 static uint8_t s_periodic_1000ms_ticks     = 0;
 static uint8_t s_mdf_3f6_counter           = 0;
+
+/* Virtual MDF Climate State (0x1ED): Default A/C ON (Bit 3=0), Dual Mode (Bit 4=1) */
+static uint8_t s_mdf_1ed_state             = 0x10;
+static bool    s_mdf_1ed_init              = false;
 
 /* Feature enables (Cmd 0x71 and Cmd 0x72) telecoded in BSI */
 static uint8_t s_feature_enable_1[2] = { 0x60, 0x12 };
@@ -61,8 +66,12 @@ void psa_car_config_init(void) {
     s_mdf_trip_reset_mask       = 0x00;
     s_mdf_reset_ticks           = 0;
     s_mdf_trip_inactivity_ticks = 0;
+    s_periodic_500ms_ticks      = 0;
     s_periodic_1000ms_ticks     = 0;
     s_mdf_3f6_counter           = 0;
+
+    s_mdf_1ed_state             = 0x10;
+    s_mdf_1ed_init              = false;
 
     s_feature_enable_1[0] = 0x60;
     s_feature_enable_1[1] = 0x12;
@@ -71,6 +80,30 @@ void psa_car_config_init(void) {
     s_feature_enable_2[0] = 0x00;
     s_feature_enable_2[1] = 0x01;
     s_feature_enable_2[2] = 0x80;
+}
+
+void psa_clim_sync_1ed_from_1e3(const uint8_t *data, uint8_t dlc) {
+    if (!data || dlc < 7) return;
+
+    if (!s_mdf_1ed_init || psa_car_config_is_mdf_present()) {
+        bool ac_off    = (data[0] & 0x40) != 0;
+        bool dual_mode = (data[0] & 0x01) != 0;
+        s_mdf_1ed_state = (uint8_t)((dual_mode ? 0x10U : 0x00U) | (ac_off ? 0x08U : 0x00U));
+        s_mdf_1ed_init  = true;
+    }
+}
+
+hal_status_t psa_clim_send_1ed(void) {
+    can_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.id      = PSA_CAN_ID_MDF_CLIM_REQ_1ED; /* 0x1ED */
+    frame.dlc     = 1;
+    frame.data[0] = s_mdf_1ed_state;
+    return hal_can_send(&frame);
+}
+
+uint8_t psa_clim_get_1ed_state(void) {
+    return s_mdf_1ed_state;
 }
 
 void psa_car_config_notify_mdf_seen(void) {
@@ -268,18 +301,58 @@ hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, u
             return hal_can_send(&frame);
         }
         else if (setting_id == 0x24) { /* Zone Temp Sync (Mono/Dual) */
-            frame.id = 0x1D0;
-            frame.dlc = 7;
-            frame.data[0] = 0x01; /* DUAL_REQ */
-            return hal_can_send(&frame);
+            /* val == 1 -> Mono (clear Bit 4), val == 0 -> Dual (set Bit 4) */
+            if (val) {
+                s_mdf_1ed_state &= (uint8_t)~0x10U;
+            } else {
+                s_mdf_1ed_state |= 0x10U;
+            }
+            s_mdf_1ed_init = true;
+            return psa_clim_send_1ed();
         }
     }
     else if (cmd_id == 0x3B) {
-        if (setting_id == 0x0F) { /* Climate Dual/Mono Sync (Section 3.3) */
-            frame.id = 0x1D0;
-            frame.dlc = 7;
-            frame.data[0] = 0x01; /* DUAL_REQ */
-            return hal_can_send(&frame);
+        if (setting_id == 0x02) { /* A/C Switch: val=1 -> A/C ON (clear Bit 3), val=0 -> A/C OFF (set Bit 3) */
+            if (val) {
+                s_mdf_1ed_state &= (uint8_t)~0x08U;
+            } else {
+                s_mdf_1ed_state |= 0x08U;
+            }
+            s_mdf_1ed_init = true;
+            return psa_clim_send_1ed();
+        }
+        else if (setting_id == 0x0F) { /* Climate Dual/Mono Sync: val=1 -> Mono (clear Bit 4), val=0 -> Dual (set Bit 4) */
+            if (val) {
+                s_mdf_1ed_state &= (uint8_t)~0x10U;
+            } else {
+                s_mdf_1ed_state |= 0x10U;
+            }
+            s_mdf_1ed_init = true;
+            return psa_clim_send_1ed();
+        }
+    }
+    else if (cmd_id == 0x8A) { /* Raise / RZC HVAC Downlink */
+        if (setting_id == 0x02) { /* A/C Toggle or Set */
+            if (val == 0xFF || val == 0x02) {
+                s_mdf_1ed_state ^= 0x08U;
+            } else if (val == 1) {
+                s_mdf_1ed_state &= (uint8_t)~0x08U; /* A/C ON */
+            } else {
+                s_mdf_1ed_state |= 0x08U;          /* A/C OFF */
+            }
+            s_mdf_1ed_init = true;
+            return psa_clim_send_1ed();
+        }
+        else if (setting_id == 0x0B) { /* Dual Toggle or Set */
+            if (val == 0xFF || val == 0x02) {
+                s_mdf_1ed_state ^= 0x10U;
+            } else if (val == 1) {
+                s_mdf_1ed_state &= (uint8_t)~0x10U; /* Mono */
+            } else {
+                s_mdf_1ed_state |= 0x10U;          /* Dual */
+            }
+            s_mdf_1ed_init = true;
+            return psa_clim_send_1ed();
         }
     }
 
@@ -344,6 +417,7 @@ void psa_car_config_periodic_100ms(void) {
 
     const vehicle_state_t *st = can_router_get_state();
     if (st == NULL || (!st->ignition_on && st->media.radio.power_status == 0)) {
+        s_periodic_500ms_ticks  = 0;
         s_periodic_1000ms_ticks = 0;
         return;
     }
@@ -364,18 +438,9 @@ void psa_car_config_periodic_100ms(void) {
         }
     }
 
-    if (++s_periodic_1000ms_ticks >= 10) {
-        s_periodic_1000ms_ticks = 0;
-
-        /* 0x3F6 (DLC 7): 00 00 <counter> 00 00 C0 01 */
-        can_frame_t frame_3f6;
-        memset(&frame_3f6, 0, sizeof(frame_3f6));
-        frame_3f6.id = PSA_CAN_ID_MDF_TRIP_3F6;
-        frame_3f6.dlc = 7;
-        frame_3f6.data[2] = s_mdf_3f6_counter++;
-        frame_3f6.data[5] = 0xC0;
-        frame_3f6.data[6] = 0x01;
-        hal_can_send(&frame_3f6);
+    /* 500 ms periodic cadence: 0x0DF (display heartbeat) and 0x1ED (climate demand) */
+    if (++s_periodic_500ms_ticks >= 5) {
+        s_periodic_500ms_ticks = 0;
 
         /* 0x0DF (DLC 3): 10 00 50 */
         can_frame_t frame_0df;
@@ -387,15 +452,35 @@ void psa_car_config_periodic_100ms(void) {
         frame_0df.data[2] = 0x50;
         hal_can_send(&frame_0df);
 
-        /* 0x15B (DLC 8): Personalization State (if valid) */
-        if (s_cached_profile1_valid) {
-            can_frame_t frame_15b;
-            memset(&frame_15b, 0, sizeof(frame_15b));
-            frame_15b.id = PSA_CAN_ID_BSI_PERSO_REQ_15B;
-            frame_15b.dlc = 8;
-            memcpy(frame_15b.data, s_cached_profile1_raw, 8);
-            frame_15b.data[0] = 0x01;
-            hal_can_send(&frame_15b);
-        }
+        /* 0x1ED (DLC 1): [s_mdf_1ed_state] */
+        psa_clim_send_1ed();
+    }
+
+    /* 1000 ms periodic cadence: 0x525 (diag), 0x3F6 (clock/trip), 0x167 (page state) */
+    if (++s_periodic_1000ms_ticks >= 10) {
+        s_periodic_1000ms_ticks = 0;
+
+        /* 0x525 (DLC 8): 05 00 01 00 00 00 00 00 */
+        can_frame_t frame_525;
+        memset(&frame_525, 0, sizeof(frame_525));
+        frame_525.id = PSA_CAN_ID_MDF_DIAG_525;
+        frame_525.dlc = 8;
+        frame_525.data[0] = 0x05;
+        frame_525.data[1] = 0x00;
+        frame_525.data[2] = 0x01;
+        hal_can_send(&frame_525);
+
+        /* 0x3F6 (DLC 7): 00 00 <counter> 00 00 C0 01 */
+        can_frame_t frame_3f6;
+        memset(&frame_3f6, 0, sizeof(frame_3f6));
+        frame_3f6.id = PSA_CAN_ID_MDF_TRIP_3F6;
+        frame_3f6.dlc = 7;
+        frame_3f6.data[2] = s_mdf_3f6_counter++;
+        frame_3f6.data[5] = 0xC0;
+        frame_3f6.data[6] = 0x01;
+        hal_can_send(&frame_3f6);
+
+        /* 0x167 (DLC 8) */
+        psa_car_config_send_0x167();
     }
 }

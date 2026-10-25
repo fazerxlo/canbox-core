@@ -81,7 +81,7 @@
 | `[x]` | `0x24` | Car Model & Baud Select | `0x02`/`0x03` | N/A | `hiworld_connection.c`, `hiworld_car_mapping.c` | ID 34 (Peugeot 407), ACK `5A A5 01 FF 24 23` |
 | `[x]` | `0x2F` | Diagnostic Journal Query | `0x02` | `0x39B` | `proto_hiworld_adapter.c`, `can_router.c` | Replays `0x42` & `0xEA` summary |
 | `[x]` | `0x30` | Firmware Version Query | `0x02` | N/A | `hiworld_connection.c` | Replies with `0xF0` |
-| `[-]` | `0x3B` | Climate Control Downlink | `0x0B` | `0x1D0`/`0x1E1` | `psa_407_car_config.c` | Sync toggle (`0x0F`) mapped; touchscreen temp/fan steps pending |
+| `[x]` | `0x3B` | Climate Control Downlink | `0x02` | `0x1ED` | `psa_407_car_config.c` | A/C switch (`0x02`) & Dual/Mono sync (`0x0F`) injected via `0x1ED` |
 | `[x]` | `0x71` | Personalization Toggle | `0x02`/`0x03` | `0x15B` | `psa_407_car_config.c` | DRL, follow-me-home write |
 | `[ ]` | `0x76` | Overspeed Warning Set | `0x03` | `0x39B` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | Speed warning chime threshold |
 | `[ ]` | `0x79` | Navigation MFD Guidance | `0x08` | `0x3B6` | `CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md` | Turn arrows & distance to amber EMF-C |

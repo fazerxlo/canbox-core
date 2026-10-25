@@ -45,6 +45,8 @@ extern "C" {
 #define PSA_CAN_ID_ETAT_TUNER       0x225
 #define PSA_CAN_ID_BSI_PERSO_REQ_15B 0x15B
 #define PSA_CAN_ID_MDF_STATUS_0DF   0x0DF
+#define PSA_CAN_ID_MDF_CLIM_REQ_1ED 0x1ED
+#define PSA_CAN_ID_CLIM_STATUS_1E3  0x1E3
 #define PSA_CAN_ID_MDF_TRIP_CMD_167 0x167
 #define PSA_CAN_ID_MDF_TRIP_3F6     0x3F6
 #define PSA_CAN_ID_MDF_DIAG_525     0x525
@@ -405,6 +407,9 @@ void psa_decode_config_0x260(vehicle_config_t *cfg, const uint8_t *data, uint8_t
 void psa_car_config_get_feature_enables(uint8_t feat1[2], uint8_t feat2[8]);
 hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, uint8_t val);
 void psa_car_config_get_cached(vehicle_config_t *cfg);
+void psa_clim_sync_1ed_from_1e3(const uint8_t *data, uint8_t dlc);
+hal_status_t psa_clim_send_1ed(void);
+uint8_t psa_clim_get_1ed_state(void);
 void psa_car_config_notify_mdf_seen(void);
 bool psa_car_config_is_mdf_present(void);
 bool psa_car_config_is_cached_valid(void);

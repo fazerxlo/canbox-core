@@ -134,6 +134,31 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 
 ---
 
+### 3.2 Cross-Protocol Synchronized Mapping Table (PSA CAN $\longleftrightarrow$ Hiworld `0x31` $\longleftrightarrow$ Raise `0x21`)
+
+The following mapping is verified against the physical Peugeot 407 Dual-Zone Climate Panel, BSI, EMF screen, and commercial Canbox hardware:
+
+| Function / Signal | PSA Comfort CAN Signal / Bitfield | Hiworld `0x31` Serialization | Raise `0x21` Serialization |
+| :--- | :--- | :--- | :--- |
+| **System Power** | `0x1D0` Byte 0 $\ne \text{0xA8}$ | `Byte 0 Bit 6` (`0x40`) | `Byte 0 Bit 7` (`0x80`) |
+| **A/C Compressor** | `0x1E3` Byte 0 Bit 6 (`0`=ON, `1`=OFF) | `Byte 0 Bit 0` (`0x01`) | `Byte 0 Bit 6` (`0x40`) |
+| **Auto Mode** | `0x1E3` Byte 0 Bits [3:2] (`(data[0] & 0x0C) == 0x0C`) | `Byte 0 Bit 3` (`0x08`) | `Byte 0 Bit 3` (`0x08`) |
+| **Dual / Mono (Sync)** | `0x1E3` Byte 0 Bit 0 (`1` = Dual, `0` = Mono) | `Byte 0 Bit 2` (`0x04`) | `Byte 0 Bit 2` (`0x04`) |
+| **A/C MAX** | `0x1D0` Byte 4 Bit 3 | `Byte 0 Bit 5` (`0x20`) | `Byte 4 Bit 3` (`0x08`) |
+| **Cabin Recirculation** | `0x1E3` Byte 0 Bit 7 (`0x80`) / `0x1D0` Byte 4 Bit 4 | `Byte 1 Bit 4` (`0x10`) | `Byte 0 Bit 5` (`0x20`) |
+| **Auto Air Intake (AQS)**| `0x1E3` Byte 0 Bit 4 (`0x10`) / `0x1D0` Byte 4 (`0x00`) | `Byte 1 Bit 3` (`0x08`) | `Byte 0 Bit 4` (`0x10`) |
+| **Front Max Demist** | `0x1D0` Byte 0 = `0x19` / `0x1E3` Byte 1 Bit 7 (`0x80`) | `Byte 2 Bit 4` (`0x10`) | `Byte 4 Bit 7` (`0x80`) |
+| **Rear Defrost Demand** | `0x1D0` Byte 0 Bit 6 (`0x40`): `0x29` $\leftrightarrow$ `0x69` | `Byte 2 Bit 5` (`0x20`) | `Byte 0 Bit 0` (`0x01`) |
+| **Rear Defrost Status** | `0x1E3` Byte 1 Bit 3 (`0x08`): `0x00` $\leftrightarrow$ `0x08` | `Byte 2 Bit 5` (`0x20`) | `Byte 0 Bit 0` (`0x01`) |
+| **Blower Fan Speed** | `0x1D0` Byte 2 [3:0]: `0x0F`=0, `0x00..0x07`=1..8 | `Byte 5` ($0 \dots 8$) | `Byte 1` Bits [3:0] ($0 \dots 8$) |
+| **Driver Vent Mode** | `0x1D0` Byte 3 [7:4] / `0x1E3` Byte 4 [7:4] | `Byte 4` Bits [3:0] (Hiworld code) | `Byte 1` Bits [7:5] (Discrete flags) |
+| **Passenger Vent Mode**| `0x1D0` Byte 3 [3:0] / `0x1E3` Byte 5 [7:4] | `Byte 4` Bits [7:4] (Hiworld code) | `Byte 5` Bits [7:5] (Discrete flags) |
+| **Driver Temperature** | `0x1D0` Byte 5 (0..22 index via `peugeot_temp_map`) | `Byte 6` ($2 \times ^\circ\text{C}$, `0xFE`=LO, `0xFF`=HI) | `Byte 2` ($2 \times ^\circ\text{C}$, `0x00`=LO, `0x1F`=HI) |
+| **Pass. Temperature** | `0x1D0` Byte 6 (0..22 index via `peugeot_temp_map`) | `Byte 7` ($2 \times ^\circ\text{C}$, `0xFE`=LO, `0xFF`=HI) | `Byte 3` ($2 \times ^\circ\text{C}$, `0x00`=LO, `0x1F`=HI) |
+| **Outdoor Ambient Temp**| `0x0F6` Byte 5 (raw) | `Byte 11` (raw byte $\times 0.5 - 40^\circ\text{C}$) | Handled via separate Status frame |
+
+---
+
 # 4. Pure C99 Firmware Implementation
 
 ```c
@@ -261,3 +286,16 @@ Rear defrost is decoded from authentic bench-verified PSA Comfort CAN signals:
 2. **Climate ECU Status Indicator (`0x1E3`):** Byte 1 Bit 3 (`(data[1] >> 3) & 1`), `dlc >= 2`. Active state `0x08` vs inactive `0x00`.
 
 A cleared bit in `0x1D0` and `0x1E3` clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`) and Raise `0x21` payload[0] bit 0 (`0x01`). Implemented in `psa_hvac_process_can_0x1d0()` and `psa_hvac_process_can_0x1e3()`; unit tested in `test_peugeot_407_rear_defrost_detection`.
+
+## Downlink Climate Commands (`0x1ED` / `0x0DF`)
+
+The physical center-console HVAC panel has no physical buttons for A/C Compressor ON/OFF (Eco) or Mono/Dual sync. These functions are commanded via CAN ID `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, DLC 1) by the Multifunction Display (EMF/RT4) or OpenCanbox (Virtual MDF):
+- **Prerequisite:** `0x0DF` (`10 00 50`, DLC 3) broadcast every 500 ms.
+- **`0x1ED` Byte 0 Bitfield:**
+  - **Bit 4 (`0x10`):** `1` = Dual Mode, `0` = Mono Mode.
+  - **Bit 3 (`0x08`):** `0` = A/C ON, `1` = A/C OFF (Eco).
+  - Valid payloads: `0x00` (A/C ON, Mono), `0x08` (A/C OFF, Mono), `0x10` (A/C ON, Dual), `0x18` (A/C OFF, Dual).
+- **HU Mapping:**
+  - Hiworld `Cmd 0x3B` Setting `0x02` (A/C): `1` = ON (clear bit 3), `0` = OFF (set bit 3).
+  - Hiworld `Cmd 0x3B` Setting `0x0F` / `Cmd 0x7D` Setting `0x24` (Mono): `1` = Mono (clear bit 4), `0` = Dual (set bit 4).
+  - Raise `Cmd 0x8A` Setting `0x02` (A/C toggle/set), Setting `0x0B` (Dual toggle/set).

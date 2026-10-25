@@ -117,12 +117,12 @@ def main():
                             if length > 32:
                                 rx_buf.pop(0)
                                 continue
-                            total_len = 3 + length + 1
+                            total_len = length + 5
                             if len(rx_buf) < total_len:
                                 break
                             cmd = rx_buf[3]
-                            payload = bytes(rx_buf[4:3 + length])
-                            cs = rx_buf[3 + length]
+                            payload = bytes(rx_buf[4:4 + length])
+                            cs = rx_buf[4 + length]
                             if cs == calc_hiworld_cs(length, cmd, payload):
                                 del rx_buf[:total_len]
                                 full_raw = f"5A A5 {length:02X} {cmd:02X} {payload.hex(' ')} {cs:02X}"
