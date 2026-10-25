@@ -118,6 +118,15 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
   - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0A 06 FF FF 00 00 00 00`)
   - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0C 06 FF FF 00 00 00 00`)
 
+### 3.5 Virtual EMF & Instrument Cluster Matrix Emulation (`0x167` RT4 Alignment)
+In vehicles with the factory Multifunction Display removed, OpenCanbox emulates the OEM RT4 / EMF display master behavior on CAN ID **`0x167`** (DLC 8):
+- **Idle / Closed State (`0x08`):** `167#0806FFFF00000000` (Main / Audio / Navigation screen, trip overlay closed). This allows the instrument cluster central matrix LCD to close the trip banner.
+- **Carousel Sequence:** `Instant (0x09)` $\longrightarrow$ `Trip 1 (0x0A)` $\longrightarrow$ `Trip 2 (0x0C)` $\longrightarrow$ `Instant (0x09)`.
+- **First Press after Cold Boot:** Stalk button press opens Zone 3 and displays **Instantaneous (`0x09`)**.
+- **7-Second Watchdog Inactivity Timeout:** Matches RT4 `DisplayScreenZ3` (`li r0, 7`). **All** trip pages (including Instantaneous) automatically revert to Idle (`0x08`) after 7 seconds without user interaction.
+- **Carousel Memory across Timeouts:** When the stalk button is pressed after a timeout (from `0x08`), OpenCanbox remembers the last viewed page and advances to the next page in order (e.g. `0x09` $\rightarrow$ timeout to `0x08` $\rightarrow$ next press shows `0x0A` Trip 1).
+- **Long Press Reset ($\ge 2\text{ s}$):** Sustained stalk hold on Trip 1 or Trip 2 pulses `0x8A` or `0x4C` for 300 ms to clear BSI trip counters, then holds the reset confirmation on screen for 7 seconds before closing to `0x08`.
+
 ---
 
 # 4. Pure C99 Firmware Implementation

@@ -12,7 +12,8 @@ static uint8_t  s_cached_profile1_raw[8] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0,
 static bool     s_cached_profile1_valid  = false;
 static uint32_t s_last_mdf_seen_ms       = 0;
 
-static uint8_t s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_INSTANT; /* Default: Instant (0x09) */
+static uint8_t s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_IDLE; /* Default: Idle / Closed (0x08) */
+static uint8_t s_last_viewed_trip          = PSA_MDF_TRIP_PAGE_IDLE; /* Remembers last viewed trip page across timeouts */
 static uint8_t s_mdf_trip_reset_mask       = 0x00; /* 0x80=Reset Trip1, 0x40=Reset Trip2 */
 static uint8_t s_mdf_reset_ticks           = 0;
 static uint8_t s_mdf_trip_inactivity_ticks = 0;    /* 7-second inactivity timeout (70 ticks of 100ms) */
@@ -62,7 +63,8 @@ void psa_car_config_init(void) {
 
     s_last_mdf_seen_ms = 0;
 
-    s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_INSTANT;
+    s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_IDLE;
+    s_last_viewed_trip          = PSA_MDF_TRIP_PAGE_IDLE;
     s_mdf_trip_reset_mask       = 0x00;
     s_mdf_reset_ticks           = 0;
     s_mdf_trip_inactivity_ticks = 0;
@@ -384,29 +386,36 @@ uint8_t psa_car_config_get_trip_page_mask(void) {
 void psa_car_config_set_trip_reset(uint8_t trip_index) {
     if (trip_index == 1) {
         s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_TRIP1;
+        s_last_viewed_trip          = PSA_MDF_TRIP_PAGE_TRIP1;
         s_mdf_trip_reset_mask       = 0x80;
         s_mdf_reset_ticks           = 3; /* 300 ms pulse */
-        s_mdf_trip_inactivity_ticks = 70;
+        s_mdf_trip_inactivity_ticks = 70; /* Keep on screen for 7s before reverting to idle 0x08 */
     } else if (trip_index == 2) {
         s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_TRIP2;
+        s_last_viewed_trip          = PSA_MDF_TRIP_PAGE_TRIP2;
         s_mdf_trip_reset_mask       = 0x40;
         s_mdf_reset_ticks           = 3; /* 300 ms pulse */
-        s_mdf_trip_inactivity_ticks = 70;
+        s_mdf_trip_inactivity_ticks = 70; /* Keep on screen for 7s before reverting to idle 0x08 */
     }
 }
 
 void psa_car_config_cycle_trip_page(void) {
     if (psa_car_config_is_mdf_present()) return;
-    if (s_mdf_trip_page_mask == PSA_MDF_TRIP_PAGE_INSTANT) {
-        s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_TRIP1;
-        s_mdf_trip_inactivity_ticks = 70; /* 7-second timeout to revert to Instant */
-    } else if (s_mdf_trip_page_mask == PSA_MDF_TRIP_PAGE_TRIP1) {
-        s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_TRIP2;
-        s_mdf_trip_inactivity_ticks = 70; /* 7-second timeout to revert to Instant */
+    if (s_last_viewed_trip == PSA_MDF_TRIP_PAGE_IDLE) {
+        /* Cold boot / first press: show Instantaneous */
+        s_mdf_trip_page_mask = PSA_MDF_TRIP_PAGE_INSTANT;
+    } else if (s_last_viewed_trip == PSA_MDF_TRIP_PAGE_INSTANT) {
+        /* Advance to Trip 1 */
+        s_mdf_trip_page_mask = PSA_MDF_TRIP_PAGE_TRIP1;
+    } else if (s_last_viewed_trip == PSA_MDF_TRIP_PAGE_TRIP1) {
+        /* Advance to Trip 2 */
+        s_mdf_trip_page_mask = PSA_MDF_TRIP_PAGE_TRIP2;
     } else {
-        s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_INSTANT;
-        s_mdf_trip_inactivity_ticks = 0; /* Default page has no timeout */
+        /* Advance to Instantaneous */
+        s_mdf_trip_page_mask = PSA_MDF_TRIP_PAGE_INSTANT;
     }
+    s_last_viewed_trip          = s_mdf_trip_page_mask;
+    s_mdf_trip_inactivity_ticks = 70; /* 7-second timeout for ALL trip pages (matches RT4 DisplayScreenZ3) */
     psa_car_config_send_0x167();
 }
 
@@ -433,7 +442,7 @@ void psa_car_config_periodic_100ms(void) {
     if (s_mdf_trip_inactivity_ticks > 0) {
         s_mdf_trip_inactivity_ticks--;
         if (s_mdf_trip_inactivity_ticks == 0) {
-            s_mdf_trip_page_mask = PSA_MDF_TRIP_PAGE_INSTANT;
+            s_mdf_trip_page_mask = PSA_MDF_TRIP_PAGE_IDLE; /* Revert to 0x08 (Zone 3 closed / Audio screen) */
             psa_car_config_send_0x167();
         }
     }

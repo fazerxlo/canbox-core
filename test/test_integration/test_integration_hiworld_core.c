@@ -950,12 +950,12 @@ void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stalk_trip_release), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_release, rx_buf, sizeof(expected_stalk_trip_release));
 
-    // Verify 0x167 is sent on release advancing trip page
+    // Verify 0x167 is sent on release advancing trip page from Idle (0x08) to Instant (0x09)
     can_frame_t sent_frame;
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x0A, sent_frame.data[0]); // Advance from Instant (0x09) to Trip 1 (0x0A)
+    TEST_ASSERT_EQUAL_HEX8(0x09, sent_frame.data[0]); // First stalk press advances from Idle (0x08) to Instant (0x09)
     TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);

@@ -52,6 +52,7 @@ extern "C" {
 #define PSA_CAN_ID_MDF_DIAG_525     0x525
 
 /* Virtual MDF / Cluster Matrix Trip Page Masks (0x167 Byte 0) */
+#define PSA_MDF_TRIP_PAGE_IDLE      0x08
 #define PSA_MDF_TRIP_PAGE_INSTANT   0x09
 #define PSA_MDF_TRIP_PAGE_TRIP1     0x0A
 #define PSA_MDF_TRIP_PAGE_TRIP2     0x0C
