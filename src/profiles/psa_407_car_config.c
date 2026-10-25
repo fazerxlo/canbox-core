@@ -1,4 +1,5 @@
 #include "profiles/peugeot_407.h"
+#include "core/can_router.h"
 #include "hal/hal_can.h"
 #include "hal/hal_system.h"
 #include <string.h>
@@ -329,6 +330,12 @@ void psa_car_config_cycle_trip_page(void) {
 
 void psa_car_config_periodic_100ms(void) {
     if (psa_car_config_is_mdf_present()) {
+        return;
+    }
+
+    const vehicle_state_t *st = can_router_get_state();
+    if (st == NULL || (!st->ignition_on && st->media.radio.power_status == 0)) {
+        s_periodic_1000ms_ticks = 0;
         return;
     }
 

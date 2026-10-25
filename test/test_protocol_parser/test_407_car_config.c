@@ -389,6 +389,15 @@ void test_peugeot_407_virtual_mdf_periodic_broadcast(void) {
 
     TEST_ASSERT_FALSE(psa_car_config_is_mdf_present());
 
+    /* Turn ignition ON via 0x036 */
+    can_frame_t f_ign;
+    memset(&f_ign, 0, sizeof(f_ign));
+    f_ign.id = PSA_CAN_ID_REVERSE_IGNITION;
+    f_ign.dlc = 8;
+    f_ign.data[4] = 0x01; /* Active / Ignition ON */
+    can_router_process_can(&f_ign);
+    hal_can_native_clear_sent_frame();
+
     /* Call periodic 100ms 9 times: no broadcast yet */
     for (int i = 0; i < 9; i++) {
         psa_car_config_periodic_100ms();
@@ -415,6 +424,26 @@ void test_peugeot_407_virtual_mdf_periodic_broadcast(void) {
     TEST_ASSERT_EQUAL_UINT8(3, history[1].dlc);
     const uint8_t exp_0df[] = { 0x10, 0x00, 0x50 };
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_0df, history[1].data, 3);
+}
+
+void test_peugeot_407_virtual_mdf_suppression_when_ign_off(void) {
+    setUp_peugeot_407_car_config();
+
+    /* Inject BSI shutdown countdown 0x036 (Ignition OFF) */
+    can_frame_t f_ign;
+    memset(&f_ign, 0, sizeof(f_ign));
+    f_ign.id = PSA_CAN_ID_REVERSE_IGNITION;
+    f_ign.dlc = 8;
+    f_ign.data[4] = 0x02; /* Network shutdown countdown */
+    can_router_process_can(&f_ign);
+    hal_can_native_clear_sent_frame();
+
+    /* 20 periodic ticks (2 seconds): verify ZERO frames transmitted */
+    for (int i = 0; i < 20; i++) {
+        psa_car_config_periodic_100ms();
+    }
+    can_frame_t sent;
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
 }
 
 void test_peugeot_407_mdf_coexistence_suppression(void) {
