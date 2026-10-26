@@ -35,8 +35,17 @@ typedef struct {
     void           (*send_trip2)(const vehicle_trip_t *trip);
     void           (*send_radar)(const vehicle_radar_t *radar);
     void           (*send_reverse)(bool reverse_active);
+    void           (*send_steering_angle)(int16_t angle_deg);
     void           (*send_alert_single)(const vehicle_alert_item_t *alert);
     void           (*send_alerts_summary)(const vehicle_alert_item_t *alerts, uint8_t count);
+    void           (*send_audio_settings)(const vehicle_audio_settings_t *audio);
+    void           (*send_radio_state)(const vehicle_radio_t *radio);
+    void           (*send_radio_text)(const char *text, uint8_t len);
+    void           (*send_radio_presets)(const vehicle_radio_t *radio);
+    void           (*send_media_state)(const vehicle_cdc_t *cdc);
+    void           (*send_feature_enables)(const uint8_t *feat1, const uint8_t *feat2);
+    void           (*send_central_state1)(const vehicle_config_t *config);
+    void           (*send_central_state2)(const vehicle_config_t *config, const vehicle_state_t *state);
     void           (*send_heartbeat)(void);
 } hu_protocol_driver_t;
 

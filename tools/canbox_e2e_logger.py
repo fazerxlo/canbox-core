@@ -324,6 +324,16 @@ class SerialFrameReassembler:
                     del self.buf[0]
                     continue
                 total_len = plen + 5
+                cmd = self.buf[3]
+                # 0-payload query frames where len=1 counts CMD (e.g. 5A A5 01 0F 0F)
+                if plen == 1 and len(self.buf) >= 5:
+                    csum = (self.buf[2] + self.buf[3]) & 0xFF
+                    cs_cand = self.buf[4]
+                    if (cs_cand == ((csum - 1) & 0xFF) or cs_cand == csum) and (
+                        cmd in (0x0F, 0x11, 0x12, 0xFF) or len(self.buf) == 5 or (len(self.buf) > 5 and self.buf[5] == 0x5A)
+                    ):
+                        total_len = 5
+
                 if len(self.buf) < total_len:
                     break
                 frame = bytes(self.buf[:total_len])
@@ -394,6 +404,13 @@ class UartProxy(threading.Thread):
         self.tx_reassembler = SerialFrameReassembler()
         self.rx_reassembler = SerialFrameReassembler()
 
+    def inject_hu_frame(self, frame_bytes: bytes):
+        self.stats["HU_RX_BYTES"] += len(frame_bytes)
+        frames = self.rx_reassembler.feed(frame_bytes)
+        for f in frames:
+            self.logger.log("APP_UART_RX", f"{f.hex()}")
+        os.write(self.master_fd, frame_bytes)
+
     def run(self):
         try:
             ser = serial.Serial(self.real_port, self.baud, timeout=0.1)
@@ -421,15 +438,19 @@ class UartProxy(threading.Thread):
                         for f in frames:
                             self.logger.log("APP_UART_RX", f"{f.hex()}")
                         os.write(self.master_fd, data)
-                        # Forward Head Unit downlink data (including handshake) to original canbox
+                        # Forward Head Unit downlink handshake/keepalive data to original canbox,
+                        # but strictly filter out active control commands (0xA1, 0xA2, 0xA4, 0xAD,
+                        # 0x0F, 0x7A, 0x2F) to prevent ORIG_CANBOX from colliding on the vehicle CAN bus!
                         if self.orig_ser and self.orig_ser.is_open:
-                            try:
-                                self.orig_ser.write(data)
-                                self.stats["ORIG_TX_BYTES"] = self.stats.get("ORIG_TX_BYTES", 0) + len(data)
-                                for f in frames:
+                            for f in frames:
+                                if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] in (0xA1, 0xA2, 0xA4, 0xAD, 0x0F, 0x7A, 0x2F):
+                                    continue
+                                try:
+                                    self.orig_ser.write(f)
+                                    self.stats["ORIG_TX_BYTES"] = self.stats.get("ORIG_TX_BYTES", 0) + len(f)
                                     self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
-                            except Exception as e:
-                                self.logger.log("ORIG_CANBOX", f"TX error: {e}")
+                                except Exception as e:
+                                    self.logger.log("ORIG_CANBOX", f"TX error: {e}")
 
                 # Flush stale incomplete fragments on idle
                 for f in self.tx_reassembler.flush_stale(0.2):
@@ -437,7 +458,13 @@ class UartProxy(threading.Thread):
                 for f in self.rx_reassembler.flush_stale(0.2):
                     self.logger.log("APP_UART_RX", f"{f.hex()}")
                     if self.orig_ser and self.orig_ser.is_open:
-                        self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
+                        if len(f) >= 4 and f[0] == 0x5A and f[1] == 0xA5 and f[3] in (0xA1, 0xA2, 0xA4, 0xAD, 0x0F, 0x7A, 0x2F):
+                            continue
+                        try:
+                            self.orig_ser.write(f)
+                            self.logger.log("ORIG_CANBOX", f"TX: {f.hex()}")
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
@@ -455,15 +482,32 @@ class CanSniffer(threading.Thread):
             self.sock.bind((self.iface,))
             self.sock.setblocking(True)
             while True:
-                pkt = self.sock.recv(16)
-                if pkt and len(pkt) == 16:
-                    can_id_raw, can_dlc, data = struct.unpack("=IB3x8s", pkt)
+                try:
+                    pkt, ancdata, flags, addr = self.sock.recvmsg(16)
+                    is_tx = bool(flags & socket.MSG_DONTROUTE)
+                except (AttributeError, OSError):
+                    pkt = self.sock.recv(16)
+                    is_tx = False
+
+                if pkt and len(pkt) >= 16:
+                    can_id_raw, can_dlc, data = struct.unpack("=IB3x8s", pkt[:16])
                     is_extended = (can_id_raw & 0x80000000) != 0
                     can_id = can_id_raw & (0x1FFFFFFF if is_extended else 0x000007FF)
                     dlc = min(can_dlc, 8)
                     data_hex = data[:dlc].hex()
                     self.logger.log("CAN", f"ID:{can_id:X} DLC:{dlc} DATA:{data_hex}")
                     self.stats["CAN_FRAMES"] += 1
+                    if is_tx:
+                        self.stats["CAN_TX_FRAMES"] = self.stats.get("CAN_TX_FRAMES", 0) + 1
+                    else:
+                        self.stats["CAN_RX_FRAMES"] = self.stats.get("CAN_RX_FRAMES", 0) + 1
+
+                    if can_id == 0x525:
+                        self.stats["LAST_MDF_SEEN"] = time.time()
+                        self.stats["MDF_FRAMES"] = self.stats.get("MDF_FRAMES", 0) + 1
+                        if not self.stats.get("MDF_PRESENT", False):
+                            self.stats["MDF_PRESENT"] = True
+                            self.logger.log("MDF", f"Physical/External MDF detected on CAN bus (ID:525 DLC:{dlc} DATA:{data_hex})")
         except Exception as e:
             self.logger.log("CAN_ERR", str(e))
 
@@ -569,11 +613,16 @@ def main():
         "ORIG_BYTES": 0,
         "ORIG_TX_BYTES": 0,
         "CAN_FRAMES": 0,
+        "CAN_RX_FRAMES": 0,
+        "CAN_TX_FRAMES": 0,
         "HU_TX_BYTES": 0,
         "HU_RX_BYTES": 0,
         "ACC": 0,
         "ILL": 0,
         "REV": 0,
+        "MDF_PRESENT": False,
+        "LAST_MDF_SEEN": 0.0,
+        "MDF_FRAMES": 0,
     }
 
     can_sniffer = CanSniffer(can_iface, logger, stats)
@@ -618,14 +667,49 @@ def main():
     t_app = threading.Thread(target=read_stream, args=(app_proc.stdout, logger, "APP", stats), daemon=True)
     t_app.start()
     
-    print("[*] App started. Press 'L' to dump last 5s of logs. Press 'S' to dump last 30s of logs. Press 'q' or Esc to quit.\r")
+    DOWNLINK_COMMANDS = {
+        '1': ("Switch RD4 to CDC", bytes.fromhex("5AA502AD0201B1")),
+        '2': ("CDC Standby", bytes.fromhex("5AA502AD0200B0")),
+        '3': ("Switch RD4 to Tuner", bytes.fromhex("5AA502AD0301B3")),
+        '4': ("Switch RD4 to CD", bytes.fromhex("5AA502AD0302B4")),
+        '5': ("Query Radio State (0x0F)", bytes.fromhex("5AA5010F0F")),
+    }
+
+    pipe_path = "/tmp/canbox_hu_cmd.pipe"
+    if os.path.exists(pipe_path):
+        try:
+            os.remove(pipe_path)
+        except Exception:
+            pass
+    try:
+        os.mkfifo(pipe_path)
+        pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+    except Exception:
+        pipe_fd = None
+
+    print("[*] App started. Controls:\r")
+    print("    '1': Switch to CDC   | '2': CDC Standby | '3': Switch to Tuner\r")
+    print("    '4': Switch to CD    | '5': Query 0x0F  | 'm': MDF Status  | 'c': CAN Stats\r")
+    print("    'L': Dump 5s logs    | 'S': Dump 30s    | 'pipe': /tmp/canbox_hu_cmd.pipe | 'q'/Esc: Quit\r")
     
     # Terminal setup to read single characters
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    is_tty = sys.stdin.isatty()
+    fd = sys.stdin.fileno() if is_tty else None
+    old_settings = termios.tcgetattr(fd) if is_tty else None
     
     def cleanup(signum=None, frame=None):
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        if is_tty and old_settings:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
+        if pipe_fd is not None:
+            try:
+                os.close(pipe_fd)
+                if os.path.exists(pipe_path):
+                    os.remove(pipe_path)
+            except Exception:
+                pass
         if app_proc.poll() is None:
             app_proc.terminate()
         if orig_ser and orig_ser.is_open:
@@ -641,19 +725,76 @@ def main():
     signal.signal(signal.SIGTERM, cleanup)
     
     try:
-        tty.setcbreak(fd)
+        if is_tty:
+            tty.setcbreak(fd)
         last_stats_time = 0
         while app_proc.poll() is None:
             now = time.time()
+            # 3000ms MDF timeout matching firmware psa_car_config_is_mdf_present()
+            last_mdf = stats.get("LAST_MDF_SEEN", 0.0)
+            if stats.get("MDF_PRESENT", False) and (now - last_mdf >= 3.0):
+                stats["MDF_PRESENT"] = False
+                logger.log("MDF", "Physical/External MDF presence timed out (>3s silence) -> Standalone Virtual MDF mode active")
+
+            if stats.get("MDF_PRESENT", False):
+                mdf_status = "YES"
+            elif stats.get("MDF_FRAMES", 0) > 0:
+                mdf_status = "EXPIRED"
+            else:
+                mdf_status = "NO"
+
             if now - last_stats_time > 0.5:
                 # Print stats
-                sys.stdout.write(f"\r[STATS] CAN: {stats['CAN_FRAMES']} | APP UART TX: {stats['HU_TX_BYTES']} RX: {stats['HU_RX_BYTES']} ACC:{stats['ACC']} ILL:{stats['ILL']} REV:{stats['REV']} | ORIG TX: {stats['ORIG_TX_BYTES']} RX: {stats['ORIG_BYTES']}   ")
+                can_rx = stats.get("CAN_RX_FRAMES", 0)
+                can_tx = stats.get("CAN_TX_FRAMES", 0)
+                sys.stdout.write(f"\r[STATS] CAN RX: {can_rx} TX: {can_tx} | MDF: {mdf_status} | APP UART TX: {stats['HU_TX_BYTES']} RX: {stats['HU_RX_BYTES']} ACC:{stats['ACC']} ILL:{stats['ILL']} REV:{stats['REV']} | ORIG TX: {stats['ORIG_TX_BYTES']} RX: {stats['ORIG_BYTES']}   ")
                 sys.stdout.flush()
                 last_stats_time = now
                 
-            if select.select([sys.stdin], [], [], 0.1)[0]:
+            read_fds = []
+            if is_tty:
+                read_fds.append(sys.stdin)
+            if pipe_fd is not None:
+                read_fds.append(pipe_fd)
+
+            r_avail, _, _ = select.select(read_fds, [], [], 0.1) if read_fds else ([], [], [])
+            
+            if pipe_fd is not None and pipe_fd in r_avail:
+                try:
+                    pipe_data = os.read(pipe_fd, 1024).decode('utf-8', errors='ignore').strip()
+                    if pipe_data:
+                        # Allow key number ('1'..'5') or raw hex string
+                        if pipe_data in DOWNLINK_COMMANDS:
+                            desc, cmd_bytes = DOWNLINK_COMMANDS[pipe_data]
+                            print(f"\n[*] Pipe Command [{pipe_data}]: {desc} ({cmd_bytes.hex()})\r")
+                            uart_proxy.inject_hu_frame(cmd_bytes)
+                        else:
+                            clean_hex = re.sub(r'[^0-9A-Fa-f]', '', pipe_data)
+                            if len(clean_hex) >= 2:
+                                cmd_bytes = bytes.fromhex(clean_hex)
+                                print(f"\n[*] Pipe Custom Command: {cmd_bytes.hex()}\r")
+                                uart_proxy.inject_hu_frame(cmd_bytes)
+                except Exception as e:
+                    pass
+
+            if is_tty and sys.stdin in r_avail:
                 ch = sys.stdin.read(1)
-                if ch.lower() == 'l':
+                if ch in DOWNLINK_COMMANDS:
+                    desc, cmd_bytes = DOWNLINK_COMMANDS[ch]
+                    print(f"\n[*] Sending HU Cmd [{ch}]: {desc} ({cmd_bytes.hex()})\r")
+                    uart_proxy.inject_hu_frame(cmd_bytes)
+                elif ch.lower() == 'm':
+                    last_mdf = stats.get("LAST_MDF_SEEN", 0.0)
+                    mdf_cnt = stats.get("MDF_FRAMES", 0)
+                    is_pres = stats.get("MDF_PRESENT", False)
+                    dt = f"{now - last_mdf:.1f}s ago" if last_mdf > 0 else "Never"
+                    print(f"\n[*] [MDF Status] Detected: {'YES (Coexistence Mode)' if is_pres else 'NO (Virtual Standalone)'} | Last Seen: {dt} | Total 0x525 Frames: {mdf_cnt}\r")
+                elif ch.lower() == 'c':
+                    can_tot = stats.get("CAN_FRAMES", 0)
+                    can_rx = stats.get("CAN_RX_FRAMES", 0)
+                    can_tx = stats.get("CAN_TX_FRAMES", 0)
+                    print(f"\n[*] [CAN Stats] Total Frames: {can_tot} | RX (Bus -> App): {can_rx} | TX (App -> Bus): {can_tx}\r")
+                elif ch.lower() == 'l':
                     logger.dump_last_ns(5)
                 elif ch.lower() == 's':
                     logger.dump_last_ns(30)

@@ -2,7 +2,7 @@
 #include "protocols/hu_protocol_driver.h"
 #include "protocols/raise_car_mapping.h"
 #include "core/vehicle_profile.h"
-#include "profiles/peugeot_407.h"
+#include "protocols/raise_psa_builders.h"
 #include "proto_raise.h"
 #include "hal/hal_uart.h"
 
@@ -188,5 +188,6 @@ const hu_protocol_driver_t g_hu_protocol_raise = {
     .send_trip2 = NULL,
     .send_radar = raise_send_radar,
     .send_reverse = raise_send_reverse,
+    .send_audio_settings = NULL,
     .send_heartbeat = raise_send_heartbeat,
 };

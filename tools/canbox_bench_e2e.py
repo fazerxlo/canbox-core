@@ -349,7 +349,7 @@ class BenchStateDecoder:
                 self.rear_left_door  = bool(d0 & 0x20)
                 self.rear_right_door = bool(d0 & 0x10)
                 self.trunk           = bool(d0 & 0x08)
-                self.hood            = bool(d0 & 0x04)
+                self.hood            = False  # PSA CAN 0x220 bit 0x04 is bus idle active flag, NOT hood
                 if dlc >= 2:
                     self.handbrake   = bool(data[1] & 0x01)
 

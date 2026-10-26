@@ -18,33 +18,6 @@ In Peugeot 407 (PSA CAN2004 architecture), the steering column multifunction rem
 - **Native PSA CAN2004 RD4 Console Frame (`0x3E5`):** A 6-byte frame carrying RD4 fascia keys (AUDIO, TRIP, CLIM, DARK, MENU, OK, ESC, arrows) as 2-bit fields; see section 3.3.
 - **Generic CAN Box Alias (`0x0F6`):** An aftermarket normalized frame definition used in legacy Chinese CAN boxes (e.g. Raise, Bagoo).
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 Steering Column Stalk                          |
-|             [Vol+, Vol-, Mute, Seek+, Seek-, Source, Voice PTT, Trip, Scroll]      |
-+------------------------------------------------------------------------------------+
-                                          │
-                  [PSA CAN 0x21F (Stalk) / 0x221 (Tips) / 0x3E5 (RD4 Console)]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Captures native 3-byte CAN ID 0x21F stalk frames                              |
-|   2. Decodes Vol+, Vol-, Source, Seek+, Seek- from Byte 0                          |
-|   3. Filters mechanical contact skew to cleanly decode chorded MUTE (0x0C)         |
-|   4. Tracks Byte 1 rotary thumbwheel counter increments/decrements                 |
-|   5. Captures Byte 0 Bit 3 trip button presses from CAN ID 0x221                   |
-|   6. Captures RD4 console keys from CAN ID 0x3E5 only                   |
-|   7. Translates actions to Hiworld OEM format (0x5AA5 / Cmd 0x11 & Cmd 0x21)       |
-+------------------------------------------------------------------------------------+
-                                          │
-                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Infotainment Subsystem                        |
-|       (Processes Key Codes: Volume, Media Control, Android Navigation, Apps)       |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
@@ -56,12 +29,6 @@ In Peugeot 407 (PSA CAN2004 architecture), the steering column multifunction rem
 - **Transmission Cycle:** Event-driven on state transition; periodically repeated (~50–100 ms) while a button is held down. When released, an idle frame (`00 <counter> 00`) is transmitted.
 
 #### Byte Layout
-```text
-+-------------------+-------------------+-------------------+
-|      Byte 0       |      Byte 1       |      Byte 2       |
-|  [All Key Flags]  |  [Scroll Counter] |   [Padding 0x00]  |
-+-------------------+-------------------+-------------------+
-```
 
 #### Byte 0: Primary Button Bitmask
 Proven by real vehicle captures (`dump_2026-10-06_16-56-18.log` & `dump_2026-10-06_17-06-48.log`):
@@ -116,26 +83,6 @@ Proven by real vehicle captures (`dump_2026-10-06_16-56-18.log` & `dump_2026-10-
 
 ### 2.4 Legacy Aftermarket CAN Box Alias (`0x0F6`)
 For compatibility with aftermarket Chinese CAN bus adapters that pre-process stalk inputs into internal `0x0F6` frames:
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Bit Mask / Value Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | Bit 7  | Dark Screen Button                 | 0x80 (1 = Pressed)          |
-|        | Bit 6  | Mode / Source Toggle               | 0x40 (1 = Pressed)          |
-|        | Bit 5  | ESC / Back Button                  | 0x20 (1 = Pressed)          |
-|        | Bit 4  | Scroll Wheel Center Click (OK)     | 0x10 (1 = Pressed)          |
-|        | Bit 3  | Volume Up                          | 0x08 (1 = Pressed)          |
-|        | Bit 2  | Volume Down                        | 0x04 (1 = Pressed)          |
-|        | Bit 1  | Next Track / Seek+                 | 0x02 (1 = Pressed)          |
-|        | Bit 0  | Previous Track / Seek-             | 0x01 (1 = Pressed)          |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | Bit 6  | Menu Button                        | 0x40 (1 = Pressed)          |
-|        | Bit 3..0| Rotary Scroll Encoder Value       | 0x00..0x0F (4-bit counter)  |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | Bit 1  | Telephone Hangup / End Call        | 0x02 (1 = Pressed)          |
-|        | Bit 0  | Telephone Answer / Call Pick-up    | 0x01 (1 = Pressed)          |
-+--------+--------+------------------------------------+-----------------------------+
-```
 
 ---
 
@@ -176,7 +123,8 @@ Directly verified against real OEM Hiworld transmissions and Android `com.qf.veh
 | **Rotary Scroll Up** | `0x21F` Byte 1 Counter $+1$ | `0x12` | Scroll Up (Pulse) | `0x42` | `0x13` |
 | **Rotary Scroll Down** | `0x21F` Byte 1 Counter $-1$ | `0x11` | Scroll Down (Pulse) | `0x43` | `0x14` |
 | **Stalk Tip Trip Button (ODB)** | `0x221` Byte 0: `0x08` (`0xC8`) | `0x14` | Trip Page Cycle / Stalk Key `0x14` | — | — |
-| **Key Released (Idle)** | `0x21F` Byte 0: `0x00` / `0x221` Bit 3: `0` | `0x00` | All Keys Released | `0x00` | `0x00` |
+| **Left Stalk Tip Button** | `0x221` Byte 0: `0x01` (`0xC1`) | `0x40` | Left Stalk Tip / Key `0x40` | — | — |
+| **Key Released (Idle)** | `0x21F` Byte 0: `0x00` / `0x221` Bits 3,0: `0` | `0x00` | All Keys Released | `0x00` | `0x00` |
 
 ---
 

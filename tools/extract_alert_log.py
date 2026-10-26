@@ -295,9 +295,9 @@ class AlertDatabase:
     def _load_from_c_profile(self, c_path: Optional[str]):
         if not c_path or not os.path.exists(c_path):
             # Try default repo path
-            c_path = os.path.join(os.path.dirname(__file__), "..", "src", "profiles", "peugeot_407.c")
+            c_path = os.path.join(os.path.dirname(__file__), "..", "src", "profiles", "psa_407_alerts.c")
             if not os.path.exists(c_path):
-                c_path = "src/profiles/peugeot_407.c"
+                c_path = "src/profiles/psa_407_alerts.c"
 
         if os.path.exists(c_path):
             try:

@@ -52,9 +52,16 @@ You can also pass arguments directly or use `-y`/`--auto` to accept all detected
 
 ### Runtime Controls
 
-Once running, the console will display a live-updating statistics bar showing traffic volume across all active interfaces.
+Once running, the console will display a live-updating statistics bar showing traffic volume across all active interfaces (including `CAN RX` from physical bus, `CAN TX` transmitted by canbox firmware, and physical `MDF` detection status):
+```text
+[STATS] CAN RX: 1418 TX: 2 | MDF: YES | APP UART TX: 2450 RX: 120 ACC:1 ILL:0 REV:0 | ORIG TX: 0 RX: 0
+```
 
-- **`L`**: Extract the last 30 seconds of logs and save them to a `dump_YYYY-MM-DD_HH-MM-SS.log` file in the current directory.
+- **`c`**: Print detailed CAN frame statistics (`Total`, `RX (Bus -> App)`, `TX (App -> Bus)`).
+- **`m`**: Query physical/external MDF detection status (time since last `0x525` frame and coexistence mode).
+- **`1` - `5`**: Send Head Unit downlink commands (switch to CDC, Tuner, CD, query status).
+- **`L`**: Extract the last 5 seconds of logs to `dump_YYYY-MM-DD_HH-MM-SS.log`.
+- **`S`**: Extract the last 30 seconds of logs.
 - **`q` or `Esc`**: Safely tear down the PTY proxies, terminate the native application, securely delete the temporary log files, and exit.
 
 ## Log Format Example

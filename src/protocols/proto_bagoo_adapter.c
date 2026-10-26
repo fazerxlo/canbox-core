@@ -140,6 +140,7 @@ const hu_protocol_driver_t g_hu_protocol_bagoo = {
     .send_trip2 = NULL,
     .send_radar = NULL,
     .send_reverse = NULL,
+    .send_audio_settings = NULL,
     .send_heartbeat = bagoo_send_heartbeat,
 };
 

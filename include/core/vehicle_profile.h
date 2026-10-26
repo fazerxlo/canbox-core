@@ -34,6 +34,7 @@ typedef struct {
     void                     (*init)(void);
     bool                     (*reset_trip)(uint8_t trip_index);
     bool                     (*query_alerts)(void);
+    bool                     (*set_car_config)(uint8_t cmd_id, uint8_t setting_id, uint8_t value, vehicle_config_t *cfg);
 } vehicle_profile_t;
 
 void vehicle_profile_init(void);
@@ -42,6 +43,7 @@ const vehicle_profile_t *vehicle_profile_get_active(void);
 void vehicle_profile_process_frame(const can_frame_t *frame, vehicle_state_t *state);
 bool vehicle_profile_reset_trip(uint8_t trip_index);
 bool vehicle_profile_query_alerts(void);
+bool vehicle_profile_set_car_config(uint8_t cmd_id, uint8_t setting_id, uint8_t value, vehicle_config_t *cfg);
 
 #ifdef __cplusplus
 }

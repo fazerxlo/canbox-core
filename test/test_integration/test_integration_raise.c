@@ -95,11 +95,11 @@ void test_integration_raise_door_status_pipeline(void) {
 void test_integration_raise_telemetry_periodic_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_RAISE);
 
-    // Engine RPM & Speed CAN frame
+    // Engine RPM & Speed CAN frame: RPM=1000 (8000 = 0x1F40), Speed=50 km/h (5000 = 0x1388)
     can_frame_t b6_frame = {
         .id = 0x0B6,
         .dlc = 8,
-        .data = { 0x1F, 0x40, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00 }
+        .data = { 0x1F, 0x40, 0x13, 0x88, 0x00, 0x00, 0x00, 0x00 }
     };
     can_router_process_can(&b6_frame);
 
@@ -201,12 +201,12 @@ void test_integration_raise_downlink_trip_reset_pipeline(void) {
     }
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x80, sent_frame.data[0]); // Bit 7: Trip 1 Reset
-    for (int i = 1; i < 8; i++) {
-        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent_frame.data[0]); // 0x80 | 0x0A: Trip 1 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 
     // 2. Android sends Trip 2 Reset: 2E 82 02 22 00 59
     hal_can_native_clear_sent_frame();
@@ -216,11 +216,11 @@ void test_integration_raise_downlink_trip_reset_pipeline(void) {
     }
 
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
-    TEST_ASSERT_EQUAL_HEX32(0x221, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x40, sent_frame.data[0]); // Bit 6: Trip 2 Reset
-    for (int i = 1; i < 8; i++) {
-        TEST_ASSERT_EQUAL_HEX8(0x00, sent_frame.data[i]);
-    }
+    TEST_ASSERT_EQUAL_HEX8(0x4C, sent_frame.data[0]); // 0x40 | 0x0C: Trip 2 Reset
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
 }
 

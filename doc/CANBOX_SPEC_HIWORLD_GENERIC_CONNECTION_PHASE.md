@@ -37,33 +37,6 @@
 
 The **Hiworld (WC)** CAN bus protocol governs bidirectional communication between the vehicle-side CAN box microcontroller and the Android headunit (HU).
 
-```
-+------------------------------------------------------------------------------------+
-|                         Android Infotainment SoC (Host OS)                         |
-|            QF_Canbus.apk / com.qf.vehicle.supplier.wc.WcComDataParser              |
-+------------------------------------------------------------------------------------+
-                                          │
-                        [Android Binder / Shared Memory]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         Android MCU Subsystem (Hardware MCU)                       |
-|         McuManagerService — Tunneling Packets via Command 0x40 (Tx) / 0x41 (Rx)     |
-+------------------------------------------------------------------------------------+
-                                          │
-                         [Physical UART: 38400 bps, 8N1]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         Hiworld CAN Box Microcontroller                            |
-|             (Translates Vehicle CAN 2.0A/B to/from 0x5AA5 Serial Protocol)          |
-+------------------------------------------------------------------------------------+
-                                          │
-                           [ISO 11898 CAN-H / CAN-L]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                            Vehicle CAN Network (BSI / ECUs)                        |
-+------------------------------------------------------------------------------------+
-```
-
 ### 1.1 UART Serial Configuration
 - **Baud Rate:** `38400 bps` (Standard) or `115200 bps` (High-speed bus / IAP update mode)
 - **Data Bits:** `8`
@@ -79,15 +52,6 @@ When communicating through an intermediate MCU (common on UIS7862 / TS10 headuni
 On systems with direct serial access (USB-to-UART or direct SoC UART), raw `0x5AA5` frames are sent directly over the wire.
 
 ### 1.3 `0x5A 0xA5` Frame Structure & Byte-Level Serialization
-
-```
-+--------+--------+--------+--------+-----------------------+----------+
-| Byte 0 | Byte 1 | Byte 2 | Byte 3 | Byte 4 .. (L + 3)     | Byte L+4 |
-+--------+--------+--------+--------+-----------------------+----------+
-| Sync 1 | Sync 2 | Length | Cmd ID |     Payload Data      | Checksum |
-|  0x5A  |  0xA5  |  (L)   | (Type) |      (L bytes)        |  1 Byte  |
-+--------+--------+--------+--------+-----------------------+----------+
-```
 
 - **Sync Header (Bytes 0–1):** Fixed 2-byte preamble `0x5A 0xA5` (`90`, `-91` signed).
 - **Length ($L$, Byte 2):** Number of payload data bytes (`bArr[2] = PayloadLength`). *Note: Total frame length on the wire is $L + 5$ bytes.*
@@ -122,47 +86,6 @@ uint8_t hiworld_calc_checksum(const uint8_t *frame, size_t total_len) {
 
 ### 2.1 Complete Connection Sequence Diagram
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant HU as Android Headunit (Host)
-    participant CB as Hiworld CAN Box Adapter
-    participant CAN as Vehicle Network (BSI/ECU)
-
-    Note over HU,CB: Phase 1: Physical Link Up & Wakeup Beacon
-    CB-->>HU: Periodic Version Beacon (Cmd 0xF0: every 1000 ms while waiting)
-    HU->>CB: Handshake / Vehicle Model Configuration (Cmd 0x24: Model=34, Variant=0)
-    CB-->>HU: Immediate Command ACK (Cmd 0xFF: 5A A5 01 FF 24 23)
-
-    Note over HU,CB: Phase 2: CAN Hardware Setup & Initial Configuration Burst
-    CB->>CAN: Configure CAN Baudrate (125 kbps) & ID Acceptance Filters
-    CB-->>HU: Firmware Version Report (Cmd 0xF0: "HW_PSA_V2.04.01")
-    CB-->>HU: Feature Enable Mask 1 (Cmd 0x71)
-    CB-->>HU: Feature Enable Mask 2 (Cmd 0x72)
-    CB-->>HU: BSI Personalization State 1 (Cmd 0x76)
-    CB-->>HU: BSI Personalization State 2 (Cmd 0x79)
-    CB-->>HU: Measurement Units Feedback (Cmd 0xC1)
-
-    Note over HU,CB: Phase 3: Android System Parameter Synchronization
-    HU->>CB: Sync GPS Date & Time (Cmd 0xCB: Year, Month, Day, Hour, Min, 24H)
-    CB->>CAN: Inject Cluster Clock Sync Frame (ID 0x228)
-    HU->>CB: Master Measurement Units Setting (Cmd 0xCA)
-    HU->>CB: Vehicle System Language Setting (Cmd 0x9A)
-
-    Note over HU,CB: Phase 4: Active Operation & Link Keep-Alive
-    loop Keep-Alive Heartbeat (1.0 Hz / 1000 ms)
-        CB-->>HU: Keep-Alive Heartbeat Ping (Cmd 0xFF: 5A A5 01 FF E1 E0)
-    end
-    loop Operational Telemetry & Sensor Events
-        CAN-->>CB: Vehicle Sensor CAN Frames (0x0E1, 0x0F6, 0x1D0, etc.)
-        CB-->>HU: Hiworld Uplink Packets (Keys 0x11, Radar 0x41, Doors 0x12, AC 0x31)
-    end
-    opt Repeated 0x24 Downlink (Model Unchanged)
-        HU->>CB: Downlink Model Ping (Cmd 0x24)
-        CB-->>HU: Immediate ACK ONLY (5A A5 01 FF 24 23) — 70-byte burst suppressed
-    end
-```
-
 ---
 
 ### 2.2 Phase 1: Physical Link Up & Handshake Beacon
@@ -171,7 +94,7 @@ When the CAN box micro-controller powers on:
 2. While awaiting initial vehicle model assignment from the Android Head Unit, the CAN box emits a periodic firmware version beacon (`Cmd 0xF0`) once every 1000 ms (`hiworld_conn_task_periodic`). This serves as a link-discovery announcement.
 3. When Android boots or the USB/UART serial interface binds, Android's `QF_Canbus.apk` (`WcVehicleDataRuleHead5aa5`) opens the serial stream at 38,400 baud.
 4. The Head Unit begins dispatching the vehicle model configuration frame `0x24` (`forwardCurrentCarType`).
-5. **3000 ms Timeout / Retry Rule:** If Android receives no valid ACK response (`0xFF` with payload `0x24`) within 3000 ms, `QF_Canbus.apk` periodically resends `0x24` every 3000 ms until an acknowledgment is received.
+5. **Unconditional 3000 ms Heartbeat Rule:** Reverse engineering of `QF_Canbus.apk` (`PeugeotDataController$1.smali`) demonstrates that `0x24` is an ongoing unconditional heartbeat emitted via `sendEmptyMessageDelayed(1, 3000)` (`getIsWriteACK() == false`). The Head Unit emits `0x24` every 3000 ms indefinitely as long as the service is running. It is not a retry loop that halts upon ACK.
 
 ---
 
@@ -207,18 +130,26 @@ Upon receiving `Cmd 0x24`, the CAN box MUST immediately acknowledge receipt to s
   - Payload Byte 0: `0x24` (Acknowledged Downlink Command ID)
   - Checksum: `(0x01 + 0xFF + 0x24 - 1) & 0xFF = 0x23`
 
-#### Handshake De-duplication & Burst Suppression Rule:
-To prevent serial buffer overflows on Android head units and avoid UI redraw stuttering:
-1. **Unchanged Model in `HIWORLD_LINK_ACTIVE`:**
-   If the CAN box is already in `HIWORLD_LINK_ACTIVE` state and receives a `0x24` frame whose `car_model_id` and `car_variant` match the active configuration:
-   - The CAN box returns **ONLY** the 6-byte ACK `5A A5 01 FF 24 23`.
-   - The redundant ~70-byte initialization block (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`) is **suppressed**.
-2. **Initial Handshake or Model Change:**
-   If the CAN box is in `HIWORLD_LINK_WAIT_MODEL` state OR the received `car_model_id` / `car_variant` differs from the current configuration:
-   - Returns ACK `5A A5 01 FF 24 23`.
+#### Two-Mode Synchronization Architecture:
+To prevent serial buffer overflows on Android head units (160+ bytes every 3 seconds) while ensuring rapid recovery after head unit reboots or app crashes:
+
+1. **Case A: Initial Boot, Model Change, or Detected HU Reboot (`gap > 4500 ms`):**
+   Triggered on first `0x24` after power-on, when car model/variant changes, or when no `0x24` arrived for $> 4500\text{ ms}$ (Android OS reboot):
+   - Returns immediate ACK: `5A A5 01 FF 24 23`.
    - Dynamically reconfigures CAN controller hardware (e.g., 125 kbps for CAN2004 vs 500 kbps for EMP2) and switches active profile (`vehicle_profile_set_active`).
-   - Transmits full initialization sequence: `0xF0` (Version), `0x71` & `0x72` (Feature Enable Masks), `0x76` & `0x79` (Central States), and `0xC1` (Measurement Units).
+   - Transmits full static discovery burst: `0xF0` (Version), `0x71` & `0x72` (Feature Enable Masks), and `0xC1` (Measurement Units).
+   - Triggers an immediate full state push (`can_router_trigger_full_state_push()`) in $< 50\text{ ms}$: radio/media telemetry (`0x84`, `0x85`, `0x86`), doors (`0x12`), climate (`0x31`), central config (`0x76`, `0x79`), and DSP settings (`0x56`).
+   - Resets steady-state round-robin counter: `s_024_rr_step = 0`.
    - Sets state to `HIWORLD_LINK_ACTIVE`.
+
+2. **Case B: Steady-State 3-Second Heartbeat (`gap \le 4500 ms`):**
+   When `0x24` arrives while already in `HIWORLD_LINK_ACTIVE` with unchanged model code:
+   - Returns immediate ACK: `5A A5 01 FF 24 23`.
+   - Advances a 4-step round-robin counter (`s_024_rr_step++ & 0x03U`) to distribute synchronization evenly with zero UART bursts:
+     - **Step 0 ($t + 3\text{ s}$):** Static capabilities (`0xF0`, `0x71` `5A A5 02 71 60 12 E4`, `0x72` `5A A5 08 72 00 01 80 00 00 00 00 00 FA`, and `0xC1`).
+     - **Step 1 ($t + 6\text{ s}$):** Central Vehicle Settings (`0x76` and `0x79`).
+     - **Step 2 ($t + 9\text{ s}$):** Body & Cabin Telemetry (`0x31` Climate, `0x12` Doors, `0x56` Audio DSP).
+     - **Step 3 ($t + 12\text{ s}$):** Lightweight Media Header (`0x84` Radio State or `0x82` CDC State; excludes heavy 52-byte preset lists `0x85` and 68-byte RadioText `0x86`).
 
 ---
 
@@ -356,7 +287,6 @@ The serial link between OpenCanbox and the Android Head Unit is resilient across
 4. OpenCanbox compares the incoming model ID with `ctx->car_model_id`: since `0x10 != 0x22`, the deduplication check evaluates to false.
 5. OpenCanbox calls `hiworld_car_mapping_get_profile(0x10)` to look up the new profile, invokes `vehicle_profile_set_active()`, and calls `ctx->can_config()` to reconfigure CAN controller baud rate (e.g. switching from 125 kbps to 500 kbps for EMP2).
 6. OpenCanbox transmits updated firmware version and feature enable masks corresponding to the new vehicle model.
-
 
 ---
 
@@ -763,11 +693,11 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
 ### Vector 4: CAN Box Broadcasts Feature Enable Bitmasks
 - **Uplink Serial Transmitted (`Cmd 0x71` & `0x72`):**
   ```
-  Frame 1: 5A A5 02 71 FF FF 71
-  Frame 2: 5A A5 02 72 FB FF 6E
+  Frame 1: 5A A5 02 71 FF FF 70
+  Frame 2: 5A A5 02 72 FB FF 6D
   ```
-  - Checksum 1: `(0x02 + 0x71 + 0xFF + 0xFF - 1) & 0xFF = 0x71`
-  - Checksum 2: `(0x02 + 0x72 + 0xFB + 0xFF - 1) & 0xFF = 0x6E`
+  - Checksum 1: `(0x02 + 0x71 + 0xFF + 0xFF - 1) & 0xFF = 0x70`
+  - Checksum 2: `(0x02 + 0x72 + 0xFB + 0xFF - 1) & 0xFF = 0x6D`
 
 ### Vector 5: Periodic 1.0 Hz Protocol Keep-Alive Heartbeat
 - **Uplink Serial Transmitted (Every 1000 ms):**
@@ -782,17 +712,23 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
   - Checksum: `(0x01 + 0xFF + 0x01 - 1) & 0xFF = 0x00`
   - **Rate:** Exactly 1.0 Hz (1000 ms cadence). Prevents UART link timeout on Head Unit without choking the 38,400 baud serial bus.
 
-### Vector 6: Handshake De-duplication on Repeated Model Set (Model Unchanged)
-- **Downlink Serial Received (Host $\to$ CAN Box):**
+### Vector 6: Steady-State 3-Second Heartbeat Synchronization (4-Step Round-Robin)
+- **Downlink Serial Received (Host $\to$ CAN Box, Every 3000 ms):**
   ```
   Hex Trace: 5A A5 02 24 22 00 47
   ```
 - **Uplink Serial Transmitted (CAN Box $\to$ Host):**
   ```
-  Hex Trace: 5A A5 01 FF 24 23
+  Hex Trace: 5A A5 01 FF 24 23  (ACK frame always emitted first)
   ```
-  - **Expected Outcome:** Exactly **one** 6-byte ACK frame is emitted.
-  - The redundant 6-frame block (`0xF0`, `0x71`, `0x72`, `0x76`, `0x79`, `0xC1`) is **suppressed**. Zero dropped frames, zero Android UI stutter.
+  - **Expected Outcome:** Immediate ACK frame `5A A5 01 FF 24 23` is always returned.
+  - Full state burst (160+ bytes) is **suppressed**.
+  - Pings advance a 4-step round-robin counter:
+    - Step 0 ($t + 3\text{ s}$): Static capabilities (`0xF0`, `0x71`, `0x72`, `0xC1`).
+    - Step 1 ($t + 6\text{ s}$): Central Vehicle Settings (`0x76` & `0x79`).
+    - Step 2 ($t + 9\text{ s}$): Cabin & Body Telemetry (`0x31` Climate, `0x12` Doors, `0x56` DSP).
+    - Step 3 ($t + 12\text{ s}$): Lightweight active Radio/CD header (`0x84` / `0x82`).
+  - Zero dropped frames, zero UART congestion, $< 50\text{ bytes}$ per ping.
 
 ### Vector 7: Headunit Synchronizes GPS Clock (22 Sept 2026, 15:30, 24H)
 - **Downlink Serial Received (Host $\to$ CAN Box):**
@@ -805,4 +741,3 @@ void hiworld_conn_task_periodic(hiworld_connection_ctx_t *ctx, uint32_t now_mill
   - Payload: Year 2026 (`0x1A`), Month 9 (`0x09`), Day 22 (`0x16`), Hour 15 (`0x0F`), Min 30 (`0x1E`), 24H mode (`0x01`)
   - Checksum: `(0x06 + 0xCB + 0x1A + 0x09 + 0x16 + 0x0F + 0x1E + 0x01 - 1) & 0xFF = 0x4B`
   - **Action:** Microcontroller injects PSA CAN ID `0x228#0F1E16091A000000` onto the vehicle bus.
-

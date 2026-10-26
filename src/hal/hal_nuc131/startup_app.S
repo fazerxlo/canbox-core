@@ -171,6 +171,21 @@ HardFault_Handler:
 SVC_Handler:
 PendSV_Handler:
 Default_Handler:
+    /* Fault Recovery: Immediately isolate CAN bus (PC3=1 Standby, PD7=1 Recessive),
+     * turn off all vehicle outputs (PA8/9/12/13=0), and trigger Cortex-M0 System Reset */
+    cpsid i
+    ldr r2, =0x50004088   /* GPIOC_DOUT */
+    ldr r1, =0x000000CF   /* PC3 = 1 (CAN Standby) */
+    str r1, [r2]
+    ldr r2, =0x500040C8   /* GPIOD_DOUT */
+    ldr r1, =0x000000C0   /* PD7 = 1 (CAN_TX Recessive) */
+    str r1, [r2]
+    ldr r2, =0x50004008   /* GPIOA_DOUT */
+    ldr r1, =0x00004CFF   /* PA8/9/12/13 = 0 (ACC/ILL/BRAKE/REV OFF) */
+    str r1, [r2]
+    ldr r2, =0xE000ED0C   /* SCB->AIRCR */
+    ldr r1, =0x05FA0004   /* VECTKEY (0x05FA) | SYSRESETREQ (bit 2) */
+    str r1, [r2]
     b .
 
     def_irq SysTick_Handler

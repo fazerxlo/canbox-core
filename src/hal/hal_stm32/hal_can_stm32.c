@@ -31,9 +31,10 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     gpio_init.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
     LL_GPIO_Init(GPIOA, &gpio_init);
 
-    // Request Initialization Mode
+    // Request Initialization Mode (bounded wait so missing transceiver cannot hang boot)
     CAN1->MCR = CAN_MCR_INRQ | CAN_MCR_ABOM; // Auto-bus-off recovery
-    while ((CAN1->MSR & CAN_MSR_INAK) == 0);
+    uint32_t timeout = 200000UL;
+    while (((CAN1->MSR & CAN_MSR_INAK) == 0) && --timeout);
 
     // Timing Configuration (APB1 = 36 MHz)
     uint32_t prescaler = 4;
@@ -63,7 +64,8 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
 
     // Leave Initialization Mode
     CAN1->MCR &= ~CAN_MCR_INRQ;
-    while ((CAN1->MSR & CAN_MSR_INAK) != 0);
+    timeout = 200000UL;
+    while (((CAN1->MSR & CAN_MSR_INAK) != 0) && --timeout);
 
     // Enable FIFO 0 message pending interrupt
     CAN1->IER |= CAN_IER_FMPIE0;

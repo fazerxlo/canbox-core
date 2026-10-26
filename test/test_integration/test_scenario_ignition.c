@@ -1,7 +1,11 @@
 #include "unity.h"
 #include "can_log_player.h"
 #include "core/can_router.h"
+#include "profiles/peugeot_407.h"
+#include "protocols/hu_protocol.h"
+#include "protocols/hu_protocol_driver.h"
 #include "hal/hal_gpio.h"
+#include "test_integration_common.h"
 
 static const char *LOG_PATH = "test/test_integration/data/ignition_off_after_power_on.csv";
 
@@ -11,6 +15,7 @@ void test_scenario_ignition_off_after_power_on(void) {
     TEST_ASSERT_TRUE_MESSAGE(opened, "Failed to open CAN log CSV file");
 
     can_router_init();
+    hal_can_native_clear_sent_frame();
 
     // -------------------------------------------------------------
     // Scenario Step 1: Baseline / Pre-Ignition Sparse Bus
@@ -77,6 +82,10 @@ void test_scenario_ignition_off_after_power_on(void) {
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
     TEST_ASSERT_FALSE_MESSAGE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER), "ACC power must remain OFF in deep sleep (0x00)");
 
+    can_frame_t sent_frame;
+    TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
+                              "CAN box must not transmit any CAN frames during key-off log replay");
+
     can_log_player_close(&player);
 
     // -------------------------------------------------------------
@@ -110,6 +119,7 @@ void test_scenario_ignition_off_after_power_on(void) {
 
 void test_scenario_ignition_silence_watchdog_forces_sleep_from_on(void) {
     can_router_init();
+    hal_can_native_clear_sent_frame();
 
     // Setup: Bus is active with Ignition ON
     can_frame_t frame_ign_on = {
@@ -159,6 +169,7 @@ void test_scenario_ignition_silence_watchdog_forces_sleep_from_on(void) {
 
 void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     can_router_init();
+    hal_can_native_clear_sent_frame();
     const vehicle_state_t *state = can_router_get_state();
 
     // 1. Ignition ON reference frame: 0E 00 00 0F 01 00 00 A0
@@ -226,7 +237,7 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
     // 7. Normal mode with RD4 radio turned OFF via 0x165 (0x48 transition, then 0x08 sleep)
     can_router_process_can(&frame_norm_off); // Return to normal mode
     can_router_process_can(&frame_radio_off); // 0x48: Audio turning off, screen goodbye
-    TEST_ASSERT_FALSE(state->radio_on);
+    TEST_ASSERT_FALSE(psa_rd4_is_powered(&state->media.radio));
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
@@ -237,25 +248,319 @@ void test_scenario_ignition_economy_mode_forces_radio_off(void) {
         .data = { 0x08, 0x80, 0x00, 0x00 }
     };
     can_router_process_can(&frame_radio_sleep);
-    TEST_ASSERT_TRUE(state->radio_sleep);
-    TEST_ASSERT_FALSE(state->radio_on);
+    TEST_ASSERT_TRUE(state->media.radio.sleep);
+    TEST_ASSERT_FALSE(psa_rd4_is_powered(&state->media.radio));
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Radio in sleep mode must keep ACC OFF");
     TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
-    // Even if 0x036 arrives with ignition ON while radio is in sleep mode, ACC stays OFF
+    // Ignition ON (+APC) overrides sleeping radio: Head Unit turns ON
     can_frame_t frame_ign_with_radio_sleep = {
         .id = 0x036,
         .dlc = 8,
         .data = { 0x0E, 0x00, 0x00, 0x0F, 0x01, 0x00, 0x00, 0xA0 }
     };
     can_router_process_can(&frame_ign_with_radio_sleep);
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Radio in sleep mode overrides stale ignition 0x01");
-    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_ON, state->ignition_state, "Ignition ON must power HU even if radio is sleeping");
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
 
     // 9. When radio powers back ON (0xC8), ACC turns ON
     can_router_process_can(&frame_radio_on);
-    TEST_ASSERT_TRUE(state->radio_on);
-    TEST_ASSERT_FALSE(state->radio_sleep);
+    TEST_ASSERT_TRUE(psa_rd4_is_powered(&state->media.radio));
+    TEST_ASSERT_FALSE(state->media.radio.sleep);
     TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
     TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+}
+
+void test_scenario_sleeping_bus_blocks_can_tx_on_uart_activity(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+    hal_can_native_clear_sent_frame();
+
+    // Advance 30 ticks (3.0s) of CAN silence so bus enters sleep mode
+    for (int i = 0; i < 30; i++) {
+        can_router_periodic_100ms();
+    }
+    TEST_ASSERT_TRUE(can_router_is_bus_sleeping());
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_CAN_STBY));
+
+    hal_can_native_clear_sent_frame();
+
+    // 1. Late HU sends Date/Time Set (0xC6): 5A A5 06 C6 1A 0A 12 14 15 01 1A
+    const uint8_t pkt_time[] = { 0x5A, 0xA5, 0x06, 0xC6, 0x1A, 0x0A, 0x12, 0x14, 0x15, 0x01, 0x2B };
+    for (size_t i = 0; i < sizeof(pkt_time); i++) {
+        can_router_process_uart_byte(pkt_time[i]);
+    }
+
+    // 2. Late HU sends Virtual CDC switch command (0xAD 02 01): 5A A5 02 AD 02 01 B1
+    const uint8_t pkt_cdc[] = { 0x5A, 0xA5, 0x02, 0xAD, 0x02, 0x01, 0xB1 };
+    for (size_t i = 0; i < sizeof(pkt_cdc); i++) {
+        can_router_process_uart_byte(pkt_cdc[i]);
+    }
+
+    // 3. Late HU sends Diagnostic Query (0x2F): 5A A5 02 2F 00 00 D4
+    const uint8_t pkt_diag[] = { 0x5A, 0xA5, 0x02, 0x2F, 0x00, 0x00, 0xD4 };
+    for (size_t i = 0; i < sizeof(pkt_diag); i++) {
+        can_router_process_uart_byte(pkt_diag[i]);
+    }
+
+    // 4. Periodic 100ms ticks while sleeping
+    can_router_periodic_100ms();
+
+    // Verify CAN bus remains asleep, transceiver stays in standby, and ZERO CAN frames were sent
+    can_frame_t sent_frame;
+    TEST_ASSERT_TRUE(can_router_is_bus_sleeping());
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_CAN_STBY));
+    TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
+                              "No CAN frames may be transmitted while Comfort CAN bus is sleeping");
+}
+
+void test_scenario_acc_power_lifecycle(void) {
+    can_router_init();
+    hal_can_native_clear_sent_frame();
+    vehicle_state_t *state = can_router_get_state();
+
+    const can_frame_t f_ign_off = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x0F, 0x02, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_ign_on = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x0F, 0x01, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_eco_on = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x80, 0x0F, 0x02, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_rd4_on = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0xC8, 0x00, 0x11, 0x00 }
+    };
+    const can_frame_t f_rd4_off = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0x48, 0xA0, 0x00, 0x00 }
+    };
+    const can_frame_t f_rd4_sleep = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0x08, 0x80, 0x00, 0x00 }
+    };
+    const can_frame_t f_rd4_reboot_00 = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0x00, 0x00, 0x00, 0x00 }
+    };
+
+    const can_frame_t f_0f6_ign_on = {
+        .id = 0x0F6, .dlc = 8,
+        .data = { 0x88, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20 }
+    };
+    const can_frame_t f_0f6_ign_off = {
+        .id = 0x0F6, .dlc = 8,
+        .data = { 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20 }
+    };
+
+    // --- Scenario 1: Initial state without RD4 on bus ---
+    can_router_process_can(&f_ign_off);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Turn ON ignition without RD4: HU powers ON
+    can_router_process_can(&f_0f6_ign_on);
+    can_router_process_can(&f_ign_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Turn OFF ignition without RD4: HU powers OFF
+    can_router_process_can(&f_0f6_ign_off);
+    can_router_process_can(&f_ign_off);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // --- Scenario 2: RD4 present in car ---
+    // Start vehicle: IGN ON + RD4 ON
+    can_router_process_can(&f_0f6_ign_on);
+    can_router_process_can(&f_ign_on);
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Mid-drive RD4 restart/silence resilience:
+    // RD4 sends 00 00 00 00 (reboot) or 08 80 (standby glitch)
+    can_router_process_can(&f_rd4_reboot_00);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    can_router_process_can(&f_rd4_sleep);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Radio recovers
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ON, state->ignition_state);
+
+    // --- Scenario 3: Key turned OFF while driving (IGN goes OFF) ---
+    // HU MUST turn OFF immediately even if RD4 has not powered down yet
+    can_router_process_can(&f_0f6_ign_off);
+    can_router_process_can(&f_ign_off);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "HU must turn OFF when IGN goes OFF");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Subsequent late RD4 frames from shutdown do NOT re-trigger ACC
+    can_router_process_can(&f_rd4_on); // Stale/trailing frame
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // RD4 finishes shutting down
+    can_router_process_can(&f_rd4_off);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // --- Scenario 4: Parked, IGN is OFF, user explicitly switches ON RD4 ---
+    // Vehicle ground truth: BSI wakes up comfort network (0x036 Phase=0x01) but 0x0F6 is IGN OFF (0x80)
+    can_router_process_can(&f_0f6_ign_off);
+    can_router_process_can(&f_ign_on); // 0x036 awake
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_ACC, state->ignition_state, "HU must turn ON in ACC when RD4 switched ON with key OFF");
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // User switches OFF RD4 while parked (BSI 0x036 still broadcasting awake Phase=0x01!)
+    can_router_process_can(&f_rd4_off);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "HU must turn OFF when RD4 switched OFF even if 0x036 is awake");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Periodic 0x036 (Phase=0x01) keeper frames must NOT turn ACC back ON while RD4 is OFF
+    can_router_process_can(&f_ign_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_OFF, state->ignition_state);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // User turns RD4 back ON while parked
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_EQUAL_UINT8(VEHICLE_IGNITION_ACC, state->ignition_state);
+    TEST_ASSERT_TRUE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // --- Scenario 5: Economy mode triggers while in ACC ---
+    can_router_process_can(&f_eco_on);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(VEHICLE_IGNITION_OFF, state->ignition_state, "Economy mode must cut HU power");
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+}
+
+void test_scenario_zero_can_tx_when_ignition_and_radio_off(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_router_init();
+    hal_can_native_clear_sent_frame();
+    can_frame_t sent_frame;
+
+    const can_frame_t f_bsi_countdown = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x0F, 0x02, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_ign_off = {
+        .id = 0x0F6, .dlc = 8,
+        .data = { 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20 }
+    };
+    const can_frame_t f_rd4_off = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0x48, 0xA0, 0x00, 0x00 }
+    };
+
+    // -------------------------------------------------------------
+    // Phase 1: Bench Power-Up / Pre-Ignition (BSI awake/countdown, Key OFF)
+    // -------------------------------------------------------------
+    can_router_process_can(&f_bsi_countdown);
+    can_router_process_can(&f_ign_off);
+    can_router_process_can(&f_rd4_off);
+
+    const vehicle_state_t *st = can_router_get_state();
+    TEST_ASSERT_FALSE(st->ignition_on);
+    TEST_ASSERT_EQUAL_UINT8(0, st->media.radio.power_status);
+    TEST_ASSERT_FALSE(hal_gpio_read(GPIO_PIN_HEADUNIT_POWER));
+
+    // Simulate 50 ticks (5.0s) of periodic loop with 10 Hz BSI keep-alive
+    for (int tick = 0; tick < 50; tick++) {
+        can_router_process_can(&f_bsi_countdown);
+        can_router_periodic_100ms();
+        TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
+            "Firmware must NEVER transmit CAN frames during pre-ignition/key-off (would block BSI sleep)");
+    }
+
+    // -------------------------------------------------------------
+    // Phase 2: Key Turned OFF After Driving (BSI countdown transition)
+    // -------------------------------------------------------------
+    const can_frame_t f_ign_on = {
+        .id = 0x0F6, .dlc = 8,
+        .data = { 0x88, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20 }
+    };
+    const can_frame_t f_bsi_awake = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x00, 0x0F, 0x01, 0x00, 0x00, 0xA0 }
+    };
+    const can_frame_t f_rd4_on = {
+        .id = 0x165, .dlc = 4,
+        .data = { 0xC8, 0x00, 0x11, 0x00 }
+    };
+    can_router_process_can(&f_ign_on);
+    can_router_process_can(&f_bsi_awake);
+    can_router_process_can(&f_rd4_on);
+    TEST_ASSERT_TRUE(st->ignition_on);
+
+    // Engine shut down: Key OFF, Radio OFF, BSI countdown 0x02 begins
+    can_router_process_can(&f_ign_off);
+    can_router_process_can(&f_rd4_off);
+    can_router_process_can(&f_bsi_countdown);
+    TEST_ASSERT_FALSE(st->ignition_on);
+    TEST_ASSERT_EQUAL_UINT8(0, st->media.radio.power_status);
+    hal_can_native_clear_sent_frame();
+
+    // Simulate full 14-second BSI countdown (140 ticks @ 100ms)
+    for (int tick = 0; tick < 140; tick++) {
+        can_router_process_can(&f_bsi_countdown);
+        can_router_periodic_100ms();
+        TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
+            "Periodic CAN transmission detected during BSI sleep countdown (0x02)");
+    }
+
+    // -------------------------------------------------------------
+    // Phase 3: Android HU Background Activity During Shutdown Countdown
+    // While bus is still in countdown (not asleep yet), HU sends background/handshake packets.
+    // Periodic processing and HU background traffic must not emit CAN frames.
+    // -------------------------------------------------------------
+    hal_can_native_clear_sent_frame();
+
+    // Standard periodic HU Model Ping 0x24 (sent every ~3s by Hiworld Android service)
+    const uint8_t pkt_24[] = { 0x5A, 0xA5, 0x02, 0x24, 0x22, 0x00, 0x47 };
+    for (size_t i = 0; i < sizeof(pkt_24); i++) {
+        can_router_process_uart_byte(pkt_24[i]);
+    }
+    // Radio state query 0x0F (sent by HU UI to request telemetry refresh)
+    const uint8_t pkt_0f[] = { 0x5A, 0xA5, 0x01, 0x0F, 0x00, 0x0F };
+    for (size_t i = 0; i < sizeof(pkt_0f); i++) {
+        can_router_process_uart_byte(pkt_0f[i]);
+    }
+    // Radio control query 0xA1 (sent when HU tuner app is in background/foreground)
+    const uint8_t pkt_a1[] = { 0x5A, 0xA5, 0x03, 0xA1, 0x00, 0x01, 0x00, 0xA4 };
+    for (size_t i = 0; i < sizeof(pkt_a1); i++) {
+        can_router_process_uart_byte(pkt_a1[i]);
+    }
+
+    // 20 periodic ticks (2.0s) with BSI 0x036 keep-alive
+    for (int tick = 0; tick < 20; tick++) {
+        can_router_process_can(&f_bsi_countdown);
+        can_router_periodic_100ms();
+        TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
+            "HU background traffic and periodic ticks must not emit CAN frames when IGN and Radio are OFF");
+    }
+
+    // -------------------------------------------------------------
+    // Phase 4: Economy Mode Triggered
+    // -------------------------------------------------------------
+    const can_frame_t f_eco_on = {
+        .id = 0x036, .dlc = 8,
+        .data = { 0x0E, 0x00, 0x80, 0x0F, 0x02, 0x00, 0x00, 0xA0 }
+    };
+    can_router_process_can(&f_eco_on);
+    hal_can_native_clear_sent_frame();
+
+    for (int tick = 0; tick < 50; tick++) {
+        can_router_periodic_100ms();
+        TEST_ASSERT_FALSE_MESSAGE(hal_can_native_get_last_sent_frame(&sent_frame),
+            "Zero CAN frames may be transmitted while Economy mode is active");
+    }
 }

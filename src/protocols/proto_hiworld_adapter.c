@@ -3,7 +3,10 @@
 #include "protocols/hiworld_connection.h"
 #include "protocols/hiworld_car_mapping.h"
 #include "proto_hiworld.h"
+#include "protocols/hiworld_psa_builders.h"
 #include "core/can_router.h"
+#include "profiles/peugeot_407.h"
+#include "profiles/psa_source_arbiter.h"
 #include "hal/hal_uart.h"
 #include "hal/hal_can.h"
 #include "core/canbox_version.h"
@@ -13,6 +16,10 @@
 static hiworld_connection_ctx_t s_hw_conn_ctx;
 static bool s_hiworld_initialized = false;
 static uint8_t s_hiworld_hb_tick = 0;
+
+hiworld_connection_ctx_t *proto_hiworld_get_connection_ctx(void) {
+    return &s_hw_conn_ctx;
+}
 
 static void on_can_config_callback(uint8_t car_model_id, uint32_t baud_rate) {
     (void)car_model_id;
@@ -43,7 +50,9 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         }
     }
 
-    if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
+    if (packet->cmd == HIWORLD_CMD_CAR_TYPE_SET) {
+        /* Handled in hiworld_connection.c via two-mode architecture */
+    } else if (packet->cmd == HIWORLD_CMD_ECU_SETTING_SET) {
         /* ForwardEcuSetting:
          * 4-byte variant (standard Android QF/Hiworld APK):
          *   payload[0] = Active Page (1=Instant, 2=Trip1, 3=Trip2)
@@ -78,6 +87,53 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
     } else if (packet->cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY) {
         /* Head Unit requested alert/diagnostic log refresh (forwardType 0x2F) */
         can_router_query_alert_journal();
+    } else if (packet->cmd == 0x0F) {
+        /* Head Unit resume query (forwardType 0x0F): immediate retransmit of radio telemetry */
+        hu_protocol_send_radio_state(NULL);
+        hu_protocol_send_radio_presets(NULL);
+        hu_protocol_send_dsp_state(NULL);
+        const vehicle_state_t *st = can_router_get_state();
+        if (st && st->media.radio.source_mode >= 0x20) {
+            hu_protocol_send_media_state(NULL);
+        }
+        psa_source_arbiter_trigger_station_list();
+    } else if (packet->cmd == HIWORLD_CMD_DOWNLINK_RD4_CTRL) { /* 0xF1 */
+        if (packet->payload_len >= 1) {
+            uint8_t type  = packet->payload[0];
+            uint8_t param = (packet->payload_len >= 2) ? packet->payload[1] : 0x00;
+            psa_source_arbiter_handle_f1_cmd(type, param);
+        }
+    } else if (packet->cmd == HIWORLD_CMD_RADIO_CONTROL) { /* 0xA1 */
+        /* When HU Tuner UI opens or volume/source updates occur, it sends 5A A5 03 A1 00 01 ...
+         * to query/sync current radio state and preset list.
+         * Only reply with 0x84/0x85 when RD4 is powered ON in Tuner mode (< 0x20);
+         * replying while in CD/CDC/AUX or OFF causes a 0x84 <-> 0xA1 feedback loop. */
+        if (packet->payload_len >= 2 && packet->payload[0] == 0x00 && packet->payload[1] == 0x01) {
+            const vehicle_state_t *st = can_router_get_state();
+            bool radio_active_tuner = (st == NULL || !st->media.radio.present) ||
+                                      (st->media.radio.source_mode < 0x20 && st->media.radio.power_status != 0);
+            if (!psa_source_arbiter_is_source_filtered() && radio_active_tuner) {
+                hu_protocol_send_radio_state(NULL);
+                hu_protocol_send_radio_presets(NULL);
+            }
+            /* Do NOT trigger rotary scroll on 0xA1; reserve that only for explicit 0x0F queries */
+        }
+    } else if ((packet->cmd == 0x11 || packet->cmd == 0x12) && packet->payload_len == 0) {
+        /* Head Unit resume query forwardType(0x11)/0x12: immediate retransmit of CDC media state */
+        hu_protocol_send_media_state(NULL);
+    } else if (packet->cmd == HIWORLD_CMD_AUDIO_SOURCE) {
+        if (packet->payload_len >= 2) {
+            psa_source_arbiter_handle_hu_cmd(packet->payload[0], packet->payload[1]);
+        }
+    } else if (packet->cmd == HIWORLD_CMD_CENTRAL_SETTING1 || /* 0x7B */
+               packet->cmd == HIWORLD_CMD_CENTRAL_SETTING2 || /* 0x7D */
+               packet->cmd == HIWORLD_CMD_AC_SETTING_SET)      /* 0x3B */
+    {
+        if (packet->payload_len >= 2) {
+            uint8_t setting_id = packet->payload[0];
+            uint8_t val        = packet->payload[1];
+            can_router_set_car_config(packet->cmd, setting_id, val);
+        }
     } else if (packet->cmd == HIWORLD_CMD_UPGRADE_TRIGGER) {
         /* Head Unit requested firmware update (e.g. 5A A5 03 E0 00 00 E2) */
         /* Write persistent magic token to reserved SRAM */
@@ -129,6 +185,7 @@ static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
         case WHEEL_KEY_PHONE_REJECT: hw_key_code = 0x0A; break;
         case WHEEL_KEY_VOICE:        hw_key_code = 0x05; break;
         case WHEEL_KEY_TRIP:         hw_key_code = 0x14; break;
+        case WHEEL_KEY_STALK_LEFT:   hw_key_code = 0x40; break;
         default:                     hw_key_code = 0x00; break;
     }
 
@@ -205,6 +262,25 @@ static void hiworld_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) 
     (void)speed;
     (void)rpm;
     (void)angle;
+}
+
+static void hiworld_send_steering_angle(int16_t angle_deg) {
+    /* Hiworld Base Info (Cmd 0x11) steering angle: whole degrees, polarity inverted
+     * relative to PSA CAN (PSA +Left -> Hiworld negative), Big-Endian at Bytes 6..7. */
+    uint16_t u_angle = (uint16_t)(int16_t)(-angle_deg);
+    uint8_t payload[10] = {
+        0x27, 0x00, 0x00, 0x00, 0x00, 0x00,
+        (uint8_t)(u_angle >> 8),
+        (uint8_t)(u_angle & 0xFF),
+        0x5E, 0x22
+    };
+
+    uint8_t tx_buf[20];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_BASE_INFO, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
 }
 
 static void hiworld_send_heartbeat(void) {
@@ -331,19 +407,24 @@ static void hiworld_send_trip_instant(const vehicle_trip_t *trip) {
 static void hiworld_send_trip1(const vehicle_trip_t *trip) {
     if (!trip || !trip->trip1_valid) return;
 
-    /* Hiworld Trip 1 Telemetry (Cmd 0x14): 6 payload bytes
+    /* Hiworld Trip 1 Telemetry (Cmd 0x14): 10 payload bytes
      * Byte 0..1: Average Fuel Consumption (0.1 L/100km, Big-Endian)
      * Byte 2: Reserved (0x00)
      * Byte 3: Average Speed (km/h)
      * Byte 4..5: Distance Traveled (km, Big-Endian)
+     * Byte 6..9: Reserved / Padding (0x00 0x00 0x00 0x00)
      */
-    uint8_t payload[6];
+    uint8_t payload[10];
     payload[0] = (uint8_t)(trip->trip1_avg_fuel >> 8);
     payload[1] = (uint8_t)(trip->trip1_avg_fuel & 0xFF);
     payload[2] = 0x00;
     payload[3] = trip->trip1_avg_speed;
     payload[4] = (uint8_t)(trip->trip1_distance_km >> 8);
     payload[5] = (uint8_t)(trip->trip1_distance_km & 0xFF);
+    payload[6] = 0x00;
+    payload[7] = 0x00;
+    payload[8] = 0x00;
+    payload[9] = 0x00;
 
     uint8_t tx_buf[16];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P1, payload, sizeof(payload),
@@ -356,19 +437,24 @@ static void hiworld_send_trip1(const vehicle_trip_t *trip) {
 static void hiworld_send_trip2(const vehicle_trip_t *trip) {
     if (!trip || !trip->trip2_valid) return;
 
-    /* Hiworld Trip 2 Telemetry (Cmd 0x15): 6 payload bytes
+    /* Hiworld Trip 2 Telemetry (Cmd 0x15): 10 payload bytes
      * Byte 0..1: Average Fuel Consumption (0.1 L/100km, Big-Endian)
      * Byte 2: Reserved (0x00)
      * Byte 3: Average Speed (km/h)
      * Byte 4..5: Distance Traveled (km, Big-Endian)
+     * Byte 6..9: Reserved / Padding (0x00 0x00 0x00 0x00)
      */
-    uint8_t payload[6];
+    uint8_t payload[10];
     payload[0] = (uint8_t)(trip->trip2_avg_fuel >> 8);
     payload[1] = (uint8_t)(trip->trip2_avg_fuel & 0xFF);
     payload[2] = 0x00;
     payload[3] = trip->trip2_avg_speed;
     payload[4] = (uint8_t)(trip->trip2_distance_km >> 8);
     payload[5] = (uint8_t)(trip->trip2_distance_km & 0xFF);
+    payload[6] = 0x00;
+    payload[7] = 0x00;
+    payload[8] = 0x00;
+    payload[9] = 0x00;
 
     uint8_t tx_buf[16];
     size_t len = proto_hiworld_serialize(HIWORLD_CMD_ECU_P2, payload, sizeof(payload),
@@ -504,6 +590,225 @@ static void hiworld_send_alerts_summary(const vehicle_alert_item_t *alerts, uint
 #endif
 }
 
+static void hiworld_send_audio_settings(const vehicle_audio_settings_t *audio) {
+    if (!audio) {
+        const vehicle_state_t *st = can_router_get_state();
+        if (st != NULL) {
+            audio = &st->audio;
+        } else {
+            return;
+        }
+    }
+    ensure_hiworld_initialized();
+
+    /* Hiworld Audio/DSP Settings (Cmd 0x56): 8 payload bytes
+     * Byte 0: (is_muted ? 0x80 : 0x00) | (active_mode & 0x0F)
+     * Byte 1: Bass (0..18, 9 = Center)
+     * Byte 2: Treble (0..18, 9 = Center)
+     * Byte 3: Balance (0..18, 9 = Center)
+     * Byte 4: Fader (0..18, 9 = Center)
+     * Byte 5: EQ Preset Profile (0=None, 1=Classical, 2=Jazz-Blues, 3=Pop-Rock, 4=Vocals, 5=Techno)
+     * Byte 6: Flags: Bit 4 (0x10): Loudness (1=ON, 0=OFF); Bit 0 (0x01): Speed-Dependent Volume (1=ON, 0=OFF)
+     * Byte 7: Master Volume (0..30)
+     */
+    uint8_t payload[8];
+    payload[0] = (uint8_t)((audio->is_muted ? 0x80 : 0x00) | (audio->active_mode & 0x0F));
+    payload[1] = audio->bass;
+    payload[2] = audio->treble;
+    payload[3] = audio->balance;
+    payload[4] = audio->fader;
+    payload[5] = audio->eq_preset;
+    payload[6] = (uint8_t)((audio->loudness ? 0x10 : 0x00) | (audio->speed_volume ? 0x01 : 0x00));
+    payload[7] = audio->master_volume;
+
+    uint8_t tx_buf[16];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_AUDIO_SETTINGS, payload, sizeof(payload),
+                                         tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static vehicle_radio_t s_cached_radio_state;
+static vehicle_cdc_t   s_cached_cdc_state;
+static bool            s_cached_radio_valid = false;
+static bool            s_cached_cdc_valid = false;
+
+static void hiworld_send_radio_state(const vehicle_radio_t *radio) {
+    if (radio != NULL) {
+        s_cached_radio_state = *radio;
+        s_cached_radio_valid = true;
+    } else {
+        if (!s_cached_radio_valid) {
+            const vehicle_state_t *st = can_router_get_state();
+            if (st != NULL) {
+                s_cached_radio_state = st->media.radio;
+            } else {
+                memset(&s_cached_radio_state, 0, sizeof(s_cached_radio_state));
+            }
+            s_cached_radio_valid = true;
+        }
+        radio = &s_cached_radio_state;
+    }
+
+    uint8_t payload[14];
+    memset(payload, 0, sizeof(payload));
+
+    if (radio->source_mode >= 0x20) {
+        if (radio->source_mode == 0x30) {
+            payload[0] = 0x20; /* Internal CD */
+        } else {
+            payload[0] = radio->source_mode;
+        }
+    } else {
+        payload[0] = radio->band;
+    }
+
+    if (radio->source_mode < 0x20 && radio->power_status != 0) {
+        payload[1] = (uint8_t)(radio->freq_0_1mhz & 0xFF);
+        payload[2] = (uint8_t)((radio->freq_0_1mhz >> 8) & 0xFF);
+        payload[3] = radio->preset_slot;
+        payload[4] = radio->indicators;
+    } else {
+        payload[1] = 0x00;
+        payload[2] = 0x00;
+        payload[3] = 0x00;
+        payload[4] = 0x00;
+    }
+
+    payload[5] = radio->power_status;
+
+    for (size_t i = 0; i < 8; i++) {
+        payload[6 + i] = (radio->source_mode < 0x20 && radio->station_name[i] != '\0') ? (uint8_t)radio->station_name[i] : (uint8_t)' ';
+    }
+
+    uint8_t tx_buf[24];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_RADIO_STATE, payload, sizeof(payload), tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_radio_text(const char *text, uint8_t len) {
+    if (!text || len == 0) return;
+    /* Do not emit radio text frames if audio source is not radio */
+    if (s_cached_radio_valid && (s_cached_radio_state.source_mode >= 0x20 || s_cached_radio_state.power_status == 0)) {
+        return;
+    }
+    if (len > PSA_RD4_MAX_RADIO_TEXT_LEN) len = PSA_RD4_MAX_RADIO_TEXT_LEN;
+
+    uint8_t tx_buf[80];
+    size_t tx_len = proto_hiworld_serialize(HIWORLD_CMD_RADIO_TEXT, (const uint8_t *)text, len, tx_buf, sizeof(tx_buf));
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
+static void hiworld_send_media_state(const vehicle_cdc_t *cdc) {
+    if (cdc != NULL) {
+        s_cached_cdc_state = *cdc;
+        s_cached_cdc_valid = true;
+    } else {
+        if (!s_cached_cdc_valid) {
+            const vehicle_state_t *st = can_router_get_state();
+            if (st != NULL) {
+                s_cached_cdc_state = st->media.cdc;
+                s_cached_cdc_valid = true;
+            } else {
+                return;
+            }
+        }
+        cdc = &s_cached_cdc_state;
+    }
+
+    uint8_t payload[11];
+    payload[0]  = cdc->active_disc & 0x0F;
+    payload[1]  = cdc->discs_loaded_mask & 0x3F;
+    payload[2]  = cdc->disc_format & 0x3F;
+    /* Track Number uint16_le (Data[3..4]) */
+    payload[3]  = (uint8_t)(cdc->track_num & 0xFF);
+    payload[4]  = (uint8_t)((cdc->track_num >> 8) & 0xFF);
+    payload[5]  = cdc->elapsed_min;
+    payload[6]  = cdc->elapsed_sec;
+    payload[7]  = cdc->play_modes;
+    payload[8]  = cdc->play_status;
+    /* Total Tracks uint16_le (Data[9..10]) */
+    payload[9]  = (uint8_t)(cdc->total_tracks & 0xFF);
+    payload[10] = (uint8_t)((cdc->total_tracks >> 8) & 0xFF);
+
+    uint8_t tx_buf[20];
+    size_t len = proto_hiworld_serialize(HIWORLD_CMD_CAR_MEDIA_STATE, payload, sizeof(payload), tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
+static void hiworld_send_radio_presets(const vehicle_radio_t *radio) {
+    if (radio == NULL) {
+        if (!s_cached_radio_valid) return;
+        radio = &s_cached_radio_state;
+    }
+
+    /* Do not emit radio preset frames if audio source is not radio (e.g. AUX, CD, or Off) */
+    if (radio->source_mode >= 0x20 || radio->power_status == 0) {
+        return;
+    }
+
+    /* Check if any preset name is set; if so send extended names frame (49B), else freqs (13B) */
+    bool has_names = false;
+    for (size_t i = 0; i < 6; i++) {
+        if (radio->preset_names[i][0] != '\0' && radio->preset_names[i][0] != ' ') {
+            has_names = true;
+            break;
+        }
+    }
+
+    uint8_t tx_buf[64];
+    size_t tx_len = 0;
+    if (has_names) {
+        tx_len = build_hiworld_radio_preset_names(radio, tx_buf, sizeof(tx_buf));
+    } else {
+        tx_len = build_hiworld_radio_preset_freqs(radio, tx_buf, sizeof(tx_buf));
+    }
+
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
+static void hiworld_send_feature_enables(const uint8_t *feat1, const uint8_t *feat2) {
+    if (!feat1 || !feat2) return;
+    hiworld_conn_set_feature_enables(&s_hw_conn_ctx, feat1, feat2);
+
+    uint8_t tx_buf[16];
+    size_t len1 = hiworld_conn_build_frame(HIWORLD_CMD_FEATURE_ENABLE1, feat1, 2, tx_buf, sizeof(tx_buf));
+    if (len1 > 0) {
+        hal_uart_write(tx_buf, len1);
+    }
+    size_t len2 = hiworld_conn_build_frame(HIWORLD_CMD_FEATURE_ENABLE2, feat2, 8, tx_buf, sizeof(tx_buf));
+    if (len2 > 0) {
+        hal_uart_write(tx_buf, len2);
+    }
+}
+
+static void hiworld_send_central_state1(const vehicle_config_t *config) {
+    if (!config) return;
+    uint8_t tx_buf[16];
+    size_t tx_len = build_hiworld_central_state1(config, tx_buf, sizeof(tx_buf));
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
+static void hiworld_send_central_state2(const vehicle_config_t *config, const vehicle_state_t *state) {
+    if (!config) return;
+    uint8_t tx_buf[16];
+    size_t tx_len = build_hiworld_central_state2(config, state, tx_buf, sizeof(tx_buf));
+    if (tx_len > 0) {
+        hal_uart_write(tx_buf, tx_len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -522,7 +827,16 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_trip2 = hiworld_send_trip2,
     .send_radar = hiworld_send_radar,
     .send_reverse = NULL,
+    .send_steering_angle = hiworld_send_steering_angle,
     .send_alert_single = hiworld_send_alert_single,
     .send_alerts_summary = hiworld_send_alerts_summary,
+    .send_audio_settings = hiworld_send_audio_settings,
+    .send_radio_state = hiworld_send_radio_state,
+    .send_radio_text = hiworld_send_radio_text,
+    .send_radio_presets = hiworld_send_radio_presets,
+    .send_media_state = hiworld_send_media_state,
+    .send_feature_enables = hiworld_send_feature_enables,
+    .send_central_state1 = hiworld_send_central_state1,
+    .send_central_state2 = hiworld_send_central_state2,
     .send_heartbeat = hiworld_send_heartbeat,
 };

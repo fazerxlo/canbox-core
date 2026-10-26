@@ -17,45 +17,12 @@ The Peugeot 407 Built-in Systems Interface (BSI) manages central vehicle persona
 - **`0x228` (Clock & Calendar Synchronization):** Broadcasts 8-byte date/time frames (`[Hours, Minutes, Day, Month, Year, Format, 00, 00]`) to synchronize the instrument cluster and dashboard clock.
 - **Android GPS Clock Downlink (`Cmd 0xCB`):** After removing the factory RD4 radio, the CAN adapter decodes Android GPS Date/Time packets and synthesizes native PSA `0x228` frames to keep the vehicle cluster clock accurate.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 BSI & Instrument Cluster                       |
-|           [Lighting States (0x128), Illumination (0x036), Clock Sync (0x228)]      |
-+------------------------------------------------------------------------------------+
-                         │ (Uplink 0x128 / 0x036)   ▲ (Downlink Clock 0x228)
-                         ▼                          │
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Captures lighting states from CAN 0x128 Byte 4 (D5)                           |
-|   2. Decodes Android GPS Time Sync Packets (Hiworld Cmd 0xCB)                      |
-|   3. Synthesizes PSA CAN 0x228 Clock Sync Frames to set Cluster Date/Time          |
-|   4. Decodes Android "Car Settings" menu overrides (Hiworld Cmd 0x7B / 0x7D)       |
-+------------------------------------------------------------------------------------+
-                         │ (UART Telemetry)         ▲ (UART Commands)
-                         ▼                          │
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Car Settings & System Time                    |
-|          (Provides toggle switches for BSI options and automatic GPS Time Sync)    |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
 
 ### 2.1 PSA Exterior Lighting State (`0x128` Byte 4 / D5)
 - **CAN ID:** `0x128` (DLC: 8, Period: 100 ms)
-
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Bit Mask / Value Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | Bit 7  | Lights Switch Engaged (Any on)     | 0x80 (Side lights ON)       |
-|        | Bit 6  | Low Beam (Headlights) Active       | 0x40 (Headlights ON: 0xC0)  |
-|        | Bit 5  | High Beam (Full Beam) Active       | 0x20 (Full Beam ON: 0xE0)   |
-|        | Bits 4..0| Reserved                         | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-```
 
 | State | Byte 4 Value | Bits Set | Meaning |
 |:---|:---:|:---:|:---|
@@ -67,26 +34,6 @@ The Peugeot 407 Built-in Systems Interface (BSI) manages central vehicle persona
 
 ### 2.2 PSA Instrument Cluster Clock & Calendar Frame (`0x228`)
 - **CAN ID:** `0x228` (Standard 11-bit Identifier, DLC: 8)
-
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Value / Encoding Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | 7..0   | Hours (24-Hour Format)             | 0..23 Hours                 |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | 7..0   | Minutes                            | 0..59 Minutes               |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | 7..0   | Day of Month                       | 1..31 Days                  |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | 7..0   | Month                              | 1..12 (1 = Jan, 12 = Dec)   |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | 7..0   | Year (Offset from 2000)            | 0..99 (e.g. 26 = Year 2026) |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 5 | 7..0   | Time Format Flags                  | 0x00 = 24H, 0x01 = 12H AM/PM|
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 6..7|7..0  | Reserved Padding                   | 0x00, 0x00                  |
-+--------+--------+------------------------------------+-----------------------------+
-```
 
 ---
 

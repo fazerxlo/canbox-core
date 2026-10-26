@@ -21,30 +21,6 @@ The Peugeot 407 BSI broadcasts body opening events and physical microswitch cont
 
 The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cmd 0x12`) / Raise (`Cmd 0x38`) door status packets to the Android headunit, which renders an animated 3D vehicle opening popup overlay.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 BSI (Body Control Module)                      |
-|           [FL Door, FR Door, RL Door, RR Door, Trunk, Hood, Rear Window, Fuel]     |
-+------------------------------------------------------------------------------------+
-                                          │
-                                [PSA CAN 0x220 / 0x221]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Filters & extracts discrete door opening bitmasks from CAN ID 0x220 / 0x221   |
-|   2. Decodes rear window (SW estate) and fuel filler flap states                   |
-|   3. Serializes Hiworld 0x12 (10-byte) Door Status Packets                         |
-|   4. Refreshes door state periodically (every 500 ms) while open to avoid timeout  |
-+------------------------------------------------------------------------------------+
-                                          │
-                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Door Popup Application                        |
-|            (Pops up graphic vehicle model displaying opened doors/hood/trunk)      |
-+------------------------------------------------------------------------------------+
-```
-
 ---
 
 # 2. PSA CAN Bus Bitfield Specification
@@ -53,26 +29,17 @@ The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cm
 - **CAN ID:** `0x220` / `0x221` (Standard 11-bit Identifier)
 - **DLC:** 2 bytes
 - **Transmission Cycle:** Event-driven on state transition
-
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Bit Mask / Value Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | Bit 7  | Front Left Door (Driver)           | 0x80 (1 = Open, 0 = Closed) |
-|        | Bit 6  | Front Right Door (Passenger)       | 0x40 (1 = Open, 0 = Closed) |
-|        | Bit 5  | Rear Left Door                     | 0x20 (1 = Open, 0 = Closed) |
-|        | Bit 4  | Rear Right Door                    | 0x10 (1 = Open, 0 = Closed) |
-|        | Bit 3  | Trunk / Boot Lid                   | 0x08 (1 = Open, 0 = Closed) |
-|        | Bit 2  | Engine Hood / Bonnet               | 0x04 (1 = Open, 0 = Closed) |
-|        | Bit 1  | Rear Tailgate Window (SW Estate)   | 0x02 (1 = Open, 0 = Closed) |
-|        | Bit 0  | Fuel Filler Flap                   | 0x01 (1 = Open, 0 = Closed) |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | Bit 7  | Auto Rear Wiper in Reverse Active  | 0x80 (1 = Enabled)          |
-|        | Bit 4  | Auto Central Locking on Drive      | 0x10 (1 = Active)           |
-|        | Bit 3  | Parking Radar System Enabled       | 0x08 (1 = Active)           |
-|        | Bit 0  | Handbrake Physical Switch          | 0x01 (1 = Pulled / Active)  |
-+--------+--------+------------------------------------+-----------------------------+
-```
+- **Payload Layout (Byte 0):**
+  - `Bit 7` (`0x80`): Driver Front Door ($1 = \text{Open}$)
+  - `Bit 6` (`0x40`): Passenger Front Door ($1 = \text{Open}$)
+  - `Bit 5` (`0x20`): Rear Left Door ($1 = \text{Open}$)
+  - `Bit 4` (`0x10`): Rear Right Door ($1 = \text{Open}$)
+  - `Bit 3` (`0x08`): Boot / Trunk ($1 = \text{Open}$)
+  - `Bit 2` (`0x04`): PSA Comfort CAN body bus active / idle flag (Always `1` in nominal closed state `04 00`; **MUST NOT** be mapped to hood)
+  - `Bit 1` (`0x02`): Rear window microswitch
+  - `Bit 0` (`0x01`): Fuel flap microswitch
+- **Payload Layout (Byte 1):**
+  - `Bit 0` (`0x01`): Handbrake Status ($1 = \text{Engaged}$)
 
 ---
 
@@ -190,7 +157,7 @@ static inline void psa_doors_process_can_0x220(psa_doors_ctx_t *ctx, const uint8
     ctx->state.door_rear_left   = (b0 & 0x20) ? true : false;
     ctx->state.door_rear_right  = (b0 & 0x10) ? true : false;
     ctx->state.trunk_open       = (b0 & 0x08) ? true : false;
-    ctx->state.hood_open        = (b0 & 0x04) ? true : false;
+    ctx->state.hood_open        = false; /* Bit 2 is body bus idle active flag, NOT hood */
 
     if (dlc >= 2) {
         ctx->state.handbrake_pulled = (data[1] & 0x01) ? true : false;

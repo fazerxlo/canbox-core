@@ -9,7 +9,7 @@
 void app_main(void) {
     hal_system_init();
     hal_gpio_init();
-    hal_can_init(CAN_BAUD_500K);
+    hal_can_init(CAN_BAUD_125K);
     hal_uart_init(UART_BAUD_38400);
 
     can_router_init();
@@ -34,7 +34,14 @@ void app_main(void) {
             hal_gpio_toggle(GPIO_PIN_LED_STATUS);
         }
 
-        // Relinquish remaining slice to prevent IDLE task watchdog trigger
-        vTaskDelay(pdMS_TO_TICKS(1));
+        hal_watchdog_feed();
+
+        if (can_router_is_bus_sleeping()) {
+            hal_system_enter_deep_sleep();
+            last_heartbeat = hal_get_tick_ms();
+        } else {
+            // Relinquish remaining slice to prevent IDLE task watchdog trigger
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
     }
 }

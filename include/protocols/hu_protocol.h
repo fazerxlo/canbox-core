@@ -24,8 +24,18 @@ void hu_protocol_send_trip1(const vehicle_trip_t *trip);
 void hu_protocol_send_trip2(const vehicle_trip_t *trip);
 void hu_protocol_send_radar(const vehicle_radar_t *radar);
 void hu_protocol_send_reverse(bool reverse_active);
+void hu_protocol_send_steering_angle(int16_t angle_deg);
 void hu_protocol_send_alert_single(const vehicle_alert_item_t *alert);
 void hu_protocol_send_alerts_summary(const vehicle_alert_item_t *alerts, uint8_t count);
+void hu_protocol_send_audio_settings(const vehicle_audio_settings_t *audio);
+void hu_protocol_send_dsp_state(const vehicle_audio_settings_t *audio);
+void hu_protocol_send_radio_state(const vehicle_radio_t *radio);
+void hu_protocol_send_radio_text(const char *text, uint8_t len);
+void hu_protocol_send_radio_presets(const vehicle_radio_t *radio);
+void hu_protocol_send_media_state(const vehicle_cdc_t *cdc);
+void hu_protocol_send_feature_enables(const uint8_t *feat1, const uint8_t *feat2);
+void hu_protocol_send_central_state1(const vehicle_config_t *config);
+void hu_protocol_send_central_state2(const vehicle_config_t *config, const vehicle_state_t *state);
 
 #ifdef __cplusplus
 }

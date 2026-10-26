@@ -28,7 +28,7 @@ This document captures the hardware integration, peripheral mapping, and build a
 
 ## 3. Hardware Pinout & Peripheral Mapping
 
-The `canbox-core` HAL implementation (`src/hal/hal_nuc131/`) and Hiworld bootloader (`src/hiworld_bootloader/`) map hardware pins to match automotive CAN box PCB designs (specifically Raise PSA-RZ-15-0121-B1):
+The `canbox-core` HAL implementation (`src/hal/hal_nuc131/`) and Hiworld bootloader (`src/nuc131_hiworld_bootloader/`) map hardware pins to match automotive CAN box PCB designs (specifically Raise PSA-RZ-15-0121-B1):
 
 | Function / Signal | NUC131 Pin | Direction / Mode | HAL Identifier | Notes |
 | :--- | :---: | :---: | :--- | :--- |
@@ -93,8 +93,8 @@ build_flags =
     -DPLATFORM_NUC131
     -Wall -Wextra -std=c99
 build_src_filter = 
-    +<hiworld_bootloader/startup_bootloader.S>
-    +<hiworld_bootloader/hiworld_iap_nuc131.c>
+    +<nuc131_hiworld_bootloader/startup_bootloader.S>
+    +<nuc131_hiworld_bootloader/hiworld_iap_nuc131.c>
 
 [env:raise_nuc131]
 platform = https://github.com/fazerxlo/nuvoton_nuc131.git
@@ -141,8 +141,10 @@ python3 tools/pack_hiworld_iap.py .pio/build/raise_nuc131/program.bin -o can_app
 ### 6.3 Flashing Options
 1. **OpenOCD + ST-Link V2 (SWD):**
    - Mass erase factory lock: `openocd -f openocd_nuc131.cfg -c "init; halt; numicro chip_erase; shutdown"`
-   - Flash bootloader: `openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/nuc131_bootloader/program.bin 0x00000000; shutdown"`
-   - Flash application: `openocd -f openocd_nuc131.cfg -c "init; halt; flash write_image erase .pio/build/raise_nuc131/program.bin 0x00002000; reset run; shutdown"`
+   - Start OpenOCD: `openocd -f openocd_nuc131.cfg &`
+   - Flash bootloader: `python3 tools/nuc131_flasher.py .pio/build/nuc131_bootloader/program.bin 0x0000`
+   - Flash application: `python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000`
+   - Run application: `nc -w 1 127.0.0.1 6666 <<< "reset run"`
 2. **Head Unit In-Application Programming (IAP):**
    - Copy `can_app.iap` to `/canmcuupdata/can_app.iap` on a USB drive and trigger CAN Update from Head Unit settings.
 3. **Serial Firmware Uploader (`tools/flash_hiworld_serial.py`):**

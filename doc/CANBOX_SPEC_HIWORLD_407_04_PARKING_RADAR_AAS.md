@@ -19,31 +19,6 @@ The Peugeot 407 Parking Assistance ECU (AAS - *Aide au Stationnement*) monitors 
 
 The CAN box translates these raw distance zones into serialized headunit radar packets (**`Cmd 0x41`** / `Handle.CarRadarState`), allowing the Android infotainment screen to render graphical distance arcs and trigger corresponding parking buzzer audio profiles.
 
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 Parking Assist ECU (AAS)                       |
-|           [Native CAN2004: 0x0E1 (7 bytes) | (0x260/0x270 are CAN2010 only)]       |
-+------------------------------------------------------------------------------------+
-                                          │
-                                 [PSA CAN 0x0E1]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Captures periodic 100 ms radar frames (0x0E1)                                 |
-|   2. Converts Peugeot raw distance steps (0..4/7, 0xFF) to Headunit Radar Format   |
-|   3. Pulls physical BACK trigger wire (+12V/GND) on Reverse Gear                   |
-|   4. Dispatches Hiworld Radar Telemetry (Cmd 0x41, Length 0x08)                    |
-+------------------------------------------------------------------------------------+
-                                          │
-                   [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-                   [Hardware: Dedicated BACK / REVERSE Trigger Wire]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Reverse Camera & Radar UI                     |
-|           (Displays overlay parking arcs over rear camera video stream)            |
-+------------------------------------------------------------------------------------+
-```
-
 > [!NOTE]
 > **Reverse Window Activation Requirement:** On Android Head Units (e.g., TS10, UIS7862, Topway), the reverse camera view (`QF_BackCar.apk`) is launched by the MCU hardware monitoring the physical `BACK` / `REVERSE` wire (triggering `com.qf.action.BACKCAR_START` or KeyEvent 289). Radar telemetry packets (`Cmd 0x41`) are processed by `QF_Canbus.apk` and rendered as overlays while the reverse window is active (or if Front Running Radar is enabled).
 
@@ -56,35 +31,6 @@ The CAN box translates these raw distance zones into serialized headunit radar p
 - **DLC:** 7 bytes
 - **Transmission Cycle:** Periodic 100 ms while active
 - **Inactive / Quiescent Frame:** `24 00 3F FC FC FC 00` (or zeroed sensors)
-
-```
-+--------+--------+------------------------------------+-----------------------------+
-| Byte   | Bit    | Function / Signal Name             | Value / Distance Definition |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 0 | 7..0   | Header / Constant                  | Always 0x24                 |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 1 | Bit 6  | Rear Radar Active                  | 0x40 (1 = Active)           |
-|        | Bit 4  | Front Radar Active                 | 0x10 (1 = Active)           |
-|        | Bits   | Other zone/status flags            | 0x00                        |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 2 | 7..0   | Constant Mask                      | Always 0x3F                 |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 3 | 7..5   | Rear Left (RL) Sensor Zone         | 0..7 (0=closest, 7=clear)   |
-|        | 4..2   | Rear Center (RC) Sensor Zone       | 0..7 (0=closest, 7=clear)   |
-|        | 1..0   | Reserved                           | 0                           |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 4 | 7..5   | Rear Right (RR) Sensor Zone        | 0..7 (0=closest, 7=clear)   |
-|        | 4..2   | Front Left (FL) Sensor Zone        | 0..7 (0=closest, 7=clear)   |
-|        | 1..0   | Reserved                           | 0                           |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 5 | 7..5   | Front Center (FC) Sensor Zone      | 0..7 (0=closest, 7=clear)   |
-|        | 4..2   | Front Right (FR) Sensor Zone       | 0..7 (0=closest, 7=clear)   |
-|        | Bit 1  | Display Active Flag                | 1 = Display AAS on screen   |
-|        | Bit 0  | Reserved                           | 0                           |
-+--------+--------+------------------------------------+-----------------------------+
-| Byte 6 | 7..0   | Trailer / Status Byte              | Always 0x00                 |
-+--------+--------+------------------------------------+-----------------------------+
-```
 
 ### 2.2 Alternate / AEE2010 Parking Radar Frames (`0x260` / `0x270`) — CAN2010 Only
 *(Note: Not applicable to Peugeot 407 CAN2004. On CAN2004, `0x260` is `MSG_BSI_INF_PROFILS` broadcast by the BSI at 250 ms. These frames are only used on CAN2010 / AEE2010 platforms.)*

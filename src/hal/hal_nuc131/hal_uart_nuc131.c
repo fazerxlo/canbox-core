@@ -60,14 +60,16 @@ hal_status_t hal_uart_write(const uint8_t *data, size_t len) {
     if (!data || len == 0) return HAL_STATUS_ERROR;
 
     for (size_t i = 0; i < len; i++) {
-        while (UART_IS_TX_FULL(UART0)); // Wait until TX FIFO is not full
+        uint32_t timeout = 100000UL;
+        while (UART_IS_TX_FULL(UART0) && --timeout); // Wait until TX FIFO is not full
         UART_WRITE(UART0, data[i]);
     }
     return HAL_STATUS_OK;
 }
 
 hal_status_t hal_uart_flush_tx(void) {
-    while (!UART_IS_TX_EMPTY(UART0)); // Wait for transmitter empty
+    uint32_t timeout = 100000UL;
+    while (!UART_IS_TX_EMPTY(UART0) && --timeout); // Wait for transmitter empty
     return HAL_STATUS_OK;
 }
 

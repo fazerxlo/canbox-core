@@ -43,8 +43,22 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
 
     total_pages = len(data) // PAGE_SIZE
 
-    # Unlock FMC ISP
+    # 1. Reset halt target
     client.cmd("reset halt")
+
+    # 2. Immediately enforce GPIO isolation during SWD halt:
+    # - Clear GPD_MFP to disconnect CAN0 peripheral
+    # - PC_DOUT = 0x00CF, PC_PMD = 0x0000F045 (PC3=1 Standby transceiver, silence buzzer)
+    # - PD_DOUT = 0x00C0, PD_PMD = 0x00007000 (PD7=1 CAN_TX Recessive Push-Pull, PD6=Input)
+    # - PB_DOUT = 0x0000113F, PB_PMD = 0x43030FF4 (Silence buzzer lines PB3/PB12)
+    # - PA_DOUT = 0x00004DFF, PA_PMD = 0x75F5FF0F (ACC ON, other outputs off)
+    client.cmd("mww 0x5000003C 0x00000000")
+    client.cmd("mww 0x50004088 0x000000CF; mww 0x50004080 0x0000F045")
+    client.cmd("mww 0x500040C8 0x000000C0; mww 0x500040C0 0x00007000")
+    client.cmd("mww 0x50004048 0x0000113F; mww 0x50004040 0x43030FF4")
+    client.cmd("mww 0x50004008 0x00004DFF; mww 0x50004000 0x75F5FF0F")
+
+    # 3. Unlock FMC ISP
     client.cmd("mww 0x50000100 0x59")
     client.cmd("mww 0x50000100 0x16")
     client.cmd("mww 0x50000100 0x88")
@@ -58,7 +72,12 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
 
         # 1. Erase page
         client.cmd(f"mww 0x5000C004 0x{page_addr:08X}; mww 0x5000C00C 0x22; mww 0x5000C010 0x01")
-        time.sleep(0.010)
+        # Poll ISPTRG until page erase completes
+        for _ in range(50):
+            res = client.cmd("mdw 0x5000C010 1")
+            if "00000000" in res:
+                break
+            time.sleep(0.002)
 
         # 2. Program words in page
         cmds = []
@@ -69,17 +88,25 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
                 cmds.append(f"mww 0x5000C004 0x{word_addr:08X}; mww 0x5000C008 0x{val:08X}; mww 0x5000C00C 0x21; mww 0x5000C010 0x01")
 
         if cmds:
-            # Send batch of words in chunks of 4 with a short delay for FMC write cycle
+            # Send batch of words in chunks of 4 and poll completion
             chunk_size = 4
             for i in range(0, len(cmds), chunk_size):
                 client.cmd("; ".join(cmds[i : i + chunk_size]))
-                time.sleep(0.003)
+                for _ in range(50):
+                    res = client.cmd("mdw 0x5000C010 1")
+                    if "00000000" in res:
+                        break
+                    time.sleep(0.001)
 
         print(f"    - Programmed page {p + 1}/{total_pages} ({(p + 1) * 100 // total_pages}%)...", end="\r")
 
     print()
     elapsed = time.time() - start_time
     print(f"[*] Flashing finished in {elapsed:.2f}s ({len(data)/elapsed/1024:.2f} KB/s)")
+
+    # Force bootloader mode with token, then reset halt to flush flash cache safely
+    client.cmd("mww 0x20000000 0x55AA55AA")
+    client.cmd("reset halt")
 
     # Verify
     print("[*] Verifying flash memory...")
@@ -114,6 +141,10 @@ def flash_binary(client: OpenOcdClient, bin_path: str, base_addr: int):
         print(f"[+] Flash at 0x{base_addr:08X} VERIFIED SUCCESSFULLY!")
     else:
         print(f"[!] Verification FAILED with {mismatches} errors!")
+
+    # Clear token and run application
+    client.cmd("mww 0x20000000 0x00000000")
+    client.cmd("reset run")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:

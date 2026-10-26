@@ -1,0 +1,23 @@
+# Build & IDE caches
+.pio/
+.vscode/
+__pycache__/
+*.pyc
+build/
+
+# Logs, dumps & firmware binaries
+*.log
+*.dump
+*.iap
+openocd_nuc131_bin
+openocd_nuc131_bin/
+
+# Auto-generated / large MCU SDK configs & linker scripts
+sdkconfig.*
+ldscripts/
+
+# Large raw CSV data & archived documentation
+test/test_integration/data/*.csv
+doc/RT4_CAN_ALERTS_0x1A1.csv
+doc/archive/
+

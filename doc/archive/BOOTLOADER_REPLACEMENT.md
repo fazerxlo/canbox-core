@@ -164,7 +164,7 @@ void iap_run(void);
 #endif /* HIWORLD_IAP_NUC131_H */
 ```
 
-### 4.2 Core Bootloader: `src/hiworld_bootloader/hiworld_iap_nuc131.c`
+### 4.2 Core Bootloader: `src/nuc131_hiworld_bootloader/hiworld_iap_nuc131.c`
 
 ```c
 #include "hiworld_iap_nuc131.h"

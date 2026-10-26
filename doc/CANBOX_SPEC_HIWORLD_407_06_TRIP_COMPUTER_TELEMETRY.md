@@ -13,39 +13,14 @@
 
 In Peugeot 407 (PSA CAN2004 architecture), engine telemetry, odometer readings, ambient temperatures, and trip metrics are broadcast across the following core frames:
 - **`0x0B6` (Fast Dynamic Data, 50 ms):** Engine RPM (bits 15..3 = RPM $\times 8$) and vehicle speed (uint16 scaled by 100 in km/h).
-- **`0x0F6` (BSI Slow Data, 500 ms):** Engine coolant temperature ($\text{Raw} - 40^\circ\text{C}$), external ambient air temperature ($\text{Raw} \times 0.5 - 40^\circ\text{C}$), reverse gear status (Byte 7 Bit 7), wipers, and turn signals (blinkers).
+- **`0x0F6` (BSI Slow Data, 500 ms):** Ignition contact state (+APC: Byte 0 Bit 3, `0x88`=ON, `0x80`=OFF), engine coolant temperature ($\text{Raw} - 40^\circ\text{C}$), external ambient air temperature ($\text{Raw} \times 0.5 - 40^\circ\text{C}$), reverse gear status (Byte 7 Bit 7), wipers, and turn signals (blinkers).
 - **`0x161` (BSI Gauges, 500 ms):** Oil temperature ($\text{Raw} - 40^\circ\text{C}$), fuel level percentage (Byte 3), and oil level (Byte 6).
-- **`0x036` (Ignition & Illumination, 100 ms):** Power state (`Byte 4: 0x01=IGN, 0x03=ACC`), dashboard illumination enabled (Byte 3 Bit 5), and luminosity level.
+- **`0x036` (Network State & Illumination, 100 ms):** Comfort bus network lifecycle / Phase de vie (`Byte 4: 0x00=Sleep, 0x01=Awake, 0x02=Shutdown countdown, 0x03=Wakeup transition`), dashboard illumination enabled (Byte 3 Bit 5), and luminosity level.
 - **`0x221` (Instantaneous Trip, 1000 ms):** Instantaneous fuel consumption ($0.1\text{ L/100km}$), cruising range / autonomy (km), distance ($0.1\text{ km}$), and stalk com button flags.
 - **`0x2A1` (Trip 1 Historical, 1000 ms):** Mean speed (uint8 / uint16 km/h), distance (km), and average consumption ($0.1\text{ L/100km}$).
 - **`0x261` (Trip 2 Historical, 1000 ms):** Same format as Trip 1.
 
 The CAN box translates these parameters into Hiworld trip computer packets (`Cmd 0x13`, `0x14`, `0x15`) and accepts touchscreen trip reset commands from the Android system to clear Trip 1 or Trip 2.
-
-```
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 BSI & Engine Management                        |
-|        [BSI Slow Data (0x0F6), Power/Ignition (0x036), Trip Metrics (0x221)]       |
-|        [Fast Dynamics (0x0B6), Historical Trip1 (0x2A1), Historical Trip2 (0x261)]  |
-+------------------------------------------------------------------------------------+
-                                          │
-                  [PSA CAN 0x0B6 / 0x0F6 / 0x221 / 0x2A1 / 0x261]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                         CAN Box Microcontroller (C99 Engine)                       |
-|   1. Extracts Coolant Temp, Ambient Temp, Reverse from 0x0F6                       |
-|   2. Decodes RPM and Vehicle Speed from 0x0B6                                      |
-|   3. Translates trip data to Hiworld 0x13 (Instant/DTE), 0x14 (Trip1), 0x15 (Trip2)|
-|   4. Dispatches BSI Personalization & Trip computer pages                          |
-+------------------------------------------------------------------------------------+
-                                          │
-                    [UART Serial: 38400 baud, 8N1 / Hiworld Protocol]
-                                          ▼
-+------------------------------------------------------------------------------------+
-|                     Android Headunit Vehicle Info & Dashboard App                  |
-|          (Displays live digital gauges, trip graphs, and outside temperature)      |
-+------------------------------------------------------------------------------------+
-```
 
 ---
 
@@ -72,16 +47,18 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 ### 2.3 Trip Computer Instantaneous Frame (`0x221`)
 - **CAN ID:** `0x221` (DLC: 7, Period: 1000 ms)
 - `Byte 0`: Bit 7 = Hide Fuel, Bit 6 = Hide Dist, Bit 3 = Com Stalk Right, Bit 0 = Com Stalk Left.
-- `Bytes 1..2`: Instantaneous Fuel Consumption ($0.1\text{ L/100km}$, Big-Endian uint16).
-- `Bytes 3..4`: Cruising Range / Autonomy (km, Big-Endian uint16).
-- `Bytes 5..6`: Instantaneous Distance ($0.1\text{ km}$, Big-Endian uint16).
+- `Bytes 1..2`: Instantaneous Fuel Consumption ($0.1\text{ L/100km}$, Big-Endian uint16, `0xFFFF` = stationary / `--.-`).
+- `Bytes 3..4`: Cruising Range / Autonomy (km, Big-Endian uint16, `0xFFFF` = undefined / `--.-`).
+- `Bytes 5..6`: Instantaneous Distance ($0.1\text{ km}$, Big-Endian uint16, `0xFFFF` = undefined / `--.-`).
+> [!NOTE]
+> When the vehicle is stationary (speed < 30 km/h or stopped), PSA CAN 0x221 broadcasts `0xFFFF` in fuel and/or range. This is a valid display state and MUST NOT be dropped; commercial canbox units forward `5A A5 0A 13 FF FF FF FF FF FF 00 00 00 00 16` so the Head Unit displays `--.-`.
 
 ### 2.4 Trip Computer Historical Records 1 & 2 (`0x2A1` & `0x261`)
 - **CAN IDs:** `0x2A1` (Trip 1), `0x261` (Trip 2) (DLC: 7, Period: 1000 ms)
 - `Byte 0`: Mean Speed ($\text{km/h}$, uint8).
 - `Bytes 1..2`: Distance Traveled (km, Big-Endian uint16).
 - `Bytes 3..4`: Average Consumption ($0.1\text{ L/100km}$, Big-Endian uint16).
-- `Bytes 5..6`: Average Speed ($\text{km/h}$, Big-Endian uint16).
+- `Bytes 5..6`: Driving Duration / Trip Elapsed Time (minutes, Big-Endian uint16).
 
 ---
 
@@ -101,25 +78,29 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 
 ### 3.2 Hiworld Trip 1 Telemetry (`Cmd 0x14` / `Handle.EcuInfoPage2`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length ($L$):** `0x06` (6 payload bytes)
+- **Length ($L$):** `0x0A` (10 payload bytes)
 - **Command ID:** `0x14` (`20` decimal / `Handle.EcuInfoPage2`)
-- **Payload Layout (6 Bytes):**
+- **Payload Layout (10 Bytes - Big Endian):**
   - `Byte 0..1`: Average Fuel Consumption ($0.1\text{ L/100km}$)
   - `Byte 2`: Reserved (`0x00`)
   - `Byte 3`: Average Speed ($\text{km/h}$, `0xFF` = 0)
   - `Byte 4..5`: Trip Distance Traveled ($\text{km}$)
+  - `Byte 6..9`: Reserved / Padding (`0x00 0x00 0x00 0x00`)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
+- **Wire Frame:** `5A A5 0A 14 [10 Bytes] Checksum`
 
 ### 3.3 Hiworld Trip 2 Telemetry (`Cmd 0x15` / `Handle.EcuInfoPage3`)
 - **Sync Header:** `0x5A 0xA5`
-- **Length ($L$):** `0x06` (6 payload bytes)
+- **Length ($L$):** `0x0A` (10 payload bytes)
 - **Command ID:** `0x15` (`21` decimal / `Handle.EcuInfoPage3`)
-- **Payload Layout (6 Bytes):**
+- **Payload Layout (10 Bytes - Big Endian):**
   - `Byte 0..1`: Average Fuel Consumption ($0.1\text{ L/100km}$)
   - `Byte 2`: Reserved (`0x00`)
   - `Byte 3`: Average Speed ($\text{km/h}$, `0xFF` = 0)
   - `Byte 4..5`: Trip Distance Traveled ($\text{km}$)
+  - `Byte 6..9`: Reserved / Padding (`0x00 0x00 0x00 0x00`)
 - **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
+- **Wire Frame:** `5A A5 0A 15 [10 Bytes] Checksum`
 
 ### 3.4 Hiworld Downlink Trip Reset & Navigation (`Cmd 0x1B` / `Command.ForwardEcuSetting`)
 - **Sync Header:** `0x5A 0xA5`
@@ -134,8 +115,8 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
   - View Instant: `5A A5 04 1B 01 00 01 FF 1F` (No CAN action)
   - View Trip 1: `5A A5 04 1B 02 00 01 FF 20` (No CAN action)
   - View Trip 2: `5A A5 04 1B 03 00 01 FF 21` (No CAN action)
-  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x221` with `0x80`
-  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x221` with `0x40`
+  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0A 06 FF FF 00 00 00 00`)
+  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0C 06 FF FF 00 00 00 00`)
 
 ---
 
@@ -221,10 +202,10 @@ static inline void psa_trip_send_instant(psa_trip_ctx_t *ctx) {
 static inline void psa_trip_send_trip1(psa_trip_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[11];
+    uint8_t p[15];
     p[0] = HIWORLD_SOF1;
     p[1] = HIWORLD_SOF2;
-    p[2] = 0x06;               /* Length: 6 Payload bytes */
+    p[2] = 0x0A;               /* Length: 10 Payload bytes */
     p[3] = HIWORLD_CMD_ECU_P1; /* Cmd 0x14 */
     p[4] = (uint8_t)(ctx->state.trip1_avg_fuel >> 8);
     p[5] = (uint8_t)(ctx->state.trip1_avg_fuel & 0xFF);
@@ -232,24 +213,28 @@ static inline void psa_trip_send_trip1(psa_trip_ctx_t *ctx) {
     p[7] = ctx->state.trip1_avg_speed;
     p[8] = (uint8_t)(ctx->state.trip1_distance_km >> 8);
     p[9] = (uint8_t)(ctx->state.trip1_distance_km & 0xFF);
+    p[10] = 0x00;
+    p[11] = 0x00;
+    p[12] = 0x00;
+    p[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum += p[i];
     }
-    p[10] = (uint8_t)((sum - 1) & 0xFF);
+    p[14] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 11);
+    ctx->uart_tx(p, 15);
 }
 
 /* Transmit Hiworld Trip 2 Telemetry (Cmd 0x15) */
 static inline void psa_trip_send_trip2(psa_trip_ctx_t *ctx) {
     if (!ctx->uart_tx) return;
 
-    uint8_t p[11];
+    uint8_t p[15];
     p[0] = HIWORLD_SOF1;
     p[1] = HIWORLD_SOF2;
-    p[2] = 0x06;               /* Length: 6 Payload bytes */
+    p[2] = 0x0A;               /* Length: 10 Payload bytes */
     p[3] = HIWORLD_CMD_ECU_P2; /* Cmd 0x15 */
     p[4] = (uint8_t)(ctx->state.trip2_avg_fuel >> 8);
     p[5] = (uint8_t)(ctx->state.trip2_avg_fuel & 0xFF);
@@ -257,14 +242,18 @@ static inline void psa_trip_send_trip2(psa_trip_ctx_t *ctx) {
     p[7] = ctx->state.trip2_avg_speed;
     p[8] = (uint8_t)(ctx->state.trip2_distance_km >> 8);
     p[9] = (uint8_t)(ctx->state.trip2_distance_km & 0xFF);
+    p[10] = 0x00;
+    p[11] = 0x00;
+    p[12] = 0x00;
+    p[13] = 0x00;
 
     uint8_t sum = 0;
-    for (size_t i = 2; i <= 9; i++) {
+    for (size_t i = 2; i <= 13; i++) {
         sum += p[i];
     }
-    p[10] = (uint8_t)((sum - 1) & 0xFF);
+    p[14] = (uint8_t)((sum - 1) & 0xFF);
 
-    ctx->uart_tx(p, 11);
+    ctx->uart_tx(p, 15);
 }
 
 /* Process PSA CAN 0x0B6 (RPM & Speed) */
@@ -294,7 +283,7 @@ static inline void psa_trip_process_can_0x2a1(psa_trip_ctx_t *ctx, const uint8_t
 
     ctx->state.trip1_distance_km = ((uint16_t)data[1] << 8) | data[2];
     ctx->state.trip1_avg_fuel    = ((uint16_t)data[3] << 8) | data[4];
-    ctx->state.trip1_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)(((uint16_t)data[5] << 8) | data[6]) : data[0];
+    ctx->state.trip1_avg_speed   = data[0];
 
     psa_trip_send_trip1(ctx);
 }
@@ -305,7 +294,7 @@ static inline void psa_trip_process_can_0x261(psa_trip_ctx_t *ctx, const uint8_t
 
     ctx->state.trip2_distance_km = ((uint16_t)data[1] << 8) | data[2];
     ctx->state.trip2_avg_fuel    = ((uint16_t)data[3] << 8) | data[4];
-    ctx->state.trip2_avg_speed   = (dlc >= 7 && (data[5] || data[6])) ? (uint8_t)(((uint16_t)data[5] << 8) | data[6]) : data[0];
+    ctx->state.trip2_avg_speed   = data[0];
 
     psa_trip_send_trip2(ctx);
 }
@@ -340,20 +329,20 @@ static inline void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t
 ### Vector 2: Trip 1 Historical (Distance 569 km, Fuel 7.3 L/100km, Mean Speed 37 km/h)
 - **CAN ID `0x2A1` Injection:**
   ```bash
-  cansend vcan0 2A1#25023900490025
+  cansend vcan0 2A1#25023900490399
   ```
 - **Expected UART Output (Hiworld `0x14`):**
-  - Frame: `5A A5 06 14 00 49 00 25 02 39 C2`
-  - Checksum Calculation: `(0x06 + 0x14 + 0x00 + 0x49 + 0x00 + 0x25 + 0x02 + 0x39 - 1) & 0xFF = (0xC3 - 1) & 0xFF = 0xC2`
+  - Frame: `5A A5 0A 14 00 49 00 25 02 39 00 00 00 00 C6`
+  - Checksum Calculation: `(0x0A + 0x14 + 0x00 + 0x49 + 0x00 + 0x25 + 0x02 + 0x39 - 1) & 0xFF = (0xC7 - 1) & 0xFF = 0xC6`
 
 ### Vector 3: Trip 2 Historical (Distance 921 km, Fuel 7.9 L/100km, Mean Speed 35 km/h)
 - **CAN ID `0x261` Injection:**
   ```bash
-  cansend vcan0 261#230399004F0023
+  cansend vcan0 261#230399004F0399
   ```
 - **Expected UART Output (Hiworld `0x15`):**
-  - Frame: `5A A5 06 15 00 4F 00 23 03 99 28`
-  - Checksum Calculation: `(0x06 + 0x15 + 0x00 + 0x4F + 0x00 + 0x23 + 0x03 + 0x99 - 1) & 0xFF = (0x129 - 1) & 0xFF = 0x28`
+  - Frame: `5A A5 0A 15 00 4F 00 23 03 99 00 00 00 00 2C`
+  - Checksum Calculation: `(0x0A + 0x15 + 0x00 + 0x4F + 0x00 + 0x23 + 0x03 + 0x99 - 1) & 0xFF = (0x12D - 1) & 0xFF = 0x2C`
 
 ### Vector 4: Fast Dynamics RPM & Speed (800 RPM, 10 km/h)
 - **CAN ID `0x0B6` Injection:**
@@ -363,4 +352,3 @@ static inline void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t
 - **Decoded Values:**
   - RPM: `(0x1900 >> 3) = 6400 >> 3 = 800 rpm`
   - Speed: `0x03E8 / 100 = 1000 / 100 = 10 km/h`
-

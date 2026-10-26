@@ -66,6 +66,22 @@ void proto_hiworld_feed_byte(uint8_t byte) {
             s_rx_packet.cmd = byte;
             s_running_sum = (uint8_t)(s_running_sum + byte);
 
+            if (s_rx_packet.cmd == HIWORLD_CMD_AUDIO_SOURCE && s_rx_packet.payload_len >= 3) {
+                /* In case a downlink frame includes cmd in length (Len=3 -> Cmd + 2 payload bytes) */
+                s_rx_packet.payload_len = 2;
+            }
+
+            if ((s_rx_packet.cmd == 0x0F || s_rx_packet.cmd == 0x11 || s_rx_packet.cmd == 0x12) &&
+                s_rx_packet.payload_len == 1) {
+                /* 5A A5 01 0F 0F: Length 1 counts CMD with 0 payload bytes */
+                s_rx_packet.payload_len = 0;
+            }
+
+            if (s_rx_packet.cmd == HIWORLD_CMD_DOWNLINK_RD4_CTRL && s_rx_packet.payload_len >= 3) {
+                /* In case a downlink frame includes cmd in length (Len=3 -> Cmd + 2 payload bytes) */
+                s_rx_packet.payload_len = 2;
+            }
+
             if (s_rx_packet.payload_len == 0) {
                 s_state = HW_STATE_WAIT_CHECKSUM;
             } else {
@@ -84,9 +100,12 @@ void proto_hiworld_feed_byte(uint8_t byte) {
 
         case HW_STATE_WAIT_CHECKSUM: {
             uint8_t expected_cs = (uint8_t)((s_running_sum - 1) & 0xFF);
+            uint8_t expected_cs_nosub = (uint8_t)(s_running_sum & 0xFF);
             uint8_t expected_cs_sync2 = (uint8_t)((s_running_sum + HIWORLD_SYNC_2 - 1) & 0xFF);
-            if (byte == expected_cs || byte == expected_cs_sync2 ||
-                (s_rx_packet.cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY && byte == 0xD4)) {
+            if (byte == expected_cs || byte == expected_cs_nosub || byte == expected_cs_sync2 ||
+                (s_rx_packet.cmd == HIWORLD_CMD_DIAGNOSTIC_QUERY && byte == 0xD4) ||
+                (s_rx_packet.cmd == 0x0F && byte == 0x1E) ||
+                (s_rx_packet.cmd == HIWORLD_CMD_DOWNLINK_RD4_CTRL && byte == (uint8_t)(s_running_sum + 3))) {
                 if (s_rx_callback) {
                     s_rx_callback(&s_rx_packet);
                 }

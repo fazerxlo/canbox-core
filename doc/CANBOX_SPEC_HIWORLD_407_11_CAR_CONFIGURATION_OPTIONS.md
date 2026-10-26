@@ -1,791 +1,796 @@
 # Hiworld (WC / 0x5AA5) Vehicle Central Configuration Specification
 ## Master Catalog: Headunit Car Settings, Personalization, Lighting Options & BSI Overrides
+### PSA CAN 2004 (Peugeot 407 / AEE2004 Comfort Bus) $\longleftrightarrow$ Hiworld Android Head Unit Bridge
 
 **Document File:** `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md`  
-**Document Version:** 1.0.0  
-**Target Platform:** Automotive Android Infotainment SoC $\longleftrightarrow$ Pure C99 CAN Box Firmware  
-**Vehicle Network:** Peugeot 407 & PSA Platform (CAN 2004 / PSA 15 Comfort & Body CAN)  
-**Primary Driver Protocol:** Hiworld (`0x5A 0xA5` sync header, additive sum checksum)  
-**Standard Reference:** Decompiled Android Automotive Core (`com.qf.vehicle.band.peugeot.parse.wc`, `CentralState.java`)
+**Document Version:** 2.1.0 (Bench-Verified against EMF-C MDF & Hiworld PA12.20 `H1H2PA123A-240717`)  
+**Target Platform:** Pure C99 Embedded Firmware (`canbox-core` on STM32 / ESP32 / NUC131)  
+**Vehicle Network:** Peugeot 407 (PSA CAN 2004 / AEE2004 Comfort Bus @ 125 kbps)  
+**Primary Driver Protocol:** Hiworld (`0x5A 0xA5` sync header, 38,400 baud 8N1, `((len + cmd + sum) - 1) & 0xFF` checksum)  
+**Standard References:**
+1. Magneti Marelli RT4 (NaviDrive SW 8.31) Firmware Specification (`RT4_AI_CAN_SETTINGS_GUIDE.md`)
+2. Reverse-Engineered Android Automotive Core (`com.qf.vehicle.band.peugeot.parse.wc`, `CentralState.java`)
+3. OpenCanbox PSA Architecture (`PEUGEOT_RT4_CAR_CONFIG.md`, `peugeot_407.h`, `can_router.h`)
+4. Hardware-in-the-Loop Bench Captures (`dump_2026-10-22_14-24-48.log`, `only_mdf_can_log_min2.csv`)
 
 ---
 
 # Table of Contents
 1. [Configuration Subsystem Architecture](#1-configuration-subsystem-architecture)
    - 1.1 Bidirectional Settings Pipeline
-   - 1.2 Downlink Command Structure (`Cmd 0x7B`, `0x7D`, `0xCA`, `0x9A`)
-   - 1.3 Uplink State Feedback (`Cmd 0x76`, `0x79`, `0xC1`)
-   - 1.4 Feature Discovery & Availability Masks (`Cmd 0x71`, `0x72`)
-2. [Exhaustive Catalog of Vehicle Configuration Options](#2-exhaustive-catalog-of-vehicle-configuration-options)
-   - 2.1 Domain 1: Lighting & Visibility (Follow-Me-Home, Welcome, DRL, Ambient)
-   - 2.2 Domain 2: Locking, Security & Access (Auto-Lock, Selective Unlock, Boot, Mirrors)
-   - 2.3 Domain 3: Wipers & Driving Convenience (Reverse Wipe, Rain Sensor, S&S, TPMS)
-   - 2.4 Domain 4: ADAS & Driver Assistance (Blind Spot, Fatigue, LDW, TSR, AEB, ESP)
-   - 2.5 Domain 5: Interior Comfort, Wellness & Seats (Massage, Fragrance, Ionizer, Sync)
-   - 2.6 Domain 6: Regional Units & System Language
-3. [Master Downlink Setting ID Translation Table](#3-master-downlink-setting-id-translation-table)
-4. [Master Uplink Telemetry Bitfield Layout](#4-master-uplink-telemetry-bitfield-layout)
-5. [Pure C99 Configuration Engine Implementation](#5-pure-c99-configuration-engine-implementation)
-   - 5.1 Configuration Data Model (`hiworld_car_config.h`)
-   - 5.2 Downlink Parser & Uplink Serializer (`hiworld_car_config.c`)
-6. [Desktop Test Harness & Verification Vectors](#6-desktop-test-harness--verification-vectors)
+   - 1.2 Menu Availability vs Active Settings (`0x361` vs `0x260` / `0x15B`)
+   - 1.3 BSI State Caching, Event-Driven `0x15B` & MDF Coexistence
+2. [Feature Discovery & UI Capability Masks (`Cmd 0x71` & `0x72`)](#2-feature-discovery--ui-capability-masks-cmd-0x71--0x72)
+   - 2.1 CentralStateEnable1 (`Cmd 0x71`)
+   - 2.2 CentralStateEnable2 (`Cmd 0x72`)
+3. [Master Downlink Setting Translation (HU $\to$ CAN Box $\to$ BSI)](#3-master-downlink-setting-translation-hu--can-box--bsi)
+   - 3.1 Primary Convenience Settings (`Cmd 0x7B`)
+   - 3.2 Extended Personalization Settings (`Cmd 0x7D`)
+   - 3.3 Climate Dual/Mono Sync Settings (`Cmd 0x3B` / `0x7D`)
+   - 3.4 Regional Measurement Units & Language (`Cmd 0xCA` / `0x9A`)
+4. [Master Uplink Telemetry Bitfield Layout (BSI $\to$ CAN Box $\to$ HU)](#4-master-uplink-telemetry-bitfield-layout-bsi--can-box--hu)
+   - 4.1 Uplink Page 1 (`Cmd 0x76` - `CentralState1`)
+   - 4.2 Uplink Page 2 (`Cmd 0x79` - `CentralState2`)
+5. [PSA CAN 2004 Frame Specifications](#5-psa-can-2004-frame-specifications)
+   - 5.1 BSI Personalization Menu Availability Mask (`0x361` - `MSG_BSI_INF_CFG_MENU_PERSO`)
+   - 5.2 Driver Profile Memory & Active Settings (`0x260` - `MSG_BSI_INF_PROFILS`)
+   - 5.3 Downlink Personalization Modification Request (`0x15B` - `MSG_BSI_PERSO_REQ`)
+   - 5.4 Power Management & Backlight Dimmer (`0x036` - `MSG_COMMANDES_BSI`)
+   - 5.5 Climate Dual/Mono Regulation (`0x1E3` Status & `0x1D0` Command)
+6. [Pure C99 Implementation Architecture for `canbox-core`](#6-pure-c99-implementation-architecture-for-canbox-core)
+   - 6.1 Data Structures (`peugeot_407.h` & `can_router.h`)
+   - 6.2 BSI Frame Decoder & Encoder (`psa_407_car_config.c`)
+   - 6.3 Routing Table Integration (`profile_psa.c`)
+   - 6.4 Hiworld Telemetry Serializers (`hiworld_psa_builders.c`)
+   - 6.5 Downlink Dispatcher (`proto_hiworld_adapter.c`)
+7. [Desktop Test Harness & Verification Vectors](#7-desktop-test-harness--verification-vectors)
 
 ---
 
 # 1. Configuration Subsystem Architecture
 
-When the user interacts with the **Car Settings / Vehicle Personalization** app on the Android touchscreen, the headunit sends discrete configuration downlink frames to the CAN box adapter. The CAN box decodes the setting index, validates parameters, maps them to native PSA BSI CAN frames (`0x221`, `0x228`, `0x1E0`, `0x1A1`), and broadcasts updated state telemetry back to Android.
+The **Car Settings / Vehicle Personalization** subsystem provides full bidirectional synchronization between the Android Head Unit touchscreen UI and the vehicle's Body Systems Interface (BSI / *Boîtier de Servitude Intelligent*).
+
 
 ```
-+------------------------------------------------------------------------------------+
-|                         Android Headunit "Car Settings" UI                         |
-|     [Follow-Me-Home: 30s | DRL: ON | Auto-Lock: ON | Mirror Fold: ON | Units: C]   |
-+------------------------------------------------------------------------------------+
-                         │ (Downlink Cmd 0x7B / 0x7D) ▲ (Uplink Feedback Cmd 0x76/0x79)
-                         ▼                            │
-+------------------------------------------------------------------------------------+
-|                         Hiworld CAN Box Microcontroller                            |
-|   1. Decodes Sub-Setting Index & Param Value (hiworld_car_config_parser)           |
-|   2. Updates internal `hiworld_car_config_t` state model                           |
-|   3. Synthesizes PSA BSI Configuration Frame (CAN ID 0x221 / 0x228)                |
-|   4. Broadcasts Feature Availability Masks (Cmd 0x71 / 0x72)                       |
-+------------------------------------------------------------------------------------+
-                         │ (PSA CAN Bus: 125 kbps)    ▲ (BSI Status CAN 0x221/0x0F6)
-                         ▼                            │
-+------------------------------------------------------------------------------------+
-|                         Peugeot 407 Built-in Systems Interface                     |
-|           [Executes Relays, Headlamp Timers, Actuators, Mirror Solenoids]          |
-+------------------------------------------------------------------------------------+
+
++-----------------------------------------------------------------------------------+
+|                        Android Head Unit (Hiworld / QF)                           |
+|       Touchscreen UI: Car Settings, Lighting, Locks, Wipers, Radar, Sync         |
++-----------------------------------------------------------------------------------+
+| Downlink Serial (38,400 baud)                       ^ Uplink Serial
+| Cmd 0x7B (Primary Settings)                         | Cmd 0x71/0x72 (Enables)
+| Cmd 0x7D (Extended Settings)                        | Cmd 0x76 (State 1, 2B)
+| Cmd 0xCA (Units) / Cmd 0x9A (Lang)                  | Cmd 0x79 (State 2, 8B)
+v                                                     |
++-----------------------------------------------------------------------------------+
+|                            OpenCanbox Core Firmware                               |
+|                                                                                   |
+|  [L4/L5 Downlink Adapter]                                [L4/L5 Telemetry Push]   |
+|  - Validates Cmd & SettingID                              - Serializes Cmd 0x76   |
+|  - Acknowledges with 0xFF                                 - Serializes Cmd 0x79   |
+|  - Calls can_router_set_car_config()                      - Serializes 0x71/0x72  |
+|            |                                                         ^            |
+|            v                                                         |            |
+|  [L3 Router & Cache]                                                 |            |
+|  - Maintains s_cached_profile1_raw[8] & s_cached_0x361_raw[6]         |            |
+|  - Updates vehicle_state_t.config & dirty flags ---------------------+            |
+|            |                                                                      |
+|            v                                                                      |
+|  [L2 PSA Profile Encoder/Decoder]                                                 |
+|  - Mutates target bits in s_cached_profile1_raw                                    |
+|  - Injects event-driven CAN ID 0x15B (DLC 8) or 0x1D0 (DLC 7) via HAL             |
+|  - Decodes BSI Profiles frame 0x260 (DLC 8) -> vehicle_config_t                    |
+|  - Decodes BSI Menu Availability frame 0x361 (DLC 6) -> feature enables (0x71/72) |
++-----------------------------------------------------------------------------------+
+| hal_can_send(&frame)                                ^ CAN RX FIFO
+v                                                     |
++-----------------------------------------------------------------------------------+
+|                         PSA CAN 2004 Comfort Bus (125 kbps)                       |
+|   - BSI (0x361 Equipment Mask, 0x260 Profiles Status, 0x036 Power/Dimmer)         |
+|   - Telematic Screen / MDF / CAN Box (0x15B Event-Driven Write Request DLC 8)     |
+|   - Climate ECU (0x1E3 Status periodic 100 ms, 0x1D0 Command)                     |
++-----------------------------------------------------------------------------------+
+
 ```
 
 ### 1.1 Bidirectional Settings Pipeline
-1. **Discovery / Capability Handshake:** CAN box emits `Cmd 0x71` & `Cmd 0x72` feature masks; Android hides unsupported switches.
-2. **User Tap:** Android emits `Cmd 0x7B` or `Cmd 0x7D` with `[SettingID]` and `[Value]`.
-3. **BSI Injection:** CAN box injects the corresponding CAN bits into PSA CAN ID `0x221`.
-4. **State Feedback:** CAN box reads vehicle confirmation and replies with `Cmd 0x76` / `0x79` to synchronize the UI toggle switch.
+1. **Discovery Handshake:** Upon CAN box connection or vehicle selection (`Cmd 0x24`), OpenCanbox transmits `Cmd 0x71` and `Cmd 0x72` feature enable bitmasks. The Android UI dynamically hides switches unsupported by the Peugeot 407 (e.g., Seat Massage, Fragrance Diffuser, Ionizer).
+2. **Periodic BSI Sniffing:**
+   - The BSI broadcasts `0x361` (DLC 6) equipment availability mask, indicating which personalization menus are telecoded in the vehicle.
+   - The BSI cycles driver profiles (1, 2, 3) every 500 ms on `0x260` (DLC 8), so Profile 1 (`data[0] == 0x01`) repeats every 1,500 ms. OpenCanbox decodes active settings from Profile 1, updates `vehicle_state_t.config`, and stores the raw bytes in `s_cached_profile1_raw[8]`.
+3. **User Interaction (Downlink):** When the driver taps a switch on the Android UI, Android emits `Cmd 0x7B` or `Cmd 0x7D` containing `[SettingID]` and `[Value]`.
+4. **Command Acknowledgment:** OpenCanbox returns `5A A5 01 FF <CmdID> <Checksum>` to satisfy the Android serial watchdog.
+5. **Atomic BSI CAN Injection:** OpenCanbox copies `s_cached_profile1_raw`, mutates the target bit for that setting, sets `data[0] = 0x01` (validity bit 2 cleared = pending configuration write request), and injects a single 8-byte frame `0x15B` onto the CAN bus.
+6. **State Echo & Sync:** On the next Profile 1 slot of `0x260` (within 500–1500 ms), the BSI commits the change to internal NVRAM/EEPROM and broadcasts the updated `0x260` Profile 1 state. OpenCanbox detects the echo, updates the cache, and transmits `Cmd 0x76` / `0x79` uplink telemetry to synchronize the UI switch.
 
 ---
 
-# 2. Exhaustive Catalog of Vehicle Configuration Options
+### 1.2 Menu Availability vs Active Settings (`0x361` vs `0x260` / `0x15B`)
+
+> [!IMPORTANT]
+> In PSA CAN 2004 (Peugeot 407), there is a strict architectural division:
+> - **CAN ID `0x361` (`MSG_BSI_INF_CFG_MENU_PERSO`, DLC 6)** is **Menu Availability (Equipment Mask)**, NOT Current User Settings. It tells displays (EMF-C/RT4) which menus are physically telecoded in the BSI:
+>   - Byte 0: `profile_number`
+>   - Byte 2: `auto_lighting` (b0), `follow_me_home` (b4), `hinge_panel` (b7)
+>   - Byte 3: `drl_present` (b6)
+>   - Byte 4: `emf_present` (b4), `aas_disable` (b5)
+>   - Byte 5: `tpms_present` (b4..b6)
+> - **CAN ID `0x260` (`MSG_BSI_INF_PROFILS`, DLC 8)** broadcasts **Active User Settings**:
+>   - The BSI cycles profiles (1, 2, 3) on `0x260` every 500 ms. Profile 1 (`data[0] == 0x01`) contains the true active user settings (DRL, Rear Wiper, Follow-Me-Home delay, Automatic Headlights, Parking Radar AAS toggle, Directional Headlights).
+> - **CAN ID `0x15B` (`MSG_BSI_PERSO_REQ`, DLC 8)** is the **Event-Driven Downlink BSI Configuration Frame**:
+>   - In PSA CAN 2004, displays command personalization changes to the BSI on CAN ID `0x15B` (DLC 8, with `Byte 0 = 0x01` and validity bit 2 cleared, indicating a pending configuration write request for Profile 1). The BSI does not accept configuration changes written into `0x361`.
 
 ---
 
-### 2.1 Domain 1: Lighting & Visibility
+### 1.3 BSI State Caching, Event-Driven `0x15B` & MDF Coexistence
 
-#### 1. Follow-Me-Home Headlamp Delay (`WithMeGoHomeTime` / Walk-Home Headlights)
-Keeps dipped low-beam headlights illuminated after locking the vehicle to guide passengers in darkness.
-- **Downlink Framing:** `Cmd 0x7B` (`123` dec), `SettingID = 0x06`
-- **Available Options:**
-  - `0`: **Disabled / 0 Seconds** (Headlights extinguish immediately)
-  - `1`: **15 Seconds** delay
-  - `2`: **30 Seconds** delay (Default standard)
-  - `3`: **60 Seconds** delay
-- **PSA CAN Mapping (`0x221` Byte 4):** Bits 7..6: `00`=0s, `01`=15s, `10`=30s, `11`=60s.
-
-#### 2. Welcome / Greeting Lighting Duration (`WelcomeLightTime`)
-Turns on sidelights, puddle lamps, and interior courtesy lights upon remote key unlock.
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x09`
-- **Available Options:**
-  - `0`: **Disabled / 0 Seconds**
-  - `1`: **15 Seconds**
-  - `2`: **30 Seconds**
-  - `3`: **60 Seconds**
-
-#### 3. Welcome Lighting Master Toggle (`WelcomeLights_Cb`)
-- **Downlink Framing:** `Cmd 0x7D` (`125` dec), `SettingID = 0x05`
-- **Available Options:**
-  - `0`: **OFF** (Welcome lights disabled)
-  - `1`: **ON** (Welcome lights enabled)
-
-#### 4. Daytime Running Lights (`DayRunCarLight_Cb` / DRL)
-Controls the dedicated front daytime running lamps while the engine is running.
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x05`
-- **Available Options:**
-  - `0`: **Disabled / OFF**
-  - `1`: **Enabled / ON**
-- **PSA CAN Mapping (`0x221` Byte 2):** Bit 7 (`0x80`).
-
-#### 5. Adaptive Directional Headlights / Cornering Lights (`TurnBigLight_Cb` / `TurnAssistance_Cb`)
-Swivels headlamps into turns or illuminates fog lights at low speeds when turning the steering wheel.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x02` (Directional Headlights) / `SettingID = 0x04` (Cornering Assistance)
-- **Available Options:** `0` = Off, `1` = On.
-- **PSA CAN Mapping (`0x221` Byte 2):** Bit 0 (`0x01`).
-
-#### 6. Automatic High Beam Assist (`AutoHighLight_Cb`)
-Automatically switches between high beam and low beam based on oncoming traffic sensors.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x17` (`23` dec)
-- **Available Options:** `0` = Off, `1` = On.
-
-#### 7. Headlamp Extinguishing Delay (`DelayedExtinguishingDoorClose_List` / `EngineCloseDelay_List`)
-Delay timer after closing doors or turning off ignition.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x1E` (`30` dec) / `SettingID = 0x20` (`32` dec)
-- **Available Options:** `0` = 0s, `1` = 15s, `2` = 30s, `3` = 60s.
-
-#### 8. Ambient Mood Lighting Master Switch & Brightness (`AtmosphereSwitch_Cb`, `AtmosphereLightBrightness_List`)
-Interior footwell and center console LED ambient lighting.
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x0A` (`10` dec)
-- **Payload Layout:** `[Bit 7: Switch (1=ON, 0=OFF)] | [Bits 3..0: Brightness Level (0..15)]`
-- **Available Options:** Switch (`ON`/`OFF`), Brightness (`0` = Off to `15` = Maximum).
-
-#### 9. Ambient Mood Mode / Theme Color (`Atmosphere_mode_List` / `ThemeColor_List`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x09` / `SettingID = 0x0A`
-- **Available Options:**
-  - Mode: `0` = Normal, `1` = Relax / Soft, `2` = Dynamic / Boost.
-  - Theme: `0` = Blue / Cyan, `1` = Amber / Red, `2` = White / Silver, `3` = Green.
-
-#### 10. Instrument Cluster Backlight Brightness (`MeterBackLight_List`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x0E`
-- **Available Options:** `0 \dots 15` (Discrete brightness levels).
+Hardware bench captures (`only_mdf_can_log_min2.csv`) prove a critical behavioral distinction between the factory PSA Multifunction Display (MDF / EMF-C) and aftermarket Chinese CAN boxes:
+- **OEM EMF-C MDF Behavior:** The physical MDF **does NOT broadcast `0x15B` periodically**. It remains completely silent on `0x15B` while idle or browsing menus, and transmits a **single event-driven `0x15B` frame** (~1.5 to 10 ms after the user presses `OK` on the RD4 fascia `0x3E5 = 00 00 40 00 00 00`). The BSI latches this single frame into EEPROM and echoes the new state on the very next `0x260` Profile 1 broadcast.
+- **OEM Hiworld PA12.20 (`H1H2PA123A-240717`) Quirk:** The commercial Hiworld PA12.20 box continuously broadcasts `0x15B` every ~520 ms (alongside `0x525`, `0x3F6`, and `0x0DF`). If a physical MDF is connected on the same CAN bus (e.g., on a test workbench), the PA12.20's periodic `0x15B` transmissions collide with and overwrite settings changed on the MDF. *(When using a PA12.20 on a workbench with an MDF for passive UART comparison, its CAN_TX line must be disconnected).*
+- **OpenCanbox Coexistence Architecture:**
+  - `canbox-core` **never** transmits `0x15B` periodically.
+  - It passively updates `s_cached_profile1_raw[8]` from every incoming `0x260` Profile 1 frame and **only** transmits `0x15B` as an event-driven frame when `psa_car_config_apply_downlink()` is invoked by the Android Head Unit (`Cmd 0x7B` / `0x7D`).
+  - Consequently, `canbox-core` works identically in a target vehicle **without an MDF** and on a development workbench **with a physical MDF connected**, allowing settings to be modified and persisted from either the RD4/MDF or the Android Head Unit without bus conflicts.
 
 ---
 
-### 2.2 Domain 2: Locking, Security & Access
+# 2. Feature Discovery & UI Capability Masks (`Cmd 0x71` & `0x72`)
 
-#### 1. Automatic Driving Door Lock (`DoorAutoLock_Cb` / Drive-Lock)
-Automatically locks all doors and tailgate once vehicle speed exceeds $10\text{ km/h}$ ($6\text{ mph}$).
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x0C` (`12` dec)
-- **Available Options:**
-  - `0`: **OFF** (Doors remain unlocked while driving)
-  - `1`: **ON** (Doors lock automatically above 10 km/h)
-- **PSA CAN Mapping (`0x221` Byte 1):** Bit 4 (`0x10`).
+During the connection handshake (after receiving `Cmd 0x24`), OpenCanbox sends `Cmd 0x71` and `Cmd 0x72` to tell Android which configuration options exist on the Peugeot 407.
 
-#### 2. Selective Door Unlocking (`UnlockDoorWhenRemoteOrManulEnter_List`)
-Controls whether the first remote unlock press unlocks all doors or driver's door only.
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x04`
-- **Available Options:**
-  - `0`: **All Doors** unlocked simultaneously
-  - `1`: **Driver's Door Only** unlocked (Second press unlocks remaining doors)
+> [!NOTE]
+> **OEM PA12.20 Reference vs Dynamic `0x361` Discovery:**  
+> At initial `Cmd 0x24` handshake, the OEM Hiworld PA12.20 (`H1H2PA123A-240717`) transmits conservative static defaults:
+> - `Cmd 0x71`: `5A A5 02 71 60 12 E4` (`0x60, 0x12`)
+> - `Cmd 0x72`: `5A A5 08 72 00 01 80 00 00 00 00 00 FA` (`0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00`)  
+> `canbox-core` initializes with these exact defaults and dynamically expands them when `0x361` arrives from the BSI.
 
-#### 3. Remote Boot Opening Mode (`OnlyRemoteOpenTrunk_Cb`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x01`
-- **Available Options:**
-  - `0`: Unlocks trunk and all doors
-  - `1`: Unlocks and releases trunk lid only (keeps cabin doors locked)
-
-#### 4. Automatic Power Mirror Folding on Lock (`DisableAutoFoldingRearviewMirror_Cb` / `RearMirrorAutoFolder_Cb`)
-Automatically folds side mirrors against the body when locking via remote key fob.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x1A` (`26` dec) / `SettingID = 0x23` (`35` dec)
-- **Available Options:**
-  - `0`: **Disabled** (Mirrors stay unfolded)
-  - `1`: **Enabled** (Mirrors fold on lock, unfold on ignition)
-- **PSA CAN Mapping (`0x221` Byte 4):** Bit 3 (`0x08`).
-
-#### 5. Hands-Free Keyless Boot / Kick Sensor (`TrunkNokeyUnlock_Cb` / `TrunkAutoOpen_Cb`)
-Motorized tailgate hands-free bumper foot sensor.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x15` (`21` dec) / `SettingID = 0x16` (`22` dec)
-- **Available Options:** `0` = Disabled, `1` = Enabled.
-
----
-
-### 2.3 Domain 3: Wipers & Driving Convenience
-
-#### 1. Automatic Rear Wiper in Reverse Gear (`AutoRearWiperWhenReverse_Cb`)
-Activates the rear window wiper automatically when reverse gear is engaged while front wipers are operating.
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x01`
-- **Available Options:**
-  - `0`: **Disabled / OFF**
-  - `1`: **Enabled / ON**
-- **PSA CAN Mapping (`0x221` Byte 1):** Bit 7 (`0x80`).
-
-#### 2. Automatic Rain-Sensing Wipers (`AutomaticWiper_Cb`)
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x0D`
-- **Available Options:** `0` = Manual intermittent, `1` = Automatic rain sensor.
-
-#### 3. Tire Pressure Calibration Trigger (`Tire_PressureCalibration_Cb` / TPMS Re-learn)
-Stores current tire pressures as the new reference baseline in the BSI.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x03`
-- **Action:** One-shot pulse (`Value = 1`). CAN Box injects `CAN ID 0x221#0000001000000000`.
-
-#### 4. Stop & Start (S&S) System Master Override (`IntelligenceStartStop_Cb`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x01` with `Cmd 0x8C` (`-116` signed)
-- **Available Options:**
-  - `0`: **Deactivated / Inhibited** (Engine will not auto-stop)
-  - `1`: **Active / Ready** (Standard eco auto-stop enabled)
-
-#### 5. Drive Mode Profile (`DriveMode_List`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x0B` (`11` dec)
-- **Available Options:** `0` = Normal / Standard, `1` = Eco Mode, `2` = Sport Mode, `3` = Snow / Off-road.
-
----
-
-### 2.4 Domain 4: ADAS & Driver Assistance Systems
-
-#### 1. Parking Radar Acoustic & Visual Master Switch (`RadarSwitch_Cb` / `Parking_AutoActive_Cb`)
-- **Downlink Framing:** `Cmd 0x7B`, `SettingID = 0x0B` (Switch) / `Cmd 0x7D`, `SettingID = 0x08` (Auto Active)
-- **Available Options:** `0` = Parking radar disabled/muted, `1` = Enabled.
-
-#### 2. Blind Spot Monitoring System (`BlindWarning_Cb` / SAM)
-Ultrasonic/radar rear quarter blind spot indicator lamps in side mirrors.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x02`
-- **Available Options:** `0` = Off, `1` = On.
-
-#### 3. Driver Fatigue Alert (`FatigueDrivingWarning_Cb`)
-Evaluates driving duration ($>2\text{ hours}$) and steering micro-corrections to display coffee cup break prompt.
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x07`
-- **Available Options:** `0` = Off, `1` = On.
-
-#### 4. Lane Departure Warning & Lane Keep (`LaneKeepAssistance_Cb` / LDW)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x06`
-- **Available Options:** `0` = Off, `1` = Visual/Audio warning only, `2` = Active steering intervention.
-
-#### 5. Traffic Sign Recognition (`TrafficSignRecognitionSystem_Cb` / TSR Speed Limits)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x22` (`34` dec)
-- **Available Options:** `0` = Off, `1` = Display road signs on cluster.
-
-#### 6. Active Emergency Braking Sensitivity (`EmergencyBrakingSensitivity_List` / AEB Forward Collision)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x21` (`33` dec)
-- **Available Options:**
-  - `0`: **Late / Close** (Warns only on immediate hazard)
-  - `1`: **Normal** (Standard safety distance)
-  - `2`: **Early / Far** (Conservative long-range warning)
-
-#### 7. Electronic Stability Program / Traction Control (`TractionControlSystem_Cb` / ESP)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x19` (`25` dec)
-- **Available Options:** `0` = ESP OFF (Inhibited up to 50 km/h), `1` = ESP ON.
-
----
-
-### 2.5 Domain 5: Interior Comfort, Wellness & Seats
-
-#### 1. Seat Massage Mode & Intensity (`SeatMassageMode_List` / `SeatMassageSpeed_List`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x1D` (`29` dec) for Mode / `SettingID = 0x1F` (`31` dec) for Speed
-- **Available Options:**
-  - **Mode:** `0` = Wave, `1` = Lumbar, `2` = Stretch, `3` = Shoulders.
-  - **Speed / Intensity:** `0` = Off, `1` = Low, `2` = Medium, `3` = High.
-
-#### 2. Interior Fragrance / Aromatherapy Diffuser (`Aromatherapy_List` / `AromatherapyConcentration_List`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x0D` (`13` dec) for Scent / `SettingID = 0x0E` (`14` dec) for Intensity
-- **Available Options:**
-  - **Scent:** `0` = Off, `1` = Scent 1 (Harmony), `2` = Scent 2 (Energizing), `3` = Scent 3 (Relax).
-  - **Intensity:** `0` = Low, `1` = Medium, `2` = Strong.
-
-#### 3. Air Ionizer / Anion Purifier (`AnionPurifier_List`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x0C` (`12` dec)
-- **Available Options:** `0` = Off, `1` = Clean Mode, `2` = Relax Mode.
-
-#### 4. Dual vs. Mono Zone Temperature Locking (`ZoneTemperature_List`)
-- **Downlink Framing:** `Cmd 0x7D`, `SettingID = 0x24` (`36` dec)
-- **Available Options:** `0` = Dual Independent Zones, `1` = Mono / Synchronized Passenger Zone.
-
----
-
-### 2.6 Domain 6: Regional Measurement Units & System Language
-
-#### 1. Temperature Measurement Unit (`TempUnit_List`)
-- **Downlink Framing:** `Cmd 0xCA` (`-54` signed / `204` dec), `SettingID = 0x03`
-- **Available Options:**
-  - `1`: **Celsius ($^\circ\text{C}$)**
-  - `2`: **Fahrenheit ($^\circ\text{F}$)**
-
-#### 2. Fuel Economy Consumption Unit (`OilUnit_List`)
-- **Downlink Framing:** `Cmd 0xCA`, `SettingID = 0x05`
-- **Available Options:**
-  - `1`: **$\text{L/100km}$** (Metric Standard)
-  - `2`: **$\text{km/L}$** (Japanese/Italian format)
-  - `3`: **$\text{MPG (US)}$**
-  - `4`: **$\text{MPG (UK)}$**
-
-#### 3. System Language (`ForwardLanguageSetting` / `Cmd 0x9A`)
-- **Downlink Framing:** `Cmd 0x9A` (`-102` signed / `154` dec), `SettingID = 0x01`
-- **Available Language Codes:**
-  - `0x00`: **English**
-  - `0x01`: **Simplified Chinese (简体中文)**
-  - `0x02`: **French (Français)**
-  - `0x03`: **German (Deutsch)**
-  - `0x04`: **Spanish (Español)**
-  - `0x05`: **Italian (Italiano)**
-  - `0x06`: **Polish (Polski)**
-  - `0x07`: **Russian (Русский)**
-  - `0x08`: **Portuguese (Português)**
-  - `0x09`: **Dutch (Nederlands)**
-  - `0x0A`: **Turkish (Türkçe)**
-  - `0x0B`: **Arabic (العربية)**
-
----
-
-# 3. Master Downlink Setting ID Translation Table
-
-| Function / Setting Name | Downlink Cmd ID | Sub-Setting Index (Hex) | Sub-Setting Index (Dec) | Valid Payload Values | Target PSA CAN Frame |
-|:---|:---:|:---:|:---:|:---|:---|
-| **Follow-Me-Home Delay** | `0x7B` (`123`) | `0x06` | `6` | `0`=0s, `1`=15s, `2`=30s, `3`=60s | `0x221` Byte 4 Bits 7..6 |
-| **Welcome Light Duration**| `0x7B` (`123`) | `0x09` | `9` | `0`=0s, `1`=15s, `2`=30s, `3`=60s | `0x221` Byte 4 Bits 5..4 |
-| **Welcome Lights Switch** | `0x7D` (`125`) | `0x05` | `5` | `0`=Off, `1`=On | `0x221` BSI Internal |
-| **Daytime Running (DRL)** | `0x7B` (`123`) | `0x05` | `5` | `0`=Off, `1`=On | `0x221` Byte 2 Bit 7 (`0x80`)|
-| **Auto Door Lock Driving**| `0x7B` (`123`) | `0x0C` | `12` | `0`=Off, `1`=On ($>10\text{ km/h}$) | `0x221` Byte 1 Bit 4 (`0x10`)|
-| **Selective Door Unlock** | `0x7B` (`123`) | `0x04` | `4` | `0`=All, `1`=Driver Only | `0x221` Byte 7 Bit 7 |
-| **Auto Rear Wiper Reverse**| `0x7B` (`123`) | `0x01` | `1` | `0`=Off, `1`=On | `0x221` Byte 1 Bit 7 (`0x80`)|
-| **Ambient Light & Bright**| `0x7B` (`123`) | `0x0A` | `10` | `0x80 \| (Brightness & 0x0F)` | `0x221` Byte 3 Bits 3..0 |
-| **TPMS Reset Trigger** | `0x7D` (`125`) | `0x03` | `3` | `1` (One-shot calibration pulse) | `0x221` Byte 3 Bit 4 (`0x10`)|
-| **Mirror Auto-Fold Lock** | `0x7D` (`125`) | `0x23` | `35` | `0`=Disabled, `1`=Enabled | `0x221` Byte 4 Bit 3 (`0x08`)|
-| **Directional Headlights** | `0x7D` (`125`) | `0x02` | `2` | `0`=Off, `1`=On | `0x221` Byte 2 Bit 0 (`0x01`)|
-| **Auto High Beam Assist** | `0x7D` (`125`) | `0x17` | `23` | `0`=Off, `1`=On | `0x221` BSI Flag |
-| **Driver Fatigue Warning** | `0x7D` (`125`) | `0x07` | `7` | `0`=Off, `1`=On | `0x221` BSI Flag |
-| **Lane Keep Assist (LKA)**| `0x7D` (`125`) | `0x06` | `6` | `0`=Off, `1`=Warn, `2`=Active | `0x221` BSI Flag |
-| **AEB Collision Distance**| `0x7D` (`125`) | `0x21` | `33` | `0`=Close, `1`=Norm, `2`=Far | `0x221` BSI Flag |
-| **Fragrance Scent Select** | `0x7D` (`125`) | `0x0D` | `13` | `0`=Off, `1`=Scent1, `2`=2, `3`=3| `0x221` BSI Flag |
-| **Fragrance Intensity** | `0x7D` (`125`) | `0x0E` | `14` | `0`=Low, `1`=Med, `2`=High | `0x221` BSI Flag |
-| **Anion Air Purifier** | `0x7D` (`125`) | `0x0C` | `12` | `0`=Off, `1`=Clean, `2`=Relax | `0x221` BSI Flag |
-| **Temperature Unit** | `0xCA` (`204`) | `0x03` | `3` | `1`=Celsius, `2`=Fahrenheit | Cluster Config |
-| **Fuel Economy Unit** | `0xCA` (`204`) | `0x05` | `5` | `1`=L/100km, `2`=km/L, `3`=MPG | Cluster Config |
-| **System Language** | `0x9A` (`154`) | `0x01` | `1` | `0`=EN, `1`=CN, `2`=FR, `3`=DE | Cluster / MFD Language |
-
----
-
-# 4. Master Uplink Telemetry Bitfield Layout
-
-The CAN box periodically (every 1000 ms) and on-change transmits the full vehicle setting state across two primary telemetry frames:
-
-### 4.1 Uplink Page 1 (`Cmd 0x76` / `118` dec - `CentralState1`)
-- **Header:** `0x5A 0xA5 0x02 76 [Byte 0] [Byte 1] [Checksum]`
+### 2.1 CentralStateEnable1 (`Cmd 0x71`, Length: 2 bytes)
+- **Serial Framing:** `5A A5 02 71 [Byte 0] [Byte 1] [CS]`
 - **Byte 0:**
-  - `Bit 7`: Parking Radar Auto-Active (`0x80`)
-  - `Bit 6`: Parking Radar Sound Enabled (`0x40`)
-  - `Bits 5..4`: Welcome Light Timer (`00`=0s, `01`=15s, `10`=30s, `11`=60s)
-  - `Bit 3`: Ambient Mood Light Enabled (`0x08`)
-  - `Bits 2..0`: Ambient Light Brightness level ($0 \dots 7$)
+  - `Bit 7` (`0x80`): Ambient Mood Lighting menu supported $\implies$ `1`
+  - `Bit 6` (`0x40`): Welcome Light timer supported $\implies$ `0` (Set in static PA12.20 default `0x60`)
+  - `Bit 5` (`0x20`): Parking Radar (AAS) master toggle supported $\implies$ `1` (if `0x361` B4.5 `0x20` set)
+  - `Bit 4` (`0x10`): Reserved $\implies$ `0`
+  - `Bit 3` (`0x08`): Reserved $\implies$ `0`
+  - `Bit 2` (`0x04`): Daytime Running Lights (DRL) toggle supported $\implies$ `1` (if `0x361` B3.6 `0x40` set)
+  - `Bits 1..0` (`0x03`): Follow-Me-Home delay options supported $\implies$ `11`b (if `0x361` B2.4 `0x10` set)
+  - **Dynamic Byte 0 Value (for `0x361 = 01 01 91 40 30 10`):** `0x80 | 0x20 | 0x04 | 0x03 = 0xA7` (Init default: `0x60`)
 - **Byte 1:**
-  - `Bit 7`: Auto Rear Wiper in Reverse (`0x80`)
-  - `Bit 6`: Parking Assist Line Overlay (`0x40`)
-  - `Bit 5`: Automatic Door Lock while Driving (`0x20`)
-  - `Bit 4`: Deadlocking Safety Active (`0x10`)
-  - `Bit 3`: Selective Door Unlocking (`0x08`: 1=Driver only, 0=All)
-  - `Bit 2`: Daytime Running Lights Enabled (`0x04`)
-  - `Bits 1..0`: Follow-Me-Home Headlamp Delay (`00`=0s, `01`=15s, `10`=30s, `11`=60s)
-
-### 4.2 Uplink Page 2 (`Cmd 0x79` / `121` dec - `CentralState`)
-- **Header:** `0x5A 0xA5 0x07 79 [B0] [B1] [B2] [B3] [B4] [B5] [B6] [Checksum]`
-- **Byte 0:** Remote Trunk Only (`b7`), Adaptive Headlamps (`b6`), Cornering Lights (`b5`), Welcome Lights (`b4`), Lane Keep Assist (`b3`), Fatigue Warning (`b2`), Overspeed Alert (`b1`), Theme Color (`b0`).
-- **Byte 1:** Ambient Mode (`b7..b6`), Drive Mode (`b5`), Anion Purifier (`b4..b3`), Fragrance Scent (`b2..b1`).
-- **Byte 2:** Fragrance Concentration (`b7..b6`), Cluster Backlight (`b5..b2`), Electric Tailgate (`b1`), Auto Tailgate Open (`b0`).
-- **Byte 3:** Keyless Tailgate Unlock (`b5`), Auto High Beam (`b4`), Touch Sensitivity (`b3`), Traction Control ESP (`b2`), Mirror Auto-Fold (`b1`), Headlight Delay Switch (`b0`).
-- **Byte 4:** Seat Massage Mode (`b5..b3`), Engine Close Delay (`b2..b0`).
-- **Byte 5:** Seat Massage Speed (`b7..b6`), Door Close Extinguish Delay (`b5..b4`), AEB Collision Sensitivity (`b3..b2`), Traffic Sign Recognition TSR (`b1`), Mirror Fold Enabled (`b0`).
-- **Byte 6:** Zone Temp Sync (`b2..b1`), Seat Position Tips (`b0`).
+  - `Bit 7` (`0x80`): Auto Rear Wiper in Reverse supported $\implies$ `1`
+  - `Bit 6` (`0x40`): Parking Guideline Overlay supported $\implies$ `0` (Handled by SAS `0x11`)
+  - `Bit 5` (`0x20`): Automatic Door Locking while Driving supported $\implies$ `1`
+  - `Bit 4` (`0x10`): Deadlocking safety active supported $\implies$ `0`
+  - `Bit 3` (`0x08`): Selective Boot / Door Unlocking supported $\implies$ `1`
+  - `Bits 2..0` (`0x07`): Reserved $\implies$ `0`
+  - **Dynamic Byte 1 Value:** `0x80 | 0x20 | 0x08 = 0xA8` (Init default: `0x12`)
 
 ---
 
-# 5. Pure C99 Configuration Engine Implementation
+### 2.2 CentralStateEnable2 (`Cmd 0x72`, Length: 8 bytes)
+- **Serial Framing:** `5A A5 08 72 [B0] [B1] [B2] [B3] [B4] [B5] [B6] [B7] [CS]`
+- **Byte 0:**
+  - `Bit 7` (`0x80`): Remote Trunk / Boot Mode $\implies$ `1` (if `0x361` B2.7 `0x80` set)
+  - `Bit 6` (`0x40`): Directional / Adaptive Xenon Headlights $\implies$ `1` (if `0x361` B2.0 `0x01` set)
+  - `Bit 5` (`0x20`): Cornering Lights $\implies$ `0`
+  - `Bit 4` (`0x10`): Welcome Lights Switch $\implies$ `0`
+  - `Bit 3` (`0x08`): Lane Keep Assist (LKA) $\implies$ `0`
+  - `Bit 2` (`0x04`): Driver Fatigue Alert $\implies$ `0`
+  - `Bit 1` (`0x02`): TPMS Calibration Reset button $\implies$ `1` (if `0x361` B5[6:4] `0x70` set)
+  - `Bit 0` (`0x01`): Drive Mode Profile $\implies$ `1` (Allows Driver Profile switch)
+- **Byte 1:**
+  - `Bit 2` (`0x04`): Cluster Backlight Dimmer $\implies$ `1`
+- **Byte 5:**
+  - `Bit 1` (`0x02`): Dual/Mono Zone Temp Sync $\implies$ `1`
+- **Other Bytes (B2..B4, B6..B7):** Set to `0x00` (disables unsupported modern PSA ADAS like AEB, Scent, Massage).
 
-### 5.1 Configuration Data Model (`hiworld_car_config.h`)
+---
 
-```c
-#ifndef HIWORLD_CAR_CONFIG_H
-#define HIWORLD_CAR_CONFIG_H
+# 3. Master Downlink Setting Translation (HU $\to$ CAN Box $\to$ BSI)
 
-#include <stdint.h>
-#include <stdbool.h>
-#include <stddef.h>
+When the user taps an option on Android, the headunit sends a serial command to the CAN box.
 
-/* Full Vehicle Configuration State Model */
-typedef struct {
-    /* Lighting & Visibility */
-    uint8_t follow_me_home_sec;   /* 0, 15, 30, 60 */
-    uint8_t welcome_light_sec;    /* 0, 15, 30, 60 */
-    bool    welcome_lights_switch;
-    bool    drl_enabled;          /* Daytime Running Lights */
-    bool    adaptive_headlights;
-    bool    cornering_lights;
-    bool    auto_high_beam;
-    bool    ambient_light_switch;
-    uint8_t ambient_brightness;   /* 0..15 */
-    uint8_t ambient_mode;         /* 0=Normal, 1=Relax, 2=Boost */
-    uint8_t theme_color;          /* 0=Blue, 1=Red, 2=White, 3=Green */
-    uint8_t cluster_backlight;    /* 0..15 */
+### 3.1 Primary Convenience Settings (`Cmd 0x7B`)
 
-    /* Locking & Security */
-    bool    auto_lock_driving;    /* Lock > 10 km/h */
-    bool    selective_unlocking;  /* true=Driver only, false=All */
-    bool    remote_trunk_only;
-    bool    auto_mirror_fold;     /* Fold mirrors on remote lock */
-    bool    handsfree_tailgate;
+| Setting Name | Cmd | Setting ID (Hex) | Setting ID (Dec) | Android Payload Values | Target PSA Frame & Bitfield | Injected CAN Action |
+|:---|:---:|:---:|:---:|:---|:---|:---|
+| **Rear Wiper on Reverse** | `0x7B` | `0x01` | `1` | `0` = Off, `1` = On | `0x15B` Byte 5 Bit 4 (`0x10`) | `data[5] = (data[5] & ~0x10) \| (val ? 0x10 : 0x00)` |
+| **Selective Door Unlock** | `0x7B` | `0x04` | `4` | `0` = All Doors, `1` = Driver Only | `0x15B` Byte 4 Bit 2 (`0x04`) | `data[4] = (data[4] & ~0x04) \| (val ? 0x04 : 0x00)` |
+| **Daytime Running (DRL)** | `0x7B` | `0x05` | `5` | `0` = Disabled, `1` = Enabled | `0x15B` Byte 3 Bit 6 (`0x40`) | `data[3] = (data[3] & ~0x40) \| (val ? 0x40 : 0x00)` |
+| **Follow-Me-Home Delay** | `0x7B` | `0x06` | `6` | `0` = 0s (Off)<br>`1` = 15s<br>`2` = 30s<br>`3` = 60s | `0x15B` Byte 2 Bit 5 (`0x20`) &<br>`0x15B` Byte 2 Bits 2..0 | `data[2] &= ~0x27;`<br>If `val == 1`: `data[2] \|= (0x20 \| 0x01);`<br>Else if `val == 2`: `data[2] \|= (0x20 \| 0x02);`<br>Else if `val == 3`: `data[2] \|= (0x20 \| 0x04);`<br>Else: `data[2] \|= 0x01;` |
+| **Ambient Mood Brightness** | `0x7B` | `0x0A` | `10` | `0x80 \| (brightness & 0x0F)`<br>Bit 7: Switch (1=On, 0=Off)<br>Bits 3..0: Level (0..15) | `0x15B` Byte 2 Bits 3..0 | If `val & 0x80`:<br>`data[2] = (data[2] & 0xF0) \| (val & 0x0F);`<br>Else:<br>`data[2] = (data[2] & 0xF0);` |
+| **Parking Radar (AAS) Toggle**| `0x7B` | `0x0B` | `11` | `0` = Muted/Off, `1` = Enabled | `0x15B` Byte 5 Bit 6 (`0x40`) | `data[5] = (data[5] & ~0x40) \| (val ? 0x40 : 0x00)` |
+| **Auto Door Lock Driving** | `0x7B` | `0x0C` | `12` | `0` = Off, `1` = On ($>10\text{ km/h}$) | `0x15B` Byte 4 Bit 3 (`0x08`) | `data[4] = (data[4] & ~0x08) \| (val ? 0x08 : 0x00)` |
 
-    /* Wipers & Driving */
-    bool    rear_wiper_reverse;
-    bool    rain_sensor_wipers;
-    bool    start_stop_active;
-    uint8_t drive_mode;           /* 0=Normal, 1=Eco, 2=Sport, 3=Snow */
+---
 
-    /* ADAS & Safety */
-    bool    radar_system_enabled;
-    bool    radar_auto_active;
-    bool    blind_spot_sam;
-    bool    driver_fatigue_alert;
-    uint8_t lane_keep_assist;     /* 0=Off, 1=Warn, 2=Active */
-    bool    traffic_sign_tsr;
-    uint8_t aeb_sensitivity;      /* 0=Late, 1=Normal, 2=Early */
-    bool    esp_traction_control;
+### 3.2 Extended Personalization Settings (`Cmd 0x7D`)
 
-    /* Interior & Seats */
-    uint8_t seat_massage_mode;    /* 0=Off, 1=Wave, 2=Lumbar, 3=Stretch */
-    uint8_t seat_massage_speed;   /* 0=Off, 1=Low, 2=Med, 3=High */
-    uint8_t fragrance_scent;      /* 0=Off, 1..3 */
-    uint8_t fragrance_intensity;  /* 0=Low, 1=Med, 2=High */
-    uint8_t anion_purifier;       /* 0=Off, 1=Clean, 2=Relax */
-    bool    zone_temp_mono_sync;
+| Setting Name | Cmd | Setting ID (Hex) | Setting ID (Dec) | Android Payload Values | Target PSA Frame & Bitfield | Injected CAN Action |
+|:---|:---:|:---:|:---:|:---|:---|:---|
+| **Remote Boot Mode** | `0x7D` | `0x01` | `1` | `0` = Full Car, `1` = Boot Only | `0x15B` Byte 5 Bit 7 (`0x80`) | `data[5] = (data[5] & ~0x80) \| (val ? 0x80 : 0x00)` |
+| **Directional Headlights** | `0x7D` | `0x02` | `2` | `0` = Off, `1` = Adaptive Xenon On | `0x15B` Byte 2 Bit 7 (`0x80`) | `data[2] = (data[2] & ~0x80) \| (val ? 0x80 : 0x00)` |
+| **TPMS Re-Learn Trigger** | `0x7D` | `0x03` | `3` | `1` = Pulse Trigger | `0x221` (Demands EMF) | Injects one-shot `0x221` with Byte 3 = `0x10` |
+| **Driver Profile Select** | `0x7D` | `0x0B` | `11` | `0` = Profile 1, `1` = Profile 2, `2` = Profile 3 | `0x15B` (`MSG_BSI_PERSO_REQ`) | Injects `0x15B#0[prof]...` (`prof` = `(val & 0x03) + 1`) |
+| **Backlight Dimmer** | `0x7D` | `0x0E` | `14` | `0 \dots 15` | `0x036` (Dimmer Level) | Update cluster dimmer state |
+| **Zone Temp Mono/Sync** | `0x7D` | `0x24` | `36` | `0` = Dual, `1` = Mono / SYNC | `0x1D0` (`MSG_CDE_CLIMAV`) | Injects `0x1D0` with Byte 0 Bit 0 (`0x01`) |
 
-    /* Units & Language */
-    uint8_t unit_temp;            /* 0=Celsius, 1=Fahrenheit */
-    uint8_t unit_fuel;            /* 0=L/100km, 1=km/L, 2=MPG US, 3=MPG UK */
-    uint8_t language_id;          /* 0=EN, 1=CN, 2=FR, 3=DE, 4=ES, etc. */
-} hiworld_car_config_t;
+---
 
-typedef void (*hiworld_uart_tx_fn)(const uint8_t *buf, size_t len);
-typedef void (*hiworld_can_tx_fn)(uint32_t id, const uint8_t *data, uint8_t dlc);
+### 3.3 Climate Dual/Mono Sync Settings (`Cmd 0x3B` / `0x7D`)
 
-typedef struct {
-    hiworld_car_config_t state;
-    hiworld_uart_tx_fn   uart_tx;
-    hiworld_can_tx_fn    can_tx;
-} hiworld_config_ctx_t;
+The Android Climate UI sends `Cmd 0x3B` with sub-setting `0x0F` to toggle Mono / SYNC mode:
+- **Downlink Serial:** `5A A5 02 3B 0F [val] [CS]` (`val == 1` $\implies$ SYNC Mono, `val == 0` $\implies$ Dual).
+- **Injected PSA CAN Frame (`0x1D0` - DLC 7):**
+  - `Byte 0`: `0x01` (`DUAL_REQ`)
+  - `Byte 5`: Driver Temperature setpoint
+  - `Byte 6`: Passenger Temperature setpoint (when commanding Mono mode, Byte 6 **must strictly equal Byte 5**).
 
-void hiworld_config_init(hiworld_config_ctx_t *ctx, hiworld_uart_tx_fn uart_tx, hiworld_can_tx_fn can_tx);
-void hiworld_config_process_downlink(hiworld_config_ctx_t *ctx, uint8_t cmd_id, const uint8_t *payload, uint8_t len);
-void hiworld_config_send_telemetry_page1(hiworld_config_ctx_t *ctx);
-void hiworld_config_send_telemetry_page2(hiworld_config_ctx_t *ctx);
-void hiworld_config_sync_to_psa_can(hiworld_config_ctx_t *ctx);
+---
 
-#endif /* HIWORLD_CAR_CONFIG_H */
+### 3.4 Regional Measurement Units & Language (`Cmd 0xCA` / `0x9A`)
+- **Temperature Unit (`Cmd 0xCA`, Setting `0x03`):** `1` = Celsius ($^\circ\text{C}$), `2` = Fahrenheit ($^\circ\text{F}$).
+- **Consumption Unit (`Cmd 0xCA`, Setting `0x05`):** `1` = L/100km, `2` = km/L, `3` = MPG (US), `4` = MPG (UK).
+- **System Language (`Cmd 0x9A`, Setting `0x01`):** `0x00` = English, `0x01` = Chinese, `0x02` = French, `0x03` = German, `0x04` = Spanish, `0x05` = Italian, `0x06` = Polish, etc.
+
+---
+
+# 4. Master Uplink Telemetry Bitfield Layout (BSI $\to$ CAN Box $\to$ HU)
+
+OpenCanbox broadcasts current settings to the Android Head Unit immediately upon state change and during periodic bulk resync via two primary telemetry packets:
+
+### 4.1 Uplink Page 1 (`Cmd 0x76` - `CentralState1`, Length: 2 bytes)
+- **Header:** `5A A5 02 76 [Byte 0] [Byte 1] [CS]`
+  *(Verified against Hiworld PA12.20 bench captures: `5A A5 02 76 50 85 4C` when ON, `5A A5 02 76 50 80 47` when Follow-Me-Home & DRL are OFF)*
+- **Byte 0:**
+  - `Bit 7` (`0x80`): Parking Radar Auto-Active (`1` = On)
+  - `Bit 6` (`0x40`): Parking Radar Enabled (`1` = On, mapped from `0x260` Byte 5 Bit 6 `0x40`)
+  - `Bit 5` (`0x20`): Welcome Light Status (`0` on standard 407)
+  - `Bit 4` (`0x10`): Automatic Headlights / Auto-Lighting Enabled (`1` = On, mapped from `0x260` Byte 2 Bit 4 `0x10`)
+  - `Bit 3` (`0x08`): Ambient Mood Light Enabled (`1` = On)
+  - `Bits 2..0` (`0x07`): Ambient Light Brightness scaled $0 \dots 7$
+- **Byte 1:**
+  - `Bit 7` (`0x80`): Auto Rear Wiper in Reverse (`1` = On, mapped from `0x260` Byte 5 Bit 4 `0x10`)
+  - `Bit 6` (`0x40`): Parking Assist Line Overlay (`0` = Default)
+  - `Bit 5` (`0x20`): Automatic Door Lock while Driving (`1` = On, mapped from `0x260` Byte 4 Bit 3 `0x08`)
+  - `Bit 4` (`0x10`): Deadlocking Safety Active (`0` = Default)
+  - `Bit 3` (`0x08`): Selective Door Unlocking (`1` = Driver Only, `0` = All Doors, mapped from `0x260` Byte 4 Bit 2 `0x04`)
+  - `Bit 2` (`0x04`): Daytime Running Lights (DRL) Enabled (`1` = On, mapped from `0x260` Byte 3 Bit 6 `0x40`)
+  - `Bits 1..0` (`0x03`): Follow-Me-Home Headlamp Delay:
+    - `00`b = 0s (Off)
+    - `01`b = 15s
+    - `10`b = 30s
+    - `11`b = 60s
+    *(Mapped from `0x260` Byte 2 Bits 1..0, or Bits 3..2 when EMF-C MDF encodes `0xB4`, qualified by Byte 2 Bit 5 `0x20`)*
+
+---
+
+### 4.2 Uplink Page 2 (`Cmd 0x79` - `CentralState2`, Length: 8 bytes)
+- **Header:** `5A A5 08 79 [B0] [B1] [B2] [B3] [B4] [B5] [B6] [B7] [CS]`
+  *(Verified against Hiworld PA12.20 bench capture: `5A A5 08 79 00 00 3C 10 00 00 00 00 CC`)*
+- **Byte 0:**
+  - `Bit 7` (`0x80`): Remote Trunk Only (`1` = Boot only, mapped from `0x260` Byte 5 Bit 7 `0x80`)
+  - `Bit 6` (`0x40`): Adaptive / Directional Headlamps (`1` = On, mapped from `0x260` Byte 2 Bit 7 `0x80`)
+  - `Bits 5..0`: Cornering (`b5`), Welcome (`b4`), LKA (`b3`), Fatigue (`b2`), Overspeed (`b1`), Theme (`b0`) $\implies$ `0`
+- **Byte 1:**
+  - `Bit 5` (`0x20`): Drive Mode Profile active (`0` = Profile 1 / Normal, `1` = Profile > 1)
+- **Byte 2:**
+  - `Bits 5..2` (`0x3C`): Cluster Dimmer Backlight level ($0 \dots 15 \ll 2$, mapped from `0x036` Byte 3 **Bits 3..0** `data[3] & 0x0F`; e.g., `0x0F << 2 = 0x3C`)
+  - `Bit 1`: Tailgate Motorized Status
+- **Byte 3:**
+  - `Bit 4` (`0x10`): Door / Window / ESP status bit on OEM PA12.20 (`0x10`)
+  - `Bit 2` (`0x04`): Traction Control / ESP Status (`1` = On)
+  - `Bit 1` (`0x02`): Power Mirror Auto-Fold (`1` = Enabled, mapped from BSI)
+- **Bytes 4..5:**
+  - Reserved / Modern ADAS fields (set to `0x00`)
+- **Byte 6:**
+  - `Bits 2..1`: Zone Temperature Mode:
+    - `0x00` = Dual Independent Zones
+    - `0x02` = Mono / Synchronized Passenger Zone
+    *(Mapped from `0x1E3` Byte 0 Bit 0: `dual_mode ? 0x00 : 0x02`)*
+- **Byte 7:**
+  - Reserved (`0x00`)
+
+---
+
+# 5. PSA CAN 2004 Frame Specifications
+
+### 5.1 BSI Personalization Menu Availability Mask (`0x361` — `MSG_BSI_INF_CFG_MENU_PERSO`)
+- **CAN ID:** `0x361` (Standard 11-bit)
+- **DLC:** `6` bytes
+- **Period:** 500 ms / 1000 ms (BSI cyclic broadcast)
+- **Direction:** BSI $\longrightarrow$ Displays / CAN Box
+- **Purpose:** Advertises physically telecoded menu availability (feature enables for `Cmd 0x71` & `Cmd 0x72`). Does NOT convey active user settings.
+
+#### Byte-by-Byte Layout (Bench Reference: `01 01 91 40 30 10`):
+
+```
+
+Byte 0: Profile ID (0x01 on standard bench)
+Byte 1: Reserved / status (0x01)
+Byte 2 (0x91):
+
+* Bit 7 (0x80): hinge_panel (Remote trunk / boot mode present)
+* Bit 4 (0x10): follow_me_home (Follow-Me-Home delay menu present)
+* Bit 0 (0x01): auto_lighting (Automatic / adaptive headlights present)
+Byte 3 (0x40):
+* Bit 6 (0x40): drl_present (Daytime Running Lights menu present)
+Byte 4 (0x30):
+* Bit 5 (0x20): aas_disable (Parking radar AAS toggle menu present)
+* Bit 4 (0x10): emf_present (EMF display present)
+Byte 5 (0x10):
+* Bits 6..4 (0x70): tpms_present (Tire pressure monitoring system present)
+
 ```
 
 ---
 
-### 5.2 Downlink Parser & Uplink Serializer (`hiworld_car_config.c`)
+### 5.2 Driver Profile Memory & Active Settings (`0x260` — `MSG_BSI_INF_PROFILS`)
+- **CAN ID:** `0x260`
+- **DLC:** `8` bytes
+- **Period:** 500 ms per slot (BSI cycles Profile 1, Profile 2, Profile 3 $\implies$ 1,500 ms full cycle)
+- **Direction:** BSI $\longrightarrow$ Displays / CAN Box
+- **Purpose:** Carries active driver personalization settings. Profile 1 (`data[0] == 0x01`) is decoded into `vehicle_config_t`.
+
+#### Byte-by-Byte Layout (Profile 1: `01 03 B1 40 00 D0 00 10` / `01 03 B4 40 00 D0 00 10`):
+
+```
+
+Byte 0: Profile ID (0x01 = Profile 1, 0x02 = Profile 2, 0x03 = Profile 3)
+Byte 1: Sub-status (0x03)
+Byte 2 (0xB1 / 0xB4 when ON; 0x91 / 0x94 when Follow-Me-Home OFF):
+
+* Bit 7 (0x80): Adaptive / Directional Headlights (1 = ON, 0 = OFF)
+* Bit 5 (0x20): Follow-Me-Home Headlamps Master Enable (1 = ON, 0 = OFF)
+* Bit 4 (0x10): Automatic Headlights / Auto-Lighting (1 = ON, 0 = OFF) -> Maps to Cmd 0x76 B0.4 (0x10)
+* Bits 3..2 (0x0C): Follow-Me-Home Duration Nibble High (used by EMF-C MDF, e.g., 0xB4 when ON / 0x94 when OFF)
+* Bits 1..0 (0x03): Follow-Me-Home Delay (00=0s, 01=15s, 10=30s, 11=60s)
+Byte 3 (0x40 when ON; 0x00 when OFF):
+* Bit 6 (0x40): Daytime Running Lights DRL (1 = ON, 0 = OFF)
+Byte 4 (0x00):
+* Bit 3 (0x08): Auto Door Lock while Driving (1 = ON)
+* Bit 2 (0x04): Selective Door Unlocking (1 = Driver Only)
+Byte 5 (0xD0):
+* Bit 7 (0x80): Remote Boot Mode / Hinge Panel (1 = Boot Only)
+* Bit 6 (0x40): Parking Radar AAS (1 = ON, 0 = Muted)
+* Bit 4 (0x10): Rear Wiper in Reverse Gear (1 = ON)
+Byte 6: Reserved (0x00)
+Byte 7: Profile options mask (0x10)
+
+```
+
+---
+
+### 5.3 Downlink Personalization Modification Request (`0x15B` — `MSG_BSI_PERSO_REQ`)
+- **CAN ID:** `0x15B`
+- **DLC:** `8` bytes
+- **Transmission Mode:** **Event-Driven One-Shot** (transmitted once upon user confirmation in MDF menu or Android Head Unit `Cmd 0x7B`/`0x7D` downlink)
+- **Direction:** Displays (EMF-C / RT4) or CAN Box $\longrightarrow$ BSI
+- **Byte 0:** `0x01` (Profile 1 with Bit 2 = 0 cleared, requesting BSI to commit the pending profile settings to NVRAM/EEPROM)
+- **Bytes 1..7:** Mirrors `0x260` layout with modified setting bits injected into the active profile.
+
+---
+
+### 5.4 Power Management & Backlight Dimmer (`0x036` — `MSG_COMMANDES_BSI`)
+- **CAN ID:** `0x036`
+- **DLC:** `8` bytes
+- **Period:** 50 ms / 100 ms
+- **Bench Reference Frame:** `0E 00 00 0F 01 00 00 A0`
+- **Byte 1 Bit 7 (`0x80`):** Reverse gear status flag
+- **Byte 1 Bit 0 (`0x01`):** Handbrake engaged flag
+- **Byte 2 Bit 7 (`0x80`):** `ECONOMY_MODE` (`1` = Active, `0` = Normal)
+- **Byte 3 Bit 5 (`0x20`):** `ILLUMINATION_NIGHT` (`1` = Night illumination active)
+- **Byte 3 Bits 3..0 (`0x0F`):** `RHEOSTAT_LEVEL` (`0..15` instrument cluster dimmer brightness level; e.g., `0x0F` = 15 $\implies$ `0x0F << 2 = 0x3C` in `Cmd 0x79` Byte 2)
+- **Byte 4 Bits 2..0 (`0x07`):** `PHASE_VIE` (`0x00` = Sleep, `0x01` = Normal/+APC, `0x02` = Shutdown)
+
+---
+
+### 5.5 Climate Dual/Mono Regulation (`0x1E3` Status & `0x1D0` Command)
+- **`0x1E3` (`MSG_ETAT_CLIMAV_EMF`, 100 ms, DLC 7):**
+  - `Byte 0 Bit 0`: `DUAL_ACTIVE` (`1` = Dual independent zones, `0` = Mono / SYNC mode).
+  - `Byte 2`: Driver setpoint ($14.0 + \text{raw} \times 0.5\ ^\circ\text{C}$).
+  - `Byte 3`: Passenger setpoint (in Mono mode, mirrors Driver setpoint).
+- **`0x1D0` (`MSG_CDE_CLIMAV`, Event, DLC 7):**
+  - `Byte 0 Bit 0`: `DUAL_REQ` (`0x01` = Toggle Dual/Mono mode).
+  - `Byte 5`: Driver setpoint.
+  - `Byte 6`: Passenger setpoint (must equal Byte 5 when commanding Mono mode).
+
+---
+
+# 6. Pure C99 Implementation Architecture for `canbox-core`
+
+To maintain strict modularity, deterministic execution, and zero heap allocations, the configuration filter is structured across layers:
+
+### 6.1 Data Structures (`peugeot_407.h` & `can_router.h`)
+
+In `include/profiles/peugeot_407.h`:
+```c
+typedef struct {
+    bool    follow_me_home;         /* 0x260 B2.5 (0x20) */
+    uint8_t follow_me_home_sec;     /* 0, 15, 30, 60 (from 0x260 B2[1:0] or B2[3:2]) */
+    bool    auto_lighting_enabled;  /* 0x260 B2.4 (0x10) -> Cmd 0x76 B0.4 (0x10) */
+    bool    drl_enabled;            /* 0x260 B3.6 (0x40) */
+    bool    rear_wiper_reverse;     /* 0x260 B5.4 (0x10) */
+    bool    auto_door_lock;         /* 0x260 B4.3 (0x08) */
+    bool    selective_boot_unlock;  /* 0x260 B4.2 (0x04) */
+    bool    directional_headlights; /* 0x260 B2.7 (0x80) */
+    bool    motorized_tailgate;     /* 0x260 B5.7 (0x80) */
+    uint8_t ambient_lighting_level; /* Ambient lighting level 0..15 */
+    bool    parking_radar_enabled;  /* 0x260 B5.6 (0x40) */
+    uint8_t active_profile_id;      /* 0x260 B0: 1..3 */
+    uint8_t cluster_dimmer;         /* 0x036 B3[3:0]: 0..15 */
+} psa_car_config_t;
+
+typedef psa_car_config_t vehicle_config_t;
+
+```
+
+In `include/core/can_router.h`:
 
 ```c
-#include "hiworld_car_config.h"
+/* Added to vehicle_dirty_flags_t: */
+typedef struct {
+    /* ... existing flags ... */
+    bool config;
+} vehicle_dirty_flags_t;
+
+/* Added to vehicle_state_t: */
+typedef struct {
+    /* ... existing subsystems ... */
+    vehicle_config_t config;
+    vehicle_dirty_flags_t dirty;
+} vehicle_state_t;
+
+/* Public Router API for Downlink injection: */
+bool can_router_set_car_config(uint8_t cmd_id, uint8_t setting_id, uint8_t value);
+
+```
+
+---
+
+### 6.2 BSI Frame Decoder & Encoder (`src/profiles/psa_407_car_config.c`)
+
+```c
+#include "profiles/peugeot_407.h"
+#include "hal/hal_can.h"
 #include <string.h>
 
-static uint8_t calc_cs(const uint8_t *frame) {
-    uint8_t len = frame[2];
-    uint8_t sum = 0;
-    for (size_t i = 2; i < (size_t)(len + 4); i++) {
-        sum += frame[i];
+static uint8_t s_cached_0x361_raw[6] = { 0x01, 0x01, 0x91, 0x40, 0x30, 0x10 };
+static bool    s_cached_0x361_valid  = false;
+
+/* Live cache of active Profile 1 status frame (0x260 / 0x15B) */
+static uint8_t s_cached_profile1_raw[8] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+static bool    s_cached_profile1_valid  = false;
+
+/* Feature enables (Cmd 0x71 and Cmd 0x72) telecoded in BSI */
+static uint8_t s_feature_enable_1[2] = { 0x60, 0x12 };
+static uint8_t s_feature_enable_2[8] = { 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+/* Convert Byte 2 delay code to seconds:
+ * Bit 2 (0x04) = 60s
+ * Bit 1 (0x02) = 30s
+ * Bit 0 (0x01) = 15s
+ * Also supports sequential 0x03 = 60s. Default minimum is 15s. */
+static inline uint8_t delay_code_to_sec(uint8_t byte2) {
+    if (byte2 & 0x04) return 60;
+    if ((byte2 & 0x03) == 3) return 60;
+    if (byte2 & 0x02) return 30;
+    if (byte2 & 0x01) return 15;
+    return 15;
+}
+
+void psa_decode_config_0x361(const uint8_t *data, uint8_t dlc) {
+    if (!data || dlc < 6) return;
+    memcpy(s_cached_0x361_raw, data, 6);
+    s_cached_0x361_valid = true;
+
+    /* Populate feature enables (Cmd 0x71 & 0x72) from equipment mask */
+    /* ... */
+}
+
+void psa_decode_config_0x260(vehicle_config_t *cfg, const uint8_t *data, uint8_t dlc) {
+    if (!cfg || !data || dlc < 8) return;
+    if (data[0] != 0x01) return; /* Profile 1 is the active user settings frame */
+
+    memcpy(s_cached_profile1_raw, data, 8);
+    s_cached_profile1_valid = true;
+
+    cfg->active_profile_id      = 1;
+    cfg->directional_headlights = (data[2] & 0x80) != 0;
+    cfg->follow_me_home         = (data[2] & 0x20) != 0;
+    cfg->follow_me_home_sec     = cfg->follow_me_home ? delay_code_to_sec(data[2]) : 0;
+    cfg->auto_lighting_enabled  = (data[2] & 0x10) != 0;
+    cfg->drl_enabled            = (data[3] & 0x40) != 0;
+    cfg->auto_door_lock         = (data[4] & 0x08) != 0;
+    cfg->selective_boot_unlock  = (data[4] & 0x04) != 0;
+    cfg->motorized_tailgate     = (data[5] & 0x80) != 0;
+    cfg->parking_radar_enabled  = (data[5] & 0x40) != 0;
+    cfg->rear_wiper_reverse     = (data[5] & 0x10) != 0;
+}
+
+hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, uint8_t val) {
+    can_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+
+    if (cmd_id == 0x7B) {
+        frame.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B; /* 0x15B */
+        frame.dlc = 8;
+        memcpy(frame.data, s_cached_profile1_raw, 8);
+        frame.data[0] = 0x01; /* Profile 1 with Bit 2 = 0 cleared */
+
+        /* Mutate target bits in frame.data ... */
+        memcpy(s_cached_profile1_raw, frame.data, 8);
+        s_cached_profile1_valid = true;
+        return hal_can_send(&frame);
     }
-    return (uint8_t)((sum - 1) & 0xFF);
+    /* ... */
+    return HAL_STATUS_ERROR;
 }
 
-void hiworld_config_init(hiworld_config_ctx_t *ctx, hiworld_uart_tx_fn uart_tx, hiworld_can_tx_fn can_tx) {
-    memset(ctx, 0, sizeof(hiworld_config_ctx_t));
-    ctx->uart_tx = uart_tx;
-    ctx->can_tx  = can_tx;
+```
 
-    /* Defaults: Follow-Me-Home 30s, DRL ON, Auto-Lock ON, Mirror Fold ON */
-    ctx->state.follow_me_home_sec    = 30;
-    ctx->state.welcome_light_sec     = 30;
-    ctx->state.welcome_lights_switch = true;
-    ctx->state.drl_enabled           = true;
-    ctx->state.auto_lock_driving     = true;
-    ctx->state.auto_mirror_fold      = true;
-    ctx->state.rear_wiper_reverse    = true;
-    ctx->state.radar_system_enabled  = true;
-    ctx->state.radar_auto_active     = true;
-    ctx->state.esp_traction_control  = true;
-    ctx->state.unit_temp             = 0; /* Celsius */
-    ctx->state.unit_fuel             = 0; /* L/100km */
-    ctx->state.language_id           = 0; /* English */
+---
+
+### 6.3 Routing Table Integration (`profile_psa.c`)
+
+In `src/profiles/profile_psa.c`:
+
+* Extract the lower nibble (`frame->data[3] & 0x0F`) in `psa_decode_ignition_reverse_0x036` for `cluster_dimmer`.
+* Route `0x361` to update feature enable masks (`Cmd 0x71` & `Cmd 0x72`).
+* Route `0x260` to decode Profile 1 active configuration into `vehicle_config_t`.
+
+```c
+/* Inside psa_decode_ignition_reverse_0x036: */
+    if (frame->dlc >= 4) {
+        state->lights.illumination = (frame->data[3] & 0x20) != 0;
+        state->lights.brightness   = (frame->data[3] & 0x0F);
+        uint8_t dimmer = (frame->data[3] & 0x0F); /* Lower nibble of 0x036 Byte 3 (e.g. 0x0F -> 0x3C in 0x79) */
+        if (state->config.cluster_dimmer != dimmer) {
+            state->config.cluster_dimmer = dimmer;
+            state->dirty.config = true;
+        }
+    }
+
+static void psa_decode_config_0x361_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    (void)state;
+    if (!frame || frame->dlc < 6) return;
+
+    uint8_t old_feat1[2], old_feat2[8];
+    psa_car_config_get_feature_enables(old_feat1, old_feat2);
+
+    psa_decode_config_0x361(frame->data, frame->dlc);
+
+    uint8_t new_feat1[2], new_feat2[8];
+    psa_car_config_get_feature_enables(new_feat1, new_feat2);
+
+    if (memcmp(old_feat1, new_feat1, 2) != 0 || memcmp(old_feat2, new_feat2, 8) != 0) {
+        hu_protocol_send_feature_enables(new_feat1, new_feat2);
+    }
 }
 
-/* Transmit Uplink Telemetry Page 1 (Cmd 0x76) */
-void hiworld_config_send_telemetry_page1(hiworld_config_ctx_t *ctx) {
-    if (!ctx->uart_tx) return;
+static void psa_decode_bsi_profiles_0x260_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state || frame->dlc < 8) return;
 
-    uint8_t p[7];
-    p[0] = 0x5A;
-    p[1] = 0xA5;
-    p[2] = 0x02; /* Length: 2 bytes */
-    p[3] = 0x76; /* Cmd ID */
+    psa_decode_config_0x260(&state->config, frame->data, frame->dlc);
+    state->dirty.config = true;
+}
+
+```
+
+Add `{ PSA_CAN_ID_BSI_PERSO_361, psa_decode_config_0x361_profile }` and `{ PSA_CAN_ID_BSI_PROFILES_260, psa_decode_bsi_profiles_0x260_profile }` to `s_psa_rules[]`.
+
+---
+
+### 6.4 Hiworld Telemetry Serializers (`hiworld_psa_builders.c`)
+
+In `src/protocols/hiworld_psa_builders.c`:
+
+```c
+size_t build_hiworld_central_state1(const vehicle_config_t *cfg, uint8_t *out, size_t max_len) {
+    if (!cfg || !out || max_len < 7) return 0;
+
+    out[0] = 0x5A;
+    out[1] = 0xA5;
+    out[2] = 0x02; /* Length: 2 payload bytes */
+    out[3] = 0x76; /* Cmd ID: CentralState1 */
 
     /* Byte 0 */
     uint8_t b0 = 0;
-    if (ctx->state.radar_auto_active)    b0 |= 0x80;
-    if (ctx->state.radar_system_enabled) b0 |= 0x40;
-    if (ctx->state.welcome_light_sec == 60) b0 |= 0x30;
-    else if (ctx->state.welcome_light_sec == 30) b0 |= 0x20;
-    else if (ctx->state.welcome_light_sec == 15) b0 |= 0x10;
-    if (ctx->state.ambient_light_switch) b0 |= 0x08;
-    b0 |= (ctx->state.ambient_brightness & 0x07);
-    p[4] = b0;
+    if (cfg->parking_radar_enabled) b0 |= 0x40;
+    if (cfg->auto_lighting_enabled) b0 |= 0x10; /* Automatic headlights (0x260 B2.4) -> 0x50 with radar */
+    if (cfg->ambient_lighting_level > 0) {
+        b0 |= 0x08; /* Ambient light active */
+        b0 |= ((cfg->ambient_lighting_level >> 1) & 0x07);
+    }
+    out[4] = b0;
 
     /* Byte 1 */
     uint8_t b1 = 0;
-    if (ctx->state.rear_wiper_reverse)   b1 |= 0x80;
-    if (ctx->state.auto_lock_driving)    b1 |= 0x20;
-    if (ctx->state.selective_unlocking)  b1 |= 0x08;
-    if (ctx->state.drl_enabled)          b1 |= 0x04;
-    if (ctx->state.follow_me_home_sec == 60) b1 |= 0x03;
-    else if (ctx->state.follow_me_home_sec == 30) b1 |= 0x02;
-    else if (ctx->state.follow_me_home_sec == 15) b1 |= 0x01;
-    p[5] = b1;
+    if (cfg->rear_wiper_reverse)    b1 |= 0x80;
+    if (cfg->auto_door_lock)        b1 |= 0x20;
+    if (cfg->selective_boot_unlock) b1 |= 0x08;
+    if (cfg->drl_enabled)           b1 |= 0x04;
+    if (cfg->follow_me_home) {
+        if (cfg->follow_me_home_sec >= 60)      b1 |= 0x03;
+        else if (cfg->follow_me_home_sec >= 30) b1 |= 0x02;
+        else                                    b1 |= 0x01;
+    }
+    out[5] = b1;
 
-    p[6] = calc_cs(p);
-    ctx->uart_tx(p, 7);
+    /* Checksum */
+    uint8_t sum = (uint8_t)(out[2] + out[3] + out[4] + out[5]);
+    out[6] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 7;
 }
 
-/* Transmit Uplink Telemetry Page 2 (Cmd 0x79) */
-void hiworld_config_send_telemetry_page2(hiworld_config_ctx_t *ctx) {
-    if (!ctx->uart_tx) return;
+size_t build_hiworld_central_state2(const vehicle_config_t *cfg, const vehicle_state_t *st, uint8_t *out, size_t max_len) {
+    if (!cfg || !out || max_len < 13) return 0;
 
-    uint8_t p[12];
-    p[0] = 0x5A;
-    p[1] = 0xA5;
-    p[2] = 0x07; /* Length: 7 bytes */
-    p[3] = 0x79; /* Cmd ID */
+    out[0] = 0x5A;
+    out[1] = 0xA5;
+    out[2] = 0x08; /* Length: 8 payload bytes (matches OEM PA12.20) */
+    out[3] = 0x79; /* Cmd ID: CentralState2 */
 
     /* Byte 0 */
     uint8_t b0 = 0;
-    if (ctx->state.remote_trunk_only)     b0 |= 0x80;
-    if (ctx->state.adaptive_headlights)   b0 |= 0x40;
-    if (ctx->state.cornering_lights)      b0 |= 0x20;
-    if (ctx->state.welcome_lights_switch) b0 |= 0x10;
-    if (ctx->state.driver_fatigue_alert)  b0 |= 0x04;
-    b0 |= (ctx->state.theme_color & 0x01);
-    p[4] = b0;
+    if (cfg->motorized_tailgate)     b0 |= 0x80;
+    if (cfg->directional_headlights) b0 |= 0x40;
+    out[4] = b0;
 
-    /* Byte 1 */
-    uint8_t b1 = (ctx->state.ambient_mode & 0x03) << 6;
-    if (ctx->state.drive_mode > 0) b1 |= 0x20;
-    b1 |= (ctx->state.anion_purifier & 0x03) << 3;
-    b1 |= (ctx->state.fragrance_scent & 0x03) << 1;
-    p[5] = b1;
+    /* Byte 1: Drive profile */
+    out[5] = (cfg->active_profile_id > 1) ? 0x20 : 0x00;
 
-    /* Byte 2 */
-    uint8_t b2 = (ctx->state.fragrance_intensity & 0x03) << 6;
-    b2 |= (ctx->state.cluster_backlight & 0x0F) << 2;
-    p[6] = b2;
+    /* Byte 2: Cluster dimmer (0x036 B3[3:0] << 2, e.g. 0x0F << 2 = 0x3C) */
+    out[6] = (uint8_t)((cfg->cluster_dimmer & 0x0F) << 2);
 
-    /* Byte 3 */
-    uint8_t b3 = 0;
-    if (ctx->state.handsfree_tailgate)    b3 |= 0x20;
-    if (ctx->state.auto_high_beam)        b3 |= 0x10;
-    if (ctx->state.esp_traction_control)  b3 |= 0x04;
-    if (ctx->state.auto_mirror_fold)      b3 |= 0x02;
-    p[7] = b3;
+    /* Byte 3: ESP Traction */
+    out[7] = 0x04; /* ESP active by default */
 
-    /* Byte 4 */
-    p[8] = ((ctx->state.seat_massage_mode & 0x07) << 3);
+    /* Bytes 4 & 5: Unused ADAS */
+    out[8] = 0x00;
+    out[9] = 0x00;
 
-    /* Byte 5 */
-    uint8_t b5 = (ctx->state.seat_massage_speed & 0x03) << 6;
-    b5 |= (ctx->state.aeb_sensitivity & 0x03) << 2;
-    if (ctx->state.traffic_sign_tsr)  b5 |= 0x02;
-    if (ctx->state.auto_mirror_fold)  b5 |= 0x01;
-    p[9] = b5;
+    /* Byte 6: Climate Dual/Mono Sync (0x02=Mono, 0x00=Dual) */
+    out[10] = (st && !st->climate.dual_mode) ? 0x02 : 0x00;
 
-    /* Byte 6 */
-    p[10] = (ctx->state.zone_temp_mono_sync ? 0x02 : 0x00);
+    /* Byte 7: Reserved */
+    out[11] = 0x00;
 
-    p[11] = calc_cs(p);
-    ctx->uart_tx(p, 12);
+    /* Checksum */
+    uint8_t sum = 0;
+    for (size_t i = 2; i < 12; i++) sum = (uint8_t)(sum + out[i]);
+    out[12] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 13;
 }
 
-/* Synchronize Configuration State to Vehicle PSA BSI Frame (CAN ID 0x221) */
-void hiworld_config_sync_to_psa_can(hiworld_config_ctx_t *ctx) {
-    if (!ctx->can_tx) return;
-
-    uint8_t can_data[8] = {0};
-
-    /* Byte 1: Rear Wiper & Auto Lock */
-    if (ctx->state.rear_wiper_reverse)   can_data[1] |= 0x80;
-    if (ctx->state.auto_lock_driving)    can_data[1] |= 0x10;
-    if (ctx->state.radar_system_enabled) can_data[1] |= 0x08;
-
-    /* Byte 2: DRL & Directional Lighting */
-    if (ctx->state.drl_enabled)          can_data[2] |= 0x80;
-    if (ctx->state.cornering_lights || ctx->state.adaptive_headlights) can_data[2] |= 0x01;
-
-    /* Byte 3: Ambient Lighting & TPMS Reset */
-    can_data[3] = (ctx->state.ambient_brightness & 0x0F);
-
-    /* Byte 4: Follow-Me-Home & Mirror Fold */
-    if (ctx->state.follow_me_home_sec == 60) can_data[4] |= 0xC0;
-    else if (ctx->state.follow_me_home_sec == 30) can_data[4] |= 0x80;
-    else if (ctx->state.follow_me_home_sec == 15) can_data[4] |= 0x40;
-    if (ctx->state.auto_mirror_fold) can_data[4] |= 0x08;
-
-    /* Byte 7: Selective Unlocking */
-    if (ctx->state.selective_unlocking) can_data[7] |= 0x80;
-
-    ctx->can_tx(0x221, can_data, 8);
-}
-
-/* Parse Downlink Touchscreen Settings from Android */
-void hiworld_config_process_downlink(hiworld_config_ctx_t *ctx, uint8_t cmd_id, const uint8_t *payload, uint8_t len) {
-    if (len < 2) return;
-
-    uint8_t setting_id = payload[0];
-    uint8_t val        = payload[1];
-
-    if (cmd_id == 0x7B) {
-        /* Primary Settings (Cmd 0x7B / 123 dec) */
-        switch (setting_id) {
-            case 0x01: /* Auto Rear Wiper in Reverse */
-                ctx->state.rear_wiper_reverse = (val != 0);
-                break;
-            case 0x04: /* Selective Door Unlocking */
-                ctx->state.selective_unlocking = (val != 0);
-                break;
-            case 0x05: /* Daytime Running Lights (DRL) */
-                ctx->state.drl_enabled = (val != 0);
-                break;
-            case 0x06: /* Follow-Me-Home Headlamp Delay */
-                ctx->state.follow_me_home_sec = (val == 3) ? 60 : (val == 2) ? 30 : (val == 1) ? 15 : 0;
-                break;
-            case 0x09: /* Welcome Light Duration */
-                ctx->state.welcome_light_sec = (val == 3) ? 60 : (val == 2) ? 30 : (val == 1) ? 15 : 0;
-                break;
-            case 0x0A: /* Ambient Light Switch & Brightness */
-                ctx->state.ambient_light_switch = ((val & 0x80) != 0);
-                ctx->state.ambient_brightness   = (val & 0x0F);
-                break;
-            case 0x0B: /* Parking Radar Master Switch */
-                ctx->state.radar_system_enabled = (val != 0);
-                break;
-            case 0x0C: /* Auto Lock when Driving */
-                ctx->state.auto_lock_driving = (val != 0);
-                break;
-            default:
-                break;
-        }
-    } 
-    else if (cmd_id == 0x7D) {
-        /* Extended Settings (Cmd 0x7D / 125 dec) */
-        switch (setting_id) {
-            case 0x01: /* Remote Trunk Only */
-                ctx->state.remote_trunk_only = (val != 0);
-                break;
-            case 0x02: /* Directional Headlamps */
-                ctx->state.adaptive_headlights = (val != 0);
-                break;
-            case 0x03: /* TPMS Calibration Pulse */
-                if (ctx->can_tx) {
-                    uint8_t tpms_pulse[8] = { 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00 };
-                    ctx->can_tx(0x221, tpms_pulse, 8);
-                }
-                break;
-            case 0x04: /* Cornering Light Assistance */
-                ctx->state.cornering_lights = (val != 0);
-                break;
-            case 0x05: /* Welcome Lights Switch */
-                ctx->state.welcome_lights_switch = (val != 0);
-                break;
-            case 0x06: /* Lane Keep Assist */
-                ctx->state.lane_keep_assist = val;
-                break;
-            case 0x07: /* Driver Fatigue Warning */
-                ctx->state.driver_fatigue_alert = (val != 0);
-                break;
-            case 0x08: /* Parking Radar Auto Active */
-                ctx->state.radar_auto_active = (val != 0);
-                break;
-            case 0x09: /* Atmosphere Mode */
-                ctx->state.ambient_mode = val;
-                break;
-            case 0x0B: /* Drive Mode */
-                ctx->state.drive_mode = val;
-                break;
-            case 0x0C: /* Anion Air Purifier */
-                ctx->state.anion_purifier = val;
-                break;
-            case 0x0D: /* Fragrance Scent Select */
-                ctx->state.fragrance_scent = val;
-                break;
-            case 0x0E: /* Fragrance Intensity */
-                ctx->state.fragrance_intensity = val;
-                break;
-            case 0x17: /* Auto High Beam */
-                ctx->state.auto_high_beam = (val != 0);
-                break;
-            case 0x19: /* Traction Control ESP */
-                ctx->state.esp_traction_control = (val != 0);
-                break;
-            case 0x1D: /* Seat Massage Mode */
-                ctx->state.seat_massage_mode = val;
-                break;
-            case 0x1F: /* Seat Massage Speed */
-                ctx->state.seat_massage_speed = val;
-                break;
-            case 0x21: /* AEB Collision Sensitivity */
-                ctx->state.aeb_sensitivity = val;
-                break;
-            case 0x22: /* Traffic Sign Recognition TSR */
-                ctx->state.traffic_sign_tsr = (val != 0);
-                break;
-            case 0x23: /* Auto Mirror Fold on Remote Lock */
-                ctx->state.auto_mirror_fold = (val != 0);
-                break;
-            case 0x24: /* Zone Temperature Sync */
-                ctx->state.zone_temp_mono_sync = (val != 0);
-                break;
-            default:
-                break;
-        }
-    }
-    else if (cmd_id == 0xCA) {
-        /* Regional Units (Cmd 0xCA / 204 dec) */
-        if (setting_id == 0x03) {
-            ctx->state.unit_temp = (val == 2) ? 1 : 0; /* 1=C, 2=F */
-        } else if (setting_id == 0x05) {
-            ctx->state.unit_fuel = (val >= 1) ? (val - 1) : 0; /* 1=L/100, 2=km/L, 3=MPG */
-        }
-    }
-    else if (cmd_id == 0x9A) {
-        /* Language Selection (Cmd 0x9A / 154 dec) */
-        if (setting_id == 0x01) {
-            ctx->state.language_id = val;
-        }
-    }
-
-    /* Synchronize updated state to BSI CAN and acknowledge to Android UI */
-    hiworld_config_sync_to_psa_can(ctx);
-    hiworld_config_send_telemetry_page1(ctx);
-    hiworld_config_send_telemetry_page2(ctx);
-}
 ```
 
 ---
 
-# 6. Desktop Test Harness & Verification Vectors
+### 6.5 Downlink Dispatcher (`proto_hiworld_adapter.c`)
 
-### Vector 1: Headunit Configures Follow-Me-Home Headlights to 30 Seconds
-- **Downlink Serial Received (Host $\to$ CAN Box):**
-  ```
-  Hex Trace: 5A A5 02 7B 06 02 84
-  ```
-  - Preamble: `5A A5`
-  - Length: `0x02`
-  - Command: `0x7B` (`Command.ForwardCentralState1`)
-  - Payload: Setting ID = `0x06` (`WithMeGoHomeTime`), Value = `0x02` (30s)
-  - Checksum: `(0x02 + 0x7B + 0x06 + 0x02 - 1) & 0xFF = 0x84`
-- **Expected PSA BSI CAN Frame Injected:**
-  - `ID 0x221#0000000080000000` (`Byte 4: 0x80` = 30s)
+In `src/protocols/proto_hiworld_adapter.c`, handle `0x7B`, `0x7D`, and `0x3B` in `on_hiworld_packet_received`:
+
+```c
+if (packet->cmd == HIWORLD_CMD_CENTRAL_SETTING1 || /* 0x7B */
+    packet->cmd == HIWORLD_CMD_CENTRAL_SETTING2 || /* 0x7D */
+    packet->cmd == HIWORLD_CMD_AC_SETTING_SET)     /* 0x3B */
+{
+    if (packet->payload_len >= 2) {
+        uint8_t setting_id = packet->payload[0];
+        uint8_t val        = packet->payload[1];
+        can_router_set_car_config(packet->cmd, setting_id, val);
+    }
+}
+
+```
+
+---
+
+# 7. Desktop Test Harness & Verification Vectors
+
+The following automated test vectors verify end-to-end translation between Hiworld downlink serial packets and PSA CAN 2004 frames in `test/test_protocol_parser/`:
+
+### Vector 1: Headunit Configures Follow-Me-Home Headlamps to 30 Seconds
+
+* **Downlink Serial Received (Host $\to$ CAN Box):**
+```
+Hex Trace: 5A A5 02 7B 06 02 84
+
+```
+
+
+* Length: `0x02`, Cmd: `0x7B`, Setting ID: `0x06` (`FollowMeHome`), Value: `0x02` (30s)
+* Checksum: `(0x02 + 0x7B + 0x06 + 0x02 - 1) & 0xFF = 0x84`
+
+
+* **Expected PSA BSI CAN Frame Injected:**
+* `ID: 0x15B, DLC: 8`
+* `Payload: 01 03 [B2] 40 00 D0 00 10` (`Byte 0: 0x01` Profile 1 with write req, `Byte 2: 0x20 | 0x02` = 30s)
+
+
+
+---
 
 ### Vector 2: Headunit Enables Daytime Running Lights (DRL = ON)
-- **Downlink Serial Received:**
-  ```
-  Hex Trace: 5A A5 02 7B 05 01 82
-  ```
-  - Command: `0x7B`, Setting ID = `0x05` (`DayRunCarLight`), Value = `0x01` (ON)
-  - Checksum: `(0x02 + 0x7B + 0x05 + 0x01 - 1) & 0xFF = 0x82`
-- **Expected PSA BSI CAN Frame Injected:**
-  - `ID 0x221#0000800000000000` (`Byte 2: 0x80` = DRL ON)
 
-### Vector 3: Headunit Enables Auto Mirror Fold on Lock
-- **Downlink Serial Received:**
-  ```
-  Hex Trace: 5A A5 02 7D 23 01 A2
-  ```
-  - Command: `0x7D` (`Command.ForwardCentralState2`), Setting ID = `0x23` (`RearMirrorAutoFolder`), Value = `0x01` (ON)
-  - Checksum: `(0x02 + 0x7D + 0x23 + 0x01 - 1) & 0xFF = 0xA2`
-- **Expected PSA BSI CAN Frame Injected:**
-  - `ID 0x221#0000000008000000` (`Byte 4: 0x08` = Mirror Fold Enabled)
+* **Downlink Serial Received:**
+```
+Hex Trace: 5A A5 02 7B 05 01 82
 
-### Vector 4: Headunit Triggers TPMS Calibration Reset
-- **Downlink Serial Received:**
-  ```
-  Hex Trace: 5A A5 02 7D 03 01 82
-  ```
-  - Command: `0x7D`, Setting ID = `0x03` (`Tire_PressureCalibration`), Value = `0x01`
-  - Checksum: `(0x02 + 0x7D + 0x03 + 0x01 - 1) & 0xFF = 0x82`
-- **Expected PSA BSI CAN Frame Injected:**
-  - `ID 0x221#0000001000000000` (`Byte 3: 0x10` = Calibration Pulse)
+```
+
+
+* Cmd: `0x7B`, Setting ID: `0x05` (`DRL`), Value: `0x01` (ON)
+* Checksum: `(0x02 + 0x7B + 0x05 + 0x01 - 1) & 0xFF = 0x82`
+
+
+* **Expected PSA BSI CAN Frame Injected:**
+* `ID: 0x15B, DLC: 8`
+* `Payload: 01 03 B1 40 00 D0 00 10` (`Byte 0: 0x01`, `Byte 3: 0x40` = DRL ON)
+
+
+
+---
+
+### Vector 3: Headunit Enables Rear Wiper in Reverse Gear
+
+* **Downlink Serial Received:**
+```
+Hex Trace: 5A A5 02 7B 01 01 7E
+
+```
+
+
+* Cmd: `0x7B`, Setting ID: `0x01`, Value: `0x01` (ON)
+* Checksum: `(0x02 + 0x7B + 0x01 + 0x01 - 1) & 0xFF = 0x7E`
+
+
+* **Expected PSA BSI CAN Frame Injected:**
+* `ID: 0x15B, DLC: 8`
+* `Payload: 01 03 B1 40 00 D0 00 10` (`Byte 0: 0x01`, `Byte 5: bit 4 (0x10)` = Rear Wiper ON)
+
+
+
+---
+
+### Vector 4: BSI Broadcasts Configuration State $\to$ CAN Box Uplinks Telemetry
+
+* **CAN Frame Received from BSI (`0x260` Active Settings):**
+* **State A (Guide-Me-Home & DRL ON):** `ID: 0x260, DLC: 8, Data: 01 03 B1 40 00 D0 00 10` (or `01 03 B4 40 00 D0 00 10` from EMF-C MDF)
+* **State B (Guide-Me-Home & DRL OFF):** `ID: 0x260, DLC: 8, Data: 01 03 91 00 00 D0 00 10` (or `01 03 94 00 00 D0 00 10` from EMF-C MDF)
+* **Decoded State (State A):**
+* Adaptive Lighting: `Active` (`0x80` in B2)
+* Follow-Me-Home: `Active (15s)` (`0x20` in B2, `0x01` in B2[1:0] or `0x04` in B2[3:2])
+* Automatic Headlights: `Active` (`0x10` in B2)
+* DRL: `Active` (`0x40` in B3)
+* Parking Radar AAS: `Active` (`0x40` in B5)
+* Rear Wiper in Reverse: `Active` (`0x10` in B5)
+
+
+
+
+* **Expected Uplink Serial Transmitted (`Cmd 0x76` — matches PA12.20 `ORIG_CANBOX`):**
+* **State A (ON):** `5A A5 02 76 50 85 4C`
+* `Byte 0: 0x50` (`0x40` Radar Active | `0x10` Auto Headlights Active)
+* `Byte 1: 0x85` (`0x80` Rear Wiper | `0x04` DRL | `0x01` Follow-Me-Home 15s)
+* Checksum: `(0x02 + 0x76 + 0x50 + 0x85 - 1) & 0xFF = 0x4C`
+
+
+* **State B (OFF):** `5A A5 02 76 50 80 47`
+* `Byte 0: 0x50` (`0x40` Radar Active | `0x10` Auto Headlights Active)
+* `Byte 1: 0x80` (`0x80` Rear Wiper | DRL OFF | Follow-Me-Home OFF)
+* Checksum: `(0x02 + 0x76 + 0x50 + 0x80 - 1) & 0xFF = 0x47`
+
+
+
+
+* **CAN Frame Received from BSI (`0x361` Menu Availability Mask):**
+* `ID: 0x361, DLC: 6, Data: 01 01 91 40 30 10`
+* **Feature Enables Computed:**
+* Static Init (PA12.20 Baseline): `Cmd 0x71 = 60 12`, `Cmd 0x72 = 00 01 80 00 00 00 00 00`
+* Dynamic `0x361` Expansion: `Cmd 0x71 = A7 A8`, `Cmd 0x72 = C3 04 00 00 00 02 00 00`
 

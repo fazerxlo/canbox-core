@@ -40,6 +40,8 @@ HIWORLD_CMD_NAMES = {
     0x33: "REAR_RADAR",
     0x41: "PARKING_RADAR",
     0x42: "ALERTS_WARNINGS",
+    0x56: "RD4_AUDIO_DSP",
+    0x66: "TPMS_NUMERIC",
     0x71: "FEATURE_CONFIG_1",
     0x72: "FEATURE_CONFIG_2",
     0x76: "PANEL_KEYS",
@@ -47,12 +49,14 @@ HIWORLD_CMD_NAMES = {
     0x81: "AUDIO_AMP_1",
     0x82: "AUDIO_AMP_2",
     0x83: "AUDIO_AMP_3",
-    0x85: "AUDIO_INFO",
+    0x84: "RD4_RADIO_STATE",
+    0x85: "RD4_PRESET_LIST",
+    0x86: "RD4_RADIO_TEXT",
     0x93: "PARKING_SYSTEM",
     0x94: "ALARM_STATUS",
     0x95: "MAINTENANCE_INFO",
     0x96: "CAR_SETTINGS_1",
-    0x97: "CAR_SETTINGS_2",
+    0x97: "RD4_MEDIA_CD",
     0xC1: "LANGUAGE_CONFIG",
     0xF0: "VERSION_REPORT",
     0xFF: "HEARTBEAT"
@@ -794,8 +798,8 @@ def main():
     parser.add_argument(
         "--preset",
         dest="preset",
-        choices=["radar", "hvac", "doors", "swc", "trip", "tpms", "alerts", "bsi_config"],
-        help="Quick PSA 407 preset for CAN IDs and serial prefixes (radar, hvac, doors, swc, trip, tpms, alerts, bsi_config)"
+        choices=["radar", "hvac", "doors", "swc", "trip", "tpms", "alerts", "bsi_config", "radio"],
+        help="Quick PSA 407 preset for CAN IDs and serial prefixes (radar, hvac, doors, swc, trip, tpms, alerts, bsi_config, radio)"
     )
     parser.add_argument(
         "-p", "--prefix", "--prefixes", "--canbox-prefix",
@@ -861,6 +865,7 @@ def main():
         "tpms": (["3A1", "348", "1E1"], ["18", "66"]),
         "alerts": (["1A1", "120", "168"], ["42"]),
         "bsi_config": (["39B", "2A8"], ["71", "72", "76", "79"]),
+        "radio": (["165", "225", "265", "2A5", "0A4", "125", "1A5", "1E5", "325", "365", "3A5", "3A6"], ["84", "85", "86", "97", "56"]),
     }
 
     can_ids_arg = args.can_ids

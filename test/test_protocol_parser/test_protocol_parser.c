@@ -45,6 +45,7 @@ void test_peugeot_407_console_0x3e5_edge_cases(void);
 void test_peugeot_407_verification_vector_1_vol_up(void);
 void test_peugeot_407_verification_vector_2_climate(void);
 void test_peugeot_407_hvac_defrost_and_recirc(void);
+void test_peugeot_407_rear_defrost_detection(void);
 void test_peugeot_407_verification_vector_3_parking_radar(void);
 void test_peugeot_407_front_parking_radar(void);
 void test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center(void);
@@ -54,6 +55,7 @@ void test_peugeot_407_radar_zone_mapping_and_boundaries(void);
 void test_peugeot_407_trip_computer_0x165_and_0x1a5(void);
 void test_peugeot_407_reverse_state(void);
 void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void);
+void test_peugeot_407_trip_hiworld_vector_stationary_sentinel(void);
 void test_peugeot_407_trip_hiworld_vector_target_mileage_dump(void);
 void test_peugeot_407_trip_hiworld_vector_2_trip1_historical(void);
 void test_peugeot_407_trip_hiworld_vector_3_trip2_historical(void);
@@ -64,6 +66,7 @@ void test_peugeot_407_trip_hiworld_boundary_and_null_safety(void);
 void test_peugeot_407_trip_reset_frames(void);
 void test_peugeot_407_verification_vector_4_doors(void);
 void test_peugeot_407_doors_all_open_with_handbrake(void);
+void test_peugeot_407_doors_0x220_idle_data_04_00(void);
 void test_peugeot_407_doors_hiworld_vector_1_driver_front(void);
 void test_peugeot_407_doors_hiworld_all_open(void);
 void test_peugeot_407_doors_hiworld_discrete_bits(void);
@@ -72,7 +75,19 @@ void test_peugeot_407_psa_doors_ctx_pipeline(void);
 void test_peugeot_407_hiworld_doors_boundary_checks(void);
 void test_peugeot_407_steering_wheel_angle(void);
 void test_peugeot_407_jbl_amplifier(void);
+void test_peugeot_407_rd4_volume(void);
+void test_peugeot_407_rd4_audio_settings(void);
+void test_peugeot_407_rd4_hiworld_frame_build(void);
 void test_peugeot_407_cd_changer_and_rds(void);
+void test_peugeot_407_rd4_vector_1_fm_tuner(void);
+void test_peugeot_407_rd4_vector_2_isotp_radiotext(void);
+void test_peugeot_407_rd4_vector_3_cd_changer(void);
+void test_peugeot_407_rd4_cd_in_dash_playback(void);
+void test_peugeot_407_rd4_cd_tray_mechanism(void);
+void test_peugeot_407_rd4_cd_ground_truth_dump(void);
+void test_peugeot_407_rd4_source_and_wavebands(void);
+void test_peugeot_407_rd4_frequency_and_ta_stability(void);
+void test_peugeot_407_rd4_preset_memory_list(void);
 
 // Peugeot 407 SPEC_02 test declarations
 void test_psa_extended_tpms_numeric(void);
@@ -83,6 +98,8 @@ void test_peugeot_407_tpms_hiworld_vector_2_asymmetric_low(void);
 void test_peugeot_407_tpms_hiworld_vector_3_puncture(void);
 void test_peugeot_407_tpms_hiworld_0x3a1_pressures(void);
 void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void);
+void test_peugeot_407_tpms_standby_guard(void);
+void test_peugeot_407_tpms_two_tier_hybrid(void);
 void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void);
 void test_psa_extended_start_stop(void);
 void test_psa_extended_cruise_memory(void);
@@ -105,6 +122,39 @@ void test_peugeot_407_custom_cockpit_check_sequence(void);
 void test_peugeot_407_custom_summary_table_and_empty_clearance(void);
 void test_peugeot_407_custom_downlink_0x2f_response(void);
 void test_can_id_filter_enforcement(void);
+void test_peugeot_407_aux_mode_suppression(void);
+void test_peugeot_407_rd4_audio_source_switching(void);
+void test_peugeot_407_rd4_station_list_trigger(void);
+void test_peugeot_407_rd4_source_switch_lockout_and_suppression(void);
+void test_peugeot_407_rd4_physical_button_debounce(void);
+void test_peugeot_407_rd4_cd_switch_intermediate_aux1_stepping(void);
+void test_peugeot_407_rd4_no_premature_pulse_when_new_cmd_arrives(void);
+void test_peugeot_407_rd4_confirm_timeout_350ms(void);
+void test_peugeot_407_rd4_post_target_settle_guard(void);
+void test_peugeot_407_rd4_physical_override_blocks_periodic_0xad_02_01(void);
+void test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression(void);
+void test_peugeot_407_rd4_cmd_0xad_switches_to_line_in_1(void);
+void test_peugeot_407_rd4_source_transition_mute(void);
+void test_peugeot_407_station_list_scroll_closed_loop_success(void);
+void test_peugeot_407_station_list_scroll_timeout_retry_and_abort(void);
+void test_peugeot_407_rd4_f1_key_pulses(void);
+void test_peugeot_407_rd4_f1_preset_navigation(void);
+
+// Peugeot 407 Car Configuration & Personalization (SPEC_11) declarations
+void test_peugeot_407_car_config_vector1_follow_me_home_downlink(void);
+void test_peugeot_407_car_config_vector2_drl_downlink(void);
+void test_peugeot_407_car_config_vector3_rear_wiper_downlink(void);
+void test_peugeot_407_car_config_vector4_bsi_to_uplink_0x76(void);
+void test_peugeot_407_car_config_extended_settings_downlink(void);
+void test_peugeot_407_car_config_central_state2_builder(void);
+void test_peugeot_407_car_config_boundary_and_guards(void);
+void test_peugeot_407_car_config_disconnected_mdf_authority(void);
+void test_peugeot_407_virtual_mdf_periodic_broadcast(void);
+void test_peugeot_407_virtual_mdf_suppression_when_ign_off(void);
+void test_peugeot_407_mdf_coexistence_suppression(void);
+void test_peugeot_407_matrix_cluster_page_cycling(void);
+void test_peugeot_407_matrix_cluster_inactivity_timeout(void);
+void test_peugeot_407_trip_reset_0x167(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -118,6 +168,8 @@ void test_hiworld_verification_vector_4_gps_time_sync(void);
 void test_hiworld_connection_periodic_ping(void);
 void test_hiworld_car_mapping_lookup(void);
 void test_canbox_embedded_firmware_version(void);
+void test_hiworld_parse_downlink_cmd_f1(void);
+void test_hiworld_cmd_0x24_two_mode_handling(void);
 
 // Driver manager tests
 void test_hu_protocol_driver_switching(void) {
@@ -171,6 +223,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_verification_vector_1_vol_up);
     RUN_TEST(test_peugeot_407_verification_vector_2_climate);
     RUN_TEST(test_peugeot_407_hvac_defrost_and_recirc);
+    RUN_TEST(test_peugeot_407_rear_defrost_detection);
     RUN_TEST(test_peugeot_407_verification_vector_3_parking_radar);
     RUN_TEST(test_peugeot_407_front_parking_radar);
     RUN_TEST(test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center);
@@ -180,6 +233,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_trip_computer_0x165_and_0x1a5);
     RUN_TEST(test_peugeot_407_reverse_state);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_1_instant_fuel);
+    RUN_TEST(test_peugeot_407_trip_hiworld_vector_stationary_sentinel);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_target_mileage_dump);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_2_trip1_historical);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_3_trip2_historical);
@@ -190,6 +244,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_trip_reset_frames);
     RUN_TEST(test_peugeot_407_verification_vector_4_doors);
     RUN_TEST(test_peugeot_407_doors_all_open_with_handbrake);
+    RUN_TEST(test_peugeot_407_doors_0x220_idle_data_04_00);
     RUN_TEST(test_peugeot_407_doors_hiworld_vector_1_driver_front);
     RUN_TEST(test_peugeot_407_doors_hiworld_all_open);
     RUN_TEST(test_peugeot_407_doors_hiworld_discrete_bits);
@@ -198,7 +253,19 @@ int main(void) {
     RUN_TEST(test_peugeot_407_hiworld_doors_boundary_checks);
     RUN_TEST(test_peugeot_407_steering_wheel_angle);
     RUN_TEST(test_peugeot_407_jbl_amplifier);
+    RUN_TEST(test_peugeot_407_rd4_volume);
+    RUN_TEST(test_peugeot_407_rd4_audio_settings);
+    RUN_TEST(test_peugeot_407_rd4_hiworld_frame_build);
     RUN_TEST(test_peugeot_407_cd_changer_and_rds);
+    RUN_TEST(test_peugeot_407_rd4_vector_1_fm_tuner);
+    RUN_TEST(test_peugeot_407_rd4_vector_2_isotp_radiotext);
+    RUN_TEST(test_peugeot_407_rd4_vector_3_cd_changer);
+    RUN_TEST(test_peugeot_407_rd4_cd_in_dash_playback);
+    RUN_TEST(test_peugeot_407_rd4_cd_tray_mechanism);
+    RUN_TEST(test_peugeot_407_rd4_cd_ground_truth_dump);
+    RUN_TEST(test_peugeot_407_rd4_source_and_wavebands);
+    RUN_TEST(test_peugeot_407_rd4_frequency_and_ta_stability);
+    RUN_TEST(test_peugeot_407_rd4_preset_memory_list);
 
     // Peugeot 407 SPEC_02 Extended Unit Tests & Verification Vectors
     RUN_TEST(test_psa_extended_tpms_numeric);
@@ -209,6 +276,8 @@ int main(void) {
     RUN_TEST(test_peugeot_407_tpms_hiworld_vector_3_puncture);
     RUN_TEST(test_peugeot_407_tpms_hiworld_0x3a1_pressures);
     RUN_TEST(test_peugeot_407_tpms_hiworld_0x1e1_status_enum);
+    RUN_TEST(test_peugeot_407_tpms_standby_guard);
+    RUN_TEST(test_peugeot_407_tpms_two_tier_hybrid);
     RUN_TEST(test_peugeot_407_tpms_hiworld_pipeline_and_boundaries);
     RUN_TEST(test_psa_extended_start_stop);
     RUN_TEST(test_psa_extended_cruise_memory);
@@ -231,6 +300,39 @@ int main(void) {
     RUN_TEST(test_peugeot_407_custom_summary_table_and_empty_clearance);
     RUN_TEST(test_peugeot_407_custom_downlink_0x2f_response);
     RUN_TEST(test_can_id_filter_enforcement);
+    RUN_TEST(test_peugeot_407_aux_mode_suppression);
+    RUN_TEST(test_peugeot_407_rd4_audio_source_switching);
+    RUN_TEST(test_peugeot_407_rd4_station_list_trigger);
+    RUN_TEST(test_peugeot_407_rd4_source_switch_lockout_and_suppression);
+    RUN_TEST(test_peugeot_407_rd4_physical_button_debounce);
+    RUN_TEST(test_peugeot_407_rd4_cd_switch_intermediate_aux1_stepping);
+    RUN_TEST(test_peugeot_407_rd4_no_premature_pulse_when_new_cmd_arrives);
+    RUN_TEST(test_peugeot_407_rd4_confirm_timeout_350ms);
+    RUN_TEST(test_peugeot_407_rd4_post_target_settle_guard);
+    RUN_TEST(test_peugeot_407_rd4_physical_override_blocks_periodic_0xad_02_01);
+    RUN_TEST(test_peugeot_407_rd4_reset_zero_volume_and_0xa1_loop_suppression);
+    RUN_TEST(test_peugeot_407_rd4_cmd_0xad_switches_to_line_in_1);
+    RUN_TEST(test_peugeot_407_rd4_source_transition_mute);
+    RUN_TEST(test_peugeot_407_station_list_scroll_closed_loop_success);
+    RUN_TEST(test_peugeot_407_station_list_scroll_timeout_retry_and_abort);
+    RUN_TEST(test_peugeot_407_rd4_f1_key_pulses);
+    RUN_TEST(test_peugeot_407_rd4_f1_preset_navigation);
+
+    // Peugeot 407 Car Configuration & Personalization (SPEC_11)
+    RUN_TEST(test_peugeot_407_car_config_vector1_follow_me_home_downlink);
+    RUN_TEST(test_peugeot_407_car_config_vector2_drl_downlink);
+    RUN_TEST(test_peugeot_407_car_config_vector3_rear_wiper_downlink);
+    RUN_TEST(test_peugeot_407_car_config_vector4_bsi_to_uplink_0x76);
+    RUN_TEST(test_peugeot_407_car_config_extended_settings_downlink);
+    RUN_TEST(test_peugeot_407_car_config_central_state2_builder);
+    RUN_TEST(test_peugeot_407_car_config_boundary_and_guards);
+    RUN_TEST(test_peugeot_407_car_config_disconnected_mdf_authority);
+    RUN_TEST(test_peugeot_407_virtual_mdf_periodic_broadcast);
+    RUN_TEST(test_peugeot_407_virtual_mdf_suppression_when_ign_off);
+    RUN_TEST(test_peugeot_407_mdf_coexistence_suppression);
+    RUN_TEST(test_peugeot_407_matrix_cluster_page_cycling);
+    RUN_TEST(test_peugeot_407_matrix_cluster_inactivity_timeout);
+    RUN_TEST(test_peugeot_407_trip_reset_0x167);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);
@@ -244,6 +346,8 @@ int main(void) {
     RUN_TEST(test_hiworld_connection_periodic_ping);
     RUN_TEST(test_hiworld_car_mapping_lookup);
     RUN_TEST(test_canbox_embedded_firmware_version);
+    RUN_TEST(test_hiworld_parse_downlink_cmd_f1);
+    RUN_TEST(test_hiworld_cmd_0x24_two_mode_handling);
 
     return UNITY_END();
 }

@@ -136,6 +136,12 @@ void hu_protocol_send_reverse(bool reverse_active) {
     }
 }
 
+void hu_protocol_send_steering_angle(int16_t angle_deg) {
+    if (s_active_driver && s_active_driver->send_steering_angle) {
+        s_active_driver->send_steering_angle(angle_deg);
+    }
+}
+
 void hu_protocol_send_alert_single(const vehicle_alert_item_t *alert) {
     if (s_active_driver && s_active_driver->send_alert_single) {
         s_active_driver->send_alert_single(alert);
@@ -145,6 +151,58 @@ void hu_protocol_send_alert_single(const vehicle_alert_item_t *alert) {
 void hu_protocol_send_alerts_summary(const vehicle_alert_item_t *alerts, uint8_t count) {
     if (s_active_driver && s_active_driver->send_alerts_summary) {
         s_active_driver->send_alerts_summary(alerts, count);
+    }
+}
+
+void hu_protocol_send_audio_settings(const vehicle_audio_settings_t *audio) {
+    if (s_active_driver && s_active_driver->send_audio_settings) {
+        s_active_driver->send_audio_settings(audio);
+    }
+}
+
+void hu_protocol_send_dsp_state(const vehicle_audio_settings_t *audio) {
+    hu_protocol_send_audio_settings(audio);
+}
+
+void hu_protocol_send_radio_state(const vehicle_radio_t *radio) {
+    if (s_active_driver && s_active_driver->send_radio_state) {
+        s_active_driver->send_radio_state(radio);
+    }
+}
+
+void hu_protocol_send_radio_text(const char *text, uint8_t len) {
+    if (s_active_driver && s_active_driver->send_radio_text) {
+        s_active_driver->send_radio_text(text, len);
+    }
+}
+
+void hu_protocol_send_radio_presets(const vehicle_radio_t *radio) {
+    if (s_active_driver && s_active_driver->send_radio_presets) {
+        s_active_driver->send_radio_presets(radio);
+    }
+}
+
+void hu_protocol_send_media_state(const vehicle_cdc_t *cdc) {
+    if (s_active_driver && s_active_driver->send_media_state) {
+        s_active_driver->send_media_state(cdc);
+    }
+}
+
+void hu_protocol_send_feature_enables(const uint8_t *feat1, const uint8_t *feat2) {
+    if (s_active_driver && s_active_driver->send_feature_enables) {
+        s_active_driver->send_feature_enables(feat1, feat2);
+    }
+}
+
+void hu_protocol_send_central_state1(const vehicle_config_t *config) {
+    if (s_active_driver && s_active_driver->send_central_state1) {
+        s_active_driver->send_central_state1(config);
+    }
+}
+
+void hu_protocol_send_central_state2(const vehicle_config_t *config, const vehicle_state_t *state) {
+    if (s_active_driver && s_active_driver->send_central_state2) {
+        s_active_driver->send_central_state2(config, state);
     }
 }
 

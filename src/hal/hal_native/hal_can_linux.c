@@ -105,14 +105,26 @@ hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
 static can_frame_t s_native_last_sent_frame;
 static bool        s_native_has_sent_frame = false;
 
+#define HAL_CAN_NATIVE_MAX_HISTORY 16
+static can_frame_t s_native_sent_history[HAL_CAN_NATIVE_MAX_HISTORY];
+static size_t      s_native_sent_history_count = 0;
+
 bool hal_can_native_get_last_sent_frame(can_frame_t *out_frame) {
     if (!s_native_has_sent_frame || !out_frame) return false;
     *out_frame = s_native_last_sent_frame;
     return true;
 }
 
+size_t hal_can_native_get_sent_history(can_frame_t *out_frames, size_t max_count) {
+    if (!out_frames || max_count == 0) return 0;
+    size_t count = (s_native_sent_history_count < max_count) ? s_native_sent_history_count : max_count;
+    memcpy(out_frames, s_native_sent_history, count * sizeof(can_frame_t));
+    return count;
+}
+
 void hal_can_native_clear_sent_frame(void) {
     s_native_has_sent_frame = false;
+    s_native_sent_history_count = 0;
     memset(&s_native_last_sent_frame, 0, sizeof(s_native_last_sent_frame));
 }
 
@@ -123,6 +135,9 @@ hal_status_t hal_can_send(const can_frame_t *frame) {
 
     s_native_last_sent_frame = *frame;
     s_native_has_sent_frame = true;
+    if (s_native_sent_history_count < HAL_CAN_NATIVE_MAX_HISTORY) {
+        s_native_sent_history[s_native_sent_history_count++] = *frame;
+    }
 
     if (s_can_fd < 0) {
         return HAL_STATUS_OK;
