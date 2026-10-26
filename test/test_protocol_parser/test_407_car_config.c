@@ -405,25 +405,37 @@ void test_peugeot_407_virtual_mdf_periodic_broadcast(void) {
     can_frame_t sent;
     TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
 
-    /* 10th tick (1000 ms): 0x3F6, 0x0DF emitted (0x167 is strictly event-driven) */
+    /* 10th tick (1000 ms): 0x525, 0x3F6, 0x0DF, 0x167 emitted */
     hal_can_native_clear_sent_frame();
     psa_car_config_periodic_100ms();
 
     can_frame_t history[4];
     size_t count = hal_can_native_get_sent_history(history, 4);
-    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_UINT32(4, count);
 
-    /* Frame 1: 0x3F6 (DLC 7): 00 00 00 00 00 C0 01 */
-    TEST_ASSERT_EQUAL_HEX32(0x3F6, history[0].id);
-    TEST_ASSERT_EQUAL_UINT8(7, history[0].dlc);
+    /* Frame 1: 0x525 (DLC 8): 05 00 01 00 00 00 00 00 */
+    TEST_ASSERT_EQUAL_HEX32(0x525, history[0].id);
+    TEST_ASSERT_EQUAL_UINT8(8, history[0].dlc);
+    const uint8_t exp_525[] = { 0x05, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_525, history[0].data, 8);
+
+    /* Frame 2: 0x3F6 (DLC 7): 00 00 00 00 00 C0 01 */
+    TEST_ASSERT_EQUAL_HEX32(0x3F6, history[1].id);
+    TEST_ASSERT_EQUAL_UINT8(7, history[1].dlc);
     const uint8_t exp_3f6[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x01 };
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_3f6, history[0].data, 7);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_3f6, history[1].data, 7);
 
-    /* Frame 2: 0x0DF (DLC 3): 10 00 50 */
-    TEST_ASSERT_EQUAL_HEX32(0x0DF, history[1].id);
-    TEST_ASSERT_EQUAL_UINT8(3, history[1].dlc);
+    /* Frame 3: 0x0DF (DLC 3): 10 00 50 */
+    TEST_ASSERT_EQUAL_HEX32(0x0DF, history[2].id);
+    TEST_ASSERT_EQUAL_UINT8(3, history[2].dlc);
     const uint8_t exp_0df[] = { 0x10, 0x00, 0x50 };
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_0df, history[1].data, 3);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_0df, history[2].data, 3);
+
+    /* Frame 4: 0x167 (DLC 8): 09 06 FF FF 00 00 00 00 */
+    TEST_ASSERT_EQUAL_HEX32(0x167, history[3].id);
+    TEST_ASSERT_EQUAL_UINT8(8, history[3].dlc);
+    const uint8_t exp_167[] = { 0x09, 0x06, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_167, history[3].data, 8);
 }
 
 void test_peugeot_407_virtual_mdf_suppression_when_ign_off(void) {

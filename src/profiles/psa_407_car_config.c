@@ -367,6 +367,15 @@ void psa_car_config_periodic_100ms(void) {
     if (++s_periodic_1000ms_ticks >= 10) {
         s_periodic_1000ms_ticks = 0;
 
+        /* 0x525 (DLC 8): Virtual MDF presence / diagnostic heartbeat: 05 00 01 00 00 00 00 00 */
+        can_frame_t frame_525;
+        memset(&frame_525, 0, sizeof(frame_525));
+        frame_525.id = PSA_CAN_ID_MDF_DIAG_525;
+        frame_525.dlc = 8;
+        frame_525.data[0] = 0x05;
+        frame_525.data[2] = 0x01;
+        hal_can_send(&frame_525);
+
         /* 0x3F6 (DLC 7): 00 00 <counter> 00 00 C0 01 */
         can_frame_t frame_3f6;
         memset(&frame_3f6, 0, sizeof(frame_3f6));
@@ -387,15 +396,7 @@ void psa_car_config_periodic_100ms(void) {
         frame_0df.data[2] = 0x50;
         hal_can_send(&frame_0df);
 
-        /* 0x15B (DLC 8): Personalization State (if valid) */
-        if (s_cached_profile1_valid) {
-            can_frame_t frame_15b;
-            memset(&frame_15b, 0, sizeof(frame_15b));
-            frame_15b.id = PSA_CAN_ID_BSI_PERSO_REQ_15B;
-            frame_15b.dlc = 8;
-            memcpy(frame_15b.data, s_cached_profile1_raw, 8);
-            frame_15b.data[0] = 0x01;
-            hal_can_send(&frame_15b);
-        }
+        /* 0x167 (DLC 8): Virtual MDF trip page supervisory frame: 09 06 FF FF 00 00 00 00 */
+        psa_car_config_send_0x167();
     }
 }

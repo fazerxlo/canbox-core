@@ -128,9 +128,14 @@ v                                                     |
 Hardware bench captures (`only_mdf_can_log_min2.csv`) prove a critical behavioral distinction between the factory PSA Multifunction Display (MDF / EMF-C) and aftermarket Chinese CAN boxes:
 - **OEM EMF-C MDF Behavior:** The physical MDF **does NOT broadcast `0x15B` periodically**. It remains completely silent on `0x15B` while idle or browsing menus, and transmits a **single event-driven `0x15B` frame** (~1.5 to 10 ms after the user presses `OK` on the RD4 fascia `0x3E5 = 00 00 40 00 00 00`). The BSI latches this single frame into EEPROM and echoes the new state on the very next `0x260` Profile 1 broadcast.
 - **OEM Hiworld PA12.20 (`H1H2PA123A-240717`) Quirk:** The commercial Hiworld PA12.20 box continuously broadcasts `0x15B` every ~520 ms (alongside `0x525`, `0x3F6`, and `0x0DF`). If a physical MDF is connected on the same CAN bus (e.g., on a test workbench), the PA12.20's periodic `0x15B` transmissions collide with and overwrite settings changed on the MDF. *(When using a PA12.20 on a workbench with an MDF for passive UART comparison, its CAN_TX line must be disconnected).*
-- **OpenCanbox Coexistence Architecture:**
-  - `canbox-core` **never** transmits `0x15B` periodically.
-  - It passively updates `s_cached_profile1_raw[8]` from every incoming `0x260` Profile 1 frame and **only** transmits `0x15B` as an event-driven frame when `psa_car_config_apply_downlink()` is invoked by the Android Head Unit (`Cmd 0x7B` / `0x7D`).
+- **OpenCanbox Coexistence & Virtual MDF Architecture:**
+  - When no physical MDF is present on the bus (3000 ms timeout on `0x525`), OpenCanbox enters **Virtual MDF mode** and broadcasts the 4 required display supervision frames at 1000 ms intervals:
+    - `0x525` (`DLC 8`: `05 00 01 00 00 00 00 00` - presence / diagnostic heartbeat)
+    - `0x3F6` (`DLC 7`: `00 00 <cnt> 00 00 C0 01` - cluster trip supervision)
+    - `0x0DF` (`DLC 3`: `10 00 50` - display status)
+    - `0x167` (`DLC 8`: `(s_mdf_trip_page_mask | s_mdf_trip_reset_mask) 06 FF FF 00 00 00 00` - active trip page supervisory frame)
+  - When a physical MDF is connected and broadcasts `0x525`, OpenCanbox suppresses all Virtual MDF frames (`0x525`, `0x3F6`, `0x0DF`, `0x167`) and ISO-TP Flow Control (`0x11F` / `0x09F`) within 100 ms.
+  - `canbox-core` **never** transmits `0x15B` periodically. It passively updates `s_cached_profile1_raw[8]` from incoming `0x260` Profile 1 and **only** transmits `0x15B` as an event-driven write frame when `psa_car_config_apply_downlink()` is invoked by the Android Head Unit (`Cmd 0x7B` / `0x7D`).
   - Consequently, `canbox-core` works identically in a target vehicle **without an MDF** and on a development workbench **with a physical MDF connected**, allowing settings to be modified and persisted from either the RD4/MDF or the Android Head Unit without bus conflicts.
 
 ---
