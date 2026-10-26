@@ -264,6 +264,16 @@ static void hiworld_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) 
     (void)angle;
 }
 
+static void hiworld_send_telemetry_state(const vehicle_state_t *state) {
+    if (!state) return;
+
+    uint8_t tx_buf[20];
+    size_t len = build_hiworld_telemetry_1a(state, tx_buf, sizeof(tx_buf));
+    if (len > 0) {
+        hal_uart_write(tx_buf, len);
+    }
+}
+
 static void hiworld_send_steering_angle(int16_t angle_deg) {
     /* Hiworld Base Info (Cmd 0x11) steering angle: whole degrees, polarity inverted
      * relative to PSA CAN (PSA +Left -> Hiworld negative), Big-Endian at Bytes 6..7. */
@@ -819,6 +829,7 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_doors = hiworld_send_doors,
     .send_climate = hiworld_send_climate,
     .send_telemetry = hiworld_send_telemetry,
+    .send_telemetry_state = hiworld_send_telemetry_state,
     .send_tpms = hiworld_send_tpms,
     .send_tpms_numeric = hiworld_send_tpms_numeric,
     .send_tpms_discrete = hiworld_send_tpms_discrete,

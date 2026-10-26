@@ -236,6 +236,7 @@ void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
 void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
+void psa_bsi_process_can_0x161(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
 
 void psa_stalk_process_tip_0x221(vehicle_wheel_t *wheel, const uint8_t *data, uint8_t dlc);
 

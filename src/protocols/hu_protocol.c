@@ -88,6 +88,12 @@ void hu_protocol_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle) {
     }
 }
 
+void hu_protocol_send_telemetry_state(const vehicle_state_t *state) {
+    if (s_active_driver && s_active_driver->send_telemetry_state) {
+        s_active_driver->send_telemetry_state(state);
+    }
+}
+
 void hu_protocol_send_tpms(const vehicle_tpms_t *tpms) {
     if (s_active_driver && s_active_driver->send_tpms) {
         s_active_driver->send_tpms(tpms);

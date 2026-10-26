@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 size_t build_hiworld_radar(const vehicle_radar_t *radar, uint8_t *out, size_t max_len);
+size_t build_hiworld_telemetry_1a(const vehicle_state_t *state, uint8_t *out, size_t max_len);
 size_t build_hiworld_trip_instant(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
 size_t build_hiworld_trip1(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);
 size_t build_hiworld_trip2(const vehicle_trip_t *trip, uint8_t *out, size_t max_len);

@@ -227,6 +227,7 @@ typedef struct {
     bool    cdc;
     uint8_t trip_page;          /* 0: none, 1: instant (0x13), 2: trip1 (0x14), 3: trip2 (0x15) */
     bool    config;
+    bool    telemetry;
 } vehicle_dirty_flags_t;
 
 typedef struct {
@@ -266,6 +267,12 @@ typedef struct {
     bool                     handbrake;
     bool                     economy_mode;
     bool                     ignition_on;
+    uint8_t                  gear;              /* 0=P, 1=R, 2=N, 3=D, 4=M1, etc. */
+    int8_t                   coolant_temp_c;    /* -40..150 °C, 0x7F = invalid */
+    int8_t                   oil_temp_c;        /* -40..160 °C, 0x7F / 0xFF = invalid/unequipped */
+    uint8_t                  fuel_liters;       /* 0..100 L, 0xFF = invalid */
+    uint8_t                  fuel_percentage;   /* 0..100 %, 0xFF = invalid */
+    bool                     fuel_low_warning;  /* true if low fuel warning alert is active */
     vehicle_dirty_flags_t    dirty;
 } vehicle_state_t;
 

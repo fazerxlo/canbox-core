@@ -98,17 +98,12 @@ static inline void psa_update_derived_power_state(vehicle_state_t *state);
 
 static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t *state) {
     if (frame->dlc >= 8) {
+        psa_bsi_process_can_0x0f6(state, frame->data, frame->dlc);
         s_have_0f6 = true;
-        s_ignition_from_0f6 = (frame->data[0] & (1 << 3)) != 0;
-        state->ignition_on = s_ignition_from_0f6;
+        s_ignition_from_0f6 = state->ignition_on;
 
         s_reverse_from_0f6 = (frame->data[7] & (1 << 7)) != 0;
         state->reverse_gear = s_reverse_from_0f6 || s_reverse_from_036;
-
-        /* Outside temperature: Byte 5, Raw * 0.5 - 40 C (0xFF = invalid; keep last value) */
-        if (frame->data[5] != 0xFF) {
-            state->climate.outdoor_temp_raw = frame->data[5];
-        }
 
         psa_update_derived_power_state(state);
     }
@@ -254,7 +249,18 @@ static psa_journal_iso_tp_t s_journal_ctx;
 static void psa_decode_alert_message_0x1a1_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     psa_decode_alert_message_0x1a1(frame->data, frame->dlc, &state->alerts.realtime_alert);
+    if (state->alerts.realtime_alert.alert_code == PSA_HIWORLD_ALERT_LOW_FUEL ||
+        state->alerts.realtime_alert.can_alarm_id == 0x000D ||
+        state->alerts.realtime_alert.can_alarm_id == 0x0138) {
+        state->fuel_low_warning = state->alerts.realtime_alert.is_active;
+        state->dirty.telemetry = true;
+    }
     state->dirty.alert_realtime = true;
+}
+
+static void psa_decode_gauges_0x161_profile(const can_frame_t *frame, vehicle_state_t *state) {
+    if (!frame || !state) return;
+    psa_bsi_process_can_0x161(state, frame->data, frame->dlc);
 }
 
 static void psa_decode_alert_journal_0x120_profile(const can_frame_t *frame, vehicle_state_t *state) {
@@ -330,6 +336,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_ALERT_JOURNAL,      psa_decode_alert_journal_0x120_profile },
     { PSA_CAN_ID_STATION_LIST_125,   psa_rd4_decode_frame },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
+    { PSA_CAN_ID_BSI_GAUGES,         psa_decode_gauges_0x161_profile },
     { PSA_CAN_ID_ETAT_AUTORADIO,     psa_decode_etat_autoradio_0x165_profile },
     { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
     { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },

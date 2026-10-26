@@ -14,7 +14,7 @@
 In Peugeot 407 (PSA CAN2004 architecture), engine telemetry, odometer readings, ambient temperatures, and trip metrics are broadcast across the following core frames:
 - **`0x0B6` (Fast Dynamic Data, 50 ms):** Engine RPM (bits 15..3 = RPM $\times 8$) and vehicle speed (uint16 scaled by 100 in km/h).
 - **`0x0F6` (BSI Slow Data, 500 ms):** Ignition contact state (+APC: Byte 0 Bit 3, `0x88`=ON, `0x80`=OFF), engine coolant temperature ($\text{Raw} - 40^\circ\text{C}$), external ambient air temperature ($\text{Raw} \times 0.5 - 40^\circ\text{C}$), reverse gear status (Byte 7 Bit 7), wipers, and turn signals (blinkers).
-- **`0x161` (BSI Gauges, 500 ms):** Oil temperature ($\text{Raw} - 40^\circ\text{C}$), fuel level percentage (Byte 3), and oil level (Byte 6).
+- **`0x161` (BSI Gauges, 500 ms):** Oil temperature (Byte 2, combine calibration `((raw * 50 + 1360 + 39) / 79)`), fuel level percentage (Byte 3), and oil level (Byte 6).
 - **`0x036` (Network State & Illumination, 100 ms):** Comfort bus network lifecycle / Phase de vie (`Byte 4: 0x00=Sleep, 0x01=Awake, 0x02=Shutdown countdown, 0x03=Wakeup transition`), dashboard illumination enabled (Byte 3 Bit 5), and luminosity level.
 - **`0x221` (Instantaneous Trip, 1000 ms):** Instantaneous fuel consumption ($0.1\text{ L/100km}$), cruising range / autonomy (km), distance ($0.1\text{ km}$), and stalk com button flags.
 - **`0x2A1` (Trip 1 Historical, 1000 ms):** Mean speed (uint8 / uint16 km/h), distance (km), and average consumption ($0.1\text{ L/100km}$).
@@ -118,7 +118,30 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
   - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0A 06 FF FF 00 00 00 00`)
   - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0C 06 FF FF 00 00 00 00`)
 
-### 3.5 Virtual EMF & Instrument Cluster Matrix Emulation (`0x167` RT4 Alignment)
+### 3.5 Hiworld Powertrain & Fluid Telemetry (`Cmd 0x1A` / `com.qf.vehicle`)
+- **Sync Header:** `0x5A 0xA5`
+- **Length ($L$):** `0x0C` (12 payload bytes)
+- **Command ID:** `0x1A` (26 decimal)
+- **Transmission:** Autonomous 5 Hz (every 200 ms) while ignition is ON (+APC / `0x0F6` Byte 0 Bit 3 set), or immediately on significant change ($\Delta\text{speed} \ge 2\text{ km/h}$, $\Delta\text{rpm} \ge 50$).
+- **Payload Layout (12 Bytes - Big Endian):**
+  - `Byte 0`: Status flags bitmask:
+    - Bit 0: ACC/Ignition ON (`1=ON`)
+    - Bit 1: Engine Running (`1=Running` if RPM > 400)
+    - Bit 2: Reverse (`1=Reverse`)
+    - Bit 3: Handbrake (`1=Engaged`)
+    - Bit 4: Low Fuel Warning (`1=Active`)
+  - `Byte 1`: Gear position (`0=P`, `1=R`, `2=N`, `3=D`, `4=M1`, etc.)
+  - `Byte 2..3`: Vehicle speed in km/h (`read_be16 / 100` from `0x0B6`)
+  - `Byte 4..5`: Engine speed in RPM (`read_be16 >> 3` from `0x0B6`)
+  - `Byte 6`: Coolant temperature in °C (`(int8_t)(data[1] - 40)` from `0x0F6`, `0x7F` if invalid)
+  - `Byte 7`: Oil temperature in °C (from `0x161` Byte 2, `0x7F` or `0xFF` if invalid)
+  - `Byte 8`: Fuel remaining in Liters (`0..100 L`, `0xFF` if invalid)
+  - `Byte 9`: Fuel percentage (`0..100 %` from `0x161` Byte 3, `0xFF` if invalid)
+  - `Byte 10..11`: Instantaneous fuel consumption in $0.1\text{ L/100km}$ (from `0x221`, `0xFFFF` when stationary/undefined)
+- **Checksum:** `((Length + CmdID + sum(Payload)) - 1) & 0xFF`
+- **Wire Frame:** `5A A5 0C 1A [12 Bytes] Checksum`
+
+### 3.6 Virtual EMF & Instrument Cluster Matrix Emulation (`0x167` RT4 Alignment)
 In vehicles with the factory Multifunction Display removed, OpenCanbox emulates the OEM RT4 / EMF display master behavior on CAN ID **`0x167`** (DLC 8):
 - **Idle / Closed State (`0x08`):** `167#0806FFFF00000000` (Main / Audio / Navigation screen, trip overlay closed). This allows the instrument cluster central matrix LCD to close the trip banner.
 - **Carousel Sequence:** `Instant (0x09)` $\longrightarrow$ `Trip 1 (0x0A)` $\longrightarrow$ `Trip 2 (0x0C)` $\longrightarrow$ `Instant (0x09)`.
