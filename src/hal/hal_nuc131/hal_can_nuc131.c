@@ -1,10 +1,12 @@
 #include "hal/hal_can.h"
 #include "core/ring_buffer.h"
+#include "core/can_router.h"
 #include "NUC131.h"
 #include "can.h"
 #include <string.h>
 
-#define NUC_CAN_RX_RING_SIZE 32
+/* Increased from 32 to 64 to absorb full vehicle CAN bursts during blocking UART TX */
+#define NUC_CAN_RX_RING_SIZE 64
 #define CAN_TX_OBJ_START     0u
 #define CAN_TX_OBJ_END       5u
 #define CAN_RX_OBJ_START     6u
@@ -13,6 +15,13 @@
 
 static can_frame_t s_rx_storage[NUC_CAN_RX_RING_SIZE];
 static ring_buffer_t s_can_rx_rb;
+
+/* Shared with hal_system_nuc131.c so ISR flag clearing before WFI return never loses CAN wake state */
+volatile bool g_nuc131_can_woke_flag = false;
+
+/* Throttled Bus-Off recovery state */
+static volatile bool s_bus_off_pending = false;
+static uint32_t s_last_boff_recovery_ms = 0;
 
 // Function implemented in Nuvoton CAN BSP driver
 int32_t CAN_SetRxMsgObjAndMsk(CAN_T *tCAN, uint8_t u8MsgObj, uint8_t u8idType, uint32_t u32id, uint32_t u32idmask, uint8_t u8singleOrFifoLast);
@@ -27,6 +36,8 @@ static inline void can_wait_if(CAN_T *can, uint8_t iface) {
 
 hal_status_t hal_can_init(can_baudrate_t baudrate) {
     ring_buffer_init(&s_can_rx_rb, s_rx_storage, sizeof(can_frame_t), NUC_CAN_RX_RING_SIZE);
+    s_bus_off_pending = false;
+    s_last_boff_recovery_ms = 0;
 
     SYS_UnlockReg();
 
@@ -59,7 +70,7 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     }
     CAN_LeaveInitMode(CAN0);
 
-    // Set RX message objects (6..31) as a hardware FIFO to accept all frames
+    // Set RX message objects (6..31) as a hardware FIFO to accept standard frames
     for (uint8_t i = CAN_RX_OBJ_START; i <= CAN_RX_OBJ_END; i++) {
         uint8_t is_last = (i == CAN_RX_OBJ_END) ? TRUE : FALSE;
         CAN_SetRxMsgObjAndMsk(CAN0, i, CAN_STD_ID, 0x0, 0x0, is_last);
@@ -76,8 +87,6 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
 }
 
 hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
-    // NUC131 reference implementation does not implement per-filter masking.
-    // All message objects are set to accept all frames at init time.
     (void)filters;
     (void)count;
     return HAL_STATUS_OK;
@@ -86,9 +95,16 @@ hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
 hal_status_t hal_can_send(const can_frame_t *frame) {
     if (!frame) return HAL_STATUS_ERROR;
 
-    // Recover from Bus-Off if controller entered INIT state due to error counter overflow
-    if (CAN0->CON & CAN_CON_INIT_Msk) {
-        CAN_LeaveInitMode(CAN0);
+    // Rate-limited recovery from Bus-Off if controller entered INIT state due to error counter overflow
+    if ((CAN0->CON & CAN_CON_INIT_Msk) || s_bus_off_pending) {
+        uint32_t now = hal_get_tick_ms();
+        if ((now - s_last_boff_recovery_ms) >= 200u) {
+            s_last_boff_recovery_ms = now;
+            s_bus_off_pending = false;
+            CAN_LeaveInitMode(CAN0);
+        } else {
+            return HAL_STATUS_BUSY;
+        }
     }
 
     uint8_t dlc = frame->dlc & 0x0Fu;
@@ -144,48 +160,59 @@ hal_status_t hal_can_send(const can_frame_t *frame) {
 
 hal_status_t hal_can_receive(can_frame_t *frame) {
     if (!frame) return HAL_STATUS_ERROR;
+
+    /* Also service pending Bus-Off recovery in RX polling path if no TX is occurring */
+    if (s_bus_off_pending || (CAN0->CON & CAN_CON_INIT_Msk)) {
+        uint32_t now = hal_get_tick_ms();
+        if ((now - s_last_boff_recovery_ms) >= 200u) {
+            s_last_boff_recovery_ms = now;
+            s_bus_off_pending = false;
+            CAN_LeaveInitMode(CAN0);
+        }
+    }
+
     return ring_buffer_pop(&s_can_rx_rb, frame) ? HAL_STATUS_OK : HAL_STATUS_TIMEOUT;
 }
 
 void CAN0_IRQHandler(void) {
-    // Clear hardware CAN wake-up status flag if woke from sleep
+    // Latch and clear hardware CAN wake-up status flag if woke from sleep
     if (CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk) {
         CAN0->WU_STATUS = 0;
+        g_nuc131_can_woke_flag = true;
     }
 
-    uint32_t u32IIDRstatus = CAN0->IIDR;
+    /* Drain all pending interrupt sources in a loop so back-to-back FIFO objects are never stranded */
+    uint32_t u32IIDRstatus;
+    uint8_t max_iter = 36u;
+    while (((u32IIDRstatus = CAN0->IIDR) != 0u) && max_iter--) {
+        if (u32IIDRstatus == 0x8000u) {
+            uint32_t sts = CAN0->STATUS;
+            if (sts & CAN_STATUS_BOFF_Msk) {
+                /* Defer Bus-Off recovery to rate-limited main-loop check to prevent ISR storm on shorted bus */
+                s_bus_off_pending = true;
+            }
+        } else if (u32IIDRstatus <= 32u) {
+            uint8_t obj_idx = (uint8_t)(u32IIDRstatus - 1u);
+            if (obj_idx >= CAN_RX_OBJ_START) {
+                STR_CANMSG_T rx_msg;
+                CAN_Receive(CAN0, obj_idx, &rx_msg);
 
-    // Check if it's a status/error interrupt (reading STATUS clears it)
-    if (u32IIDRstatus == 0x8000u) {
-        uint32_t sts = CAN0->STATUS;
-        if (sts & CAN_STATUS_BOFF_Msk) {
-            // Automatic Bus-Off recovery: clear INIT bit to rejoin bus after 128x11 recessive bits
-            CAN_LeaveInitMode(CAN0);
-        }
-    }
-    // Check if it's a message object interrupt (1-32 in IIDR -> 0-31 index)
-    else if ((u32IIDRstatus >= 1u) && (u32IIDRstatus <= 32u)) {
-        uint8_t obj_idx = (uint8_t)(u32IIDRstatus - 1u);
-        if (obj_idx >= CAN_RX_OBJ_START) {
-            STR_CANMSG_T rx_msg;
-            CAN_Receive(CAN0, obj_idx, &rx_msg);
+                can_frame_t frame;
+                frame.id = rx_msg.Id;
+                frame.dlc = rx_msg.DLC;
+                frame.is_extended = (rx_msg.IdType == CAN_EXT_ID);
+                frame.is_remote = (rx_msg.FrameType == CAN_REMOTE_FRAME);
+                frame.timestamp_ms = hal_get_tick_ms();
+                memcpy(frame.data, rx_msg.Data, 8);
 
-            // Convert to canbox-core format and queue
-            can_frame_t frame;
-            frame.id = rx_msg.Id;
-            frame.dlc = rx_msg.DLC;
-            frame.is_extended = (rx_msg.IdType == CAN_EXT_ID);
-            frame.is_remote = FALSE;
-            frame.timestamp_ms = hal_get_tick_ms();
-            memcpy(frame.data, rx_msg.Data, 8);
-
-            ring_buffer_push(&s_can_rx_rb, &frame);
-        } else {
-            /* Clear any unexpected pending bit on TX objects using IF[1] */
-            can_wait_if(CAN0, 1);
-            CAN0->IF[1].CMASK = CAN_IF_CMASK_CLRINTPND_Msk | CAN_IF_CMASK_TXRQSTNEWDAT_Msk;
-            CAN0->IF[1].CREQ = 1u + obj_idx;
-            can_wait_if(CAN0, 1);
+                ring_buffer_push(&s_can_rx_rb, &frame);
+            } else {
+                /* Clear any unexpected pending bit on TX objects using IF[1] */
+                can_wait_if(CAN0, 1);
+                CAN0->IF[1].CMASK = CAN_IF_CMASK_CLRINTPND_Msk | CAN_IF_CMASK_TXRQSTNEWDAT_Msk;
+                CAN0->IF[1].CREQ = 1u + obj_idx;
+                can_wait_if(CAN0, 1);
+            }
         }
     }
 }
