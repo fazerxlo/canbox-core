@@ -8,6 +8,11 @@
 
 static volatile uint32_t s_ticks_ms = 0;
 
+/* Latched in EXTI / CAN ISRs because NVIC executes ISRs and clears hardware flags
+ * immediately upon waking from WFI before hal_system_enter_deep_sleep() resumes. */
+extern volatile bool g_nuc131_can_woke_flag;
+static volatile bool s_irq_woke_by_can = false;
+
 void SysTick_Handler(void) {
     s_ticks_ms++;
 }
@@ -21,19 +26,25 @@ void BOD_IRQHandler(void) {
     SYS_CLEAR_BOD_INT_FLAG();
 }
 
-/* ISR Handlers for wake-up sources to clear flags and avoid Default_Handler hang */
+/* ISR Handlers for wake-up sources to latch wake reason and clear flags */
 void PWRWU_IRQHandler(void) {
     CLK->PWRCON |= CLK_PWRCON_PD_WU_STS_Msk; /* Clear power-down wake-up status */
 }
 
 void GPAB_IRQHandler(void) {
-    PA->ISRC = PA->ISRC; /* Clear Port A interrupt flags (e.g. PA0 ignition) */
-    PB->ISRC = PB->ISRC;
+    if (PA->ISRC & (1U << 0)) {
+        s_irq_woke_by_can = true; /* Woken by PA.0 Ignition sense */
+    }
+    PA->ISRC = PA->ISRC; /* Clear Port A interrupt flags */
+    PB->ISRC = PB->ISRC; /* Clear Port B interrupt flags (PB.0 UART RX) */
 }
 
 void GPCDEF_IRQHandler(void) {
+    if (PD->ISRC & (1U << 6)) {
+        s_irq_woke_by_can = true; /* Woken by PD.6 CAN_RX dominant edge */
+    }
     PC->ISRC = PC->ISRC;
-    PD->ISRC = PD->ISRC; /* Clear Port D interrupt flags (e.g. PD6 CAN_RX) */
+    PD->ISRC = PD->ISRC; /* Clear Port D interrupt flags */
     PE->ISRC = PE->ISRC;
     PF->ISRC = PF->ISRC;
 }
@@ -159,16 +170,24 @@ static void hal_system_on_wakeup(bool woke_by_can) {
 }
 
 void hal_system_enter_deep_sleep(void) {
-    /* 1. Turn off all discrete vehicle outputs */
+    /* 1. Turn off all discrete vehicle outputs (ACC PA8, ILL PA9, BRAKE PA12, REV PA13) */
     PA->DOUT &= ~((1U << 8) | (1U << 9) | (1U << 12) | (1U << 13));
 
     /* 2. Put CAN transceiver in Standby (PC3 = HIGH) and abort any stuck CAN TX */
     PC->DOUT |= (1U << 3);
     CAN0->CON |= CAN_CON_DAR_Msk;
 
+    /* Allow brief settling time after cutting PA8 (ACC) so Head Unit TX voltage decay
+     * on PB0 (UART0_RXD) does not immediately trigger a false falling-edge wake interrupt */
+    for (volatile int i = 0; i < 10000; i++);
+
     /* 3. Disable SysTick timer to prevent 1ms wakeups */
     SysTick->CTRL = 0;
     SysTick->VAL  = 0;
+
+    /* Reset latched ISR wake flags prior to enabling wake interrupts */
+    s_irq_woke_by_can = false;
+    g_nuc131_can_woke_flag = false;
 
     /* 4. Configure Wakeup Interrupt Sources */
     SYS_UnlockReg();
@@ -184,6 +203,11 @@ void hal_system_enter_deep_sleep(void) {
     NVIC_ClearPendingIRQ(CAN0_IRQn);
     NVIC_EnableIRQ(CAN0_IRQn);
 
+    // Clear any stale GPIO interrupt flags before arming EXTI
+    PA->ISRC = PA->ISRC;
+    PB->ISRC = PB->ISRC;
+    PD->ISRC = PD->ISRC;
+
     // Enable EXTI on PD6 (CAN_RX) to wake on dominant CAN bus pulse
     GPIO_EnableInt(PD, 6, GPIO_INT_FALLING);
     NVIC_ClearPendingIRQ(GPCDEF_IRQn);
@@ -191,8 +215,6 @@ void hal_system_enter_deep_sleep(void) {
 
     // Enable EXTI on PA0 (Hardware Ignition Sense line, if wired)
     GPIO_EnableInt(PA, 0, GPIO_INT_RISING);
-    NVIC_ClearPendingIRQ(GPAB_IRQn);
-    NVIC_EnableIRQ(GPAB_IRQn);
 
     // Enable EXTI on PB0 (UART0_RXD) to wake on incoming Head Unit / Flasher serial commands
     GPIO_EnableInt(PB, 0, GPIO_INT_FALLING);
@@ -219,8 +241,10 @@ void hal_system_enter_deep_sleep(void) {
     /*   MCU WAKES UP HERE IMMEDIATELY UPON BUS/KEY TRANSITION   */
     /* ========================================================= */
 
-    /* Check if CAN RX (PD6 low) or Ignition (PA0 high) or CAN0 wakeup triggered */
-    bool woke_by_can = ((PD->PIN & (1U << 6)) == 0) ||
+    /* Check latched ISR wake flags AND instantaneous pin/peripheral states */
+    bool woke_by_can = s_irq_woke_by_can ||
+                       g_nuc131_can_woke_flag ||
+                       ((PD->PIN & (1U << 6)) == 0) ||
                        ((PA->PIN & (1U << 0)) != 0) ||
                        ((CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk) != 0);
 
@@ -241,9 +265,15 @@ void hal_system_enter_deep_sleep(void) {
                 can_router_process_uart_byte(b);
                 wake_listen_start = s_ticks_ms; /* Extend window while active packet streams */
             }
+            if (s_irq_woke_by_can || g_nuc131_can_woke_flag || ((PD->PIN & (1U << 6)) == 0)) {
+                PC->DOUT &= ~(1U << 3);
+                can_router_notify_wake();
+                break;
+            }
             can_frame_t rx_can;
             if (hal_can_receive(&rx_can) == HAL_STATUS_OK) {
                 PC->DOUT &= ~(1U << 3);
+                can_router_notify_wake();
                 can_router_process_can(&rx_can);
                 break;
             }
