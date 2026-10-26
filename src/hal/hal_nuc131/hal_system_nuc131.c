@@ -256,8 +256,7 @@ void hal_system_enter_deep_sleep(void) {
     bool woke_by_can = (pd_wake != 0U) ||
                        (pa_wake != 0U) ||
                        (can_wu != 0U)  ||
-                       ((PD->PIN & (1U << 6)) == 0U) ||
-                       ((PA->PIN & (1U << 0)) != 0U);
+                       ((PD->PIN & (1U << 6)) == 0U);
 
     /* Disarm wake-only GPIO interrupts and clear pending flags before re-enabling IRQs */
     GPIO_DisableInt(PD, 6);
