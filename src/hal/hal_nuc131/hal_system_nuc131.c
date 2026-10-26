@@ -8,8 +8,7 @@
 
 static volatile uint32_t s_ticks_ms = 0;
 
-/* Latched in EXTI / CAN ISRs because NVIC executes ISRs and clears hardware flags
- * immediately upon waking from WFI before hal_system_enter_deep_sleep() resumes. */
+/* Shared with hal_can_nuc131.c and latched by ISRs if an interrupt fires during the post-wake listen window */
 extern volatile bool g_nuc131_can_woke_flag;
 static volatile bool s_irq_woke_by_can = false;
 
@@ -32,21 +31,31 @@ void PWRWU_IRQHandler(void) {
 }
 
 void GPAB_IRQHandler(void) {
-    if (PA->ISRC & (1U << 0)) {
-        s_irq_woke_by_can = true; /* Woken by PA.0 Ignition sense */
+    uint32_t pa_isrc = PA->ISRC;
+    uint32_t pb_isrc = PB->ISRC;
+
+    /* Clear interrupt sources immediately */
+    PA->ISRC = pa_isrc;
+    PB->ISRC = pb_isrc;
+
+    /* Only latch CAN/Ignition wake if PA.0 triggered AND PA.0 is actively HIGH */
+    if ((pa_isrc & (1U << 0)) && ((PA->PIN & (1U << 0)) != 0U)) {
+        s_irq_woke_by_can = true;
     }
-    PA->ISRC = PA->ISRC; /* Clear Port A interrupt flags */
-    PB->ISRC = PB->ISRC; /* Clear Port B interrupt flags (PB.0 UART RX) */
 }
 
 void GPCDEF_IRQHandler(void) {
-    if (PD->ISRC & (1U << 6)) {
-        s_irq_woke_by_can = true; /* Woken by PD.6 CAN_RX dominant edge */
-    }
+    uint32_t pd_isrc = PD->ISRC;
+
     PC->ISRC = PC->ISRC;
-    PD->ISRC = PD->ISRC; /* Clear Port D interrupt flags */
+    PD->ISRC = pd_isrc;
     PE->ISRC = PE->ISRC;
     PF->ISRC = PF->ISRC;
+
+    /* Latch CAN wake if PD.6 (CAN_RX) triggered a falling-edge interrupt */
+    if (pd_isrc & (1U << 6)) {
+        s_irq_woke_by_can = true;
+    }
 }
 
 hal_status_t hal_system_init(void) {
@@ -156,17 +165,6 @@ static void hal_system_on_wakeup(bool woke_by_can) {
 
     // Re-arm SysTick for exact 1ms task scheduler
     CLK_EnableSysTick(CLK_CLKSEL0_STCLK_S_HCLK, SystemCoreClock / 1000);
-
-    // Disable wakeup interrupts to prevent re-triggering during active run
-    GPIO_DisableInt(PD, 6);
-    GPIO_DisableInt(PA, 0);
-    GPIO_DisableInt(PB, 0);
-    CAN_DISABLE_WAKEUP(CAN0);
-
-    NVIC_ClearPendingIRQ(GPCDEF_IRQn);
-    NVIC_ClearPendingIRQ(GPAB_IRQn);
-    NVIC_ClearPendingIRQ(PWRWU_IRQn);
-    NVIC_ClearPendingIRQ(CAN0_IRQn);
 }
 
 void hal_system_enter_deep_sleep(void) {
@@ -185,11 +183,11 @@ void hal_system_enter_deep_sleep(void) {
     SysTick->CTRL = 0;
     SysTick->VAL  = 0;
 
-    /* Reset latched ISR wake flags prior to enabling wake interrupts */
-    s_irq_woke_by_can = false;
-    g_nuc131_can_woke_flag = false;
+    /* 4. Mask global interrupts via PRIMASK before arming wake sources.
+     * On Cortex-M0, enabled NVIC interrupts still wake the core from WFI when PRIMASK=1,
+     * allowing deterministic inspection of raw ISRC/WU_STATUS flags before any ISR runs. */
+    __disable_irq();
 
-    /* 4. Configure Wakeup Interrupt Sources */
     SYS_UnlockReg();
 
     // Pause WDT during deep sleep so it does not reset the sleeping MCU every 1.6s
@@ -198,32 +196,38 @@ void hal_system_enter_deep_sleep(void) {
     // Enable Brown-Out Detector Low-Power Mode during deep sleep
     SYS_SET_BOD_LPM();
 
-    // Enable hardware CAN Wake-up on CAN0 Rx edge
+    // Enable hardware CAN Wake-up on CAN0 Rx edge and clear any stale wake status
+    CAN0->WU_STATUS = 0;
     CAN_ENABLE_WAKEUP(CAN0);
-    NVIC_ClearPendingIRQ(CAN0_IRQn);
-    NVIC_EnableIRQ(CAN0_IRQn);
 
-    // Clear any stale GPIO interrupt flags before arming EXTI
+    // Enable EXTI on PD6 (CAN_RX), PA0 (Ignition), and PB0 (UART0_RXD)
+    GPIO_EnableInt(PD, 6, GPIO_INT_FALLING);
+    GPIO_EnableInt(PA, 0, GPIO_INT_RISING);
+    GPIO_EnableInt(PB, 0, GPIO_INT_FALLING);
+
+    // Clear all GPIO interrupt status flags and NVIC pending bits AFTER enabling EXTI
+    // so no stale edge prior to sleep can falsely classify the wake source
     PA->ISRC = PA->ISRC;
     PB->ISRC = PB->ISRC;
+    PC->ISRC = PC->ISRC;
     PD->ISRC = PD->ISRC;
+    PE->ISRC = PE->ISRC;
+    PF->ISRC = PF->ISRC;
 
-    // Enable EXTI on PD6 (CAN_RX) to wake on dominant CAN bus pulse
-    GPIO_EnableInt(PD, 6, GPIO_INT_FALLING);
+    s_irq_woke_by_can = false;
+    g_nuc131_can_woke_flag = false;
+
+    NVIC_ClearPendingIRQ(CAN0_IRQn);
     NVIC_ClearPendingIRQ(GPCDEF_IRQn);
-    NVIC_EnableIRQ(GPCDEF_IRQn);
-
-    // Enable EXTI on PA0 (Hardware Ignition Sense line, if wired)
-    GPIO_EnableInt(PA, 0, GPIO_INT_RISING);
-
-    // Enable EXTI on PB0 (UART0_RXD) to wake on incoming Head Unit / Flasher serial commands
-    GPIO_EnableInt(PB, 0, GPIO_INT_FALLING);
     NVIC_ClearPendingIRQ(GPAB_IRQn);
+    NVIC_ClearPendingIRQ(PWRWU_IRQn);
+
+    NVIC_EnableIRQ(CAN0_IRQn);
+    NVIC_EnableIRQ(GPCDEF_IRQn);
     NVIC_EnableIRQ(GPAB_IRQn);
 
     // Enable Power-down Wake-up Interrupt in Clock Controller
     CLK->PWRCON |= CLK_PWRCON_PD_WU_INT_EN_Msk;
-    NVIC_ClearPendingIRQ(PWRWU_IRQn);
     NVIC_EnableIRQ(PWRWU_IRQn);
 
     /* 5. Enable Cortex-M0 Deep Sleep in SCB */
@@ -241,12 +245,35 @@ void hal_system_enter_deep_sleep(void) {
     /*   MCU WAKES UP HERE IMMEDIATELY UPON BUS/KEY TRANSITION   */
     /* ========================================================= */
 
-    /* Check latched ISR wake flags AND instantaneous pin/peripheral states */
-    bool woke_by_can = s_irq_woke_by_can ||
-                       g_nuc131_can_woke_flag ||
-                       ((PD->PIN & (1U << 6)) == 0) ||
-                       ((PA->PIN & (1U << 0)) != 0) ||
-                       ((CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk) != 0);
+    /* Sample raw hardware wake flags while PRIMASK=1 before any ISR clears them:
+     * - PD.6 falling edge (CAN_RX dominant pulse) or PD.6 actively dominant LOW
+     * - CAN0 hardware wake-up status bit
+     * - PA.0 rising edge (Ignition sense) verified with PA.0 pin still HIGH */
+    uint32_t pd_wake = PD->ISRC & (1U << 6);
+    uint32_t pa_wake = (PA->ISRC & (1U << 0)) && ((PA->PIN & (1U << 0)) != 0U);
+    uint32_t can_wu  = CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk;
+
+    bool woke_by_can = (pd_wake != 0U) ||
+                       (pa_wake != 0U) ||
+                       (can_wu != 0U)  ||
+                       ((PD->PIN & (1U << 6)) == 0U) ||
+                       ((PA->PIN & (1U << 0)) != 0U);
+
+    /* Disarm wake-only GPIO interrupts and clear pending flags before re-enabling IRQs */
+    GPIO_DisableInt(PD, 6);
+    GPIO_DisableInt(PA, 0);
+    GPIO_DisableInt(PB, 0);
+    CAN_DISABLE_WAKEUP(CAN0);
+
+    PA->ISRC = PA->ISRC;
+    PB->ISRC = PB->ISRC;
+    PD->ISRC = PD->ISRC;
+    CAN0->WU_STATUS = 0;
+    CLK->PWRCON |= CLK_PWRCON_PD_WU_STS_Msk;
+
+    NVIC_ClearPendingIRQ(GPCDEF_IRQn);
+    NVIC_ClearPendingIRQ(GPAB_IRQn);
+    NVIC_ClearPendingIRQ(PWRWU_IRQn);
 
     CAN0->CON &= ~CAN_CON_DAR_Msk;
     SYS_UnlockReg();
@@ -254,6 +281,9 @@ void hal_system_enter_deep_sleep(void) {
     SYS_LockReg();
 
     hal_system_on_wakeup(woke_by_can);
+
+    /* Re-enable global interrupts so SysTick, UART0, and CAN0 ISRs run normally */
+    __enable_irq();
 
     /* If woken by UART RX (PB0), wait up to 50 ms for any incoming UART command
      * (such as 0xE0 firmware upgrade trigger) before re-entering deep sleep */
@@ -265,7 +295,7 @@ void hal_system_enter_deep_sleep(void) {
                 can_router_process_uart_byte(b);
                 wake_listen_start = s_ticks_ms; /* Extend window while active packet streams */
             }
-            if (s_irq_woke_by_can || g_nuc131_can_woke_flag || ((PD->PIN & (1U << 6)) == 0)) {
+            if (s_irq_woke_by_can || g_nuc131_can_woke_flag || ((PD->PIN & (1U << 6)) == 0U)) {
                 PC->DOUT &= ~(1U << 3);
                 can_router_notify_wake();
                 break;
