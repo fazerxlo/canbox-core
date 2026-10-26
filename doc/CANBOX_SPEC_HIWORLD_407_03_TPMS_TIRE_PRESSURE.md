@@ -35,17 +35,18 @@ The Peugeot 407 features active TPMS (DSG — *Détection de Sous-Gonflage*) whe
   - `Byte 5`: `tpms_system_state` (`0x20` = nominal monitoring active, `0x80` = system unmonitored/standby)
   - `Bytes 6–7`: Reserved (`0x00 0x00`)
 - **Per-Wheel Bitfield Layout (`Bytes 0..4`):**
-  - **`Bit 7` (`0x80`):** Unmonitored / Standby / Sensor Offline Flag (`1` = wheel not monitored / standby on bench `0x80`).
-  - **`Bits 5..3` (`(raw >> 3) & 0x07`):** 3-bit discrete wheel status enum (verified on OEM MDF & RT4):
+  - **`Bits 7:3` (`(raw >> 3) & 0x1F`):** 5-bit discrete wheel status enum (verified on OEM RT4 disassembly `get_wheel_status__9C_BCM_CANP17type_wheel_status` & EMF-C):
+  - Note: In 32-bit PowerPC disassembly jump tables, enum values are scaled by $4$ (`slwi r, 2`), producing table offsets `0x00, 0x04, 0x08, 0x0C, 0x10`. The RT4 default/invalid value is `0x8` (`0x8 << 3 = 0x40`), representing unmonitored wheels.
 
-| Enum `(raw >> 3) & 0x07` | Raw Byte (`enum << 3`) | Wheel Status Description | MDF / Cluster Behavior | Hiworld `Cmd 0x18` Code |
-| :---: | :---: | :--- | :--- | :---: |
-| **`0`** | `0x00` | **Normal / OK** | Normal tire graphic | `0x00` (Normal) |
-| **`1`** | `0x08` | **Under-inflated (Low Pressure)** | Amber `SERVICE` + wheel icon | `0x01` (Low) |
-| **`2`** | `0x10` | **Punctured / Flat** | Red `STOP` + flat tire icon | `0x02` (Puncture) |
-| **`3`** | `0x18` | **Sensor Missing / Not Detected** | Missing sensor warning | `0x03` (Fault/Offline) |
-| **`4`** | `0x20` | **Sensor Battery Low / HW Fault** | Service / battery warning | `0x03` (Fault/Offline) |
-| *(Bit 7 = 1)* | `0x80` | **Not Monitored / Standby** | Unmonitored (`80 80 80 80 80 80`) | Suppressed at boot / `0x03` |
+| Enum `(raw >> 3) & 0x1F` | Raw Byte (`enum << 3`) | PPC Jump Table Offset | Wheel Status Description | MDF / Cluster Behavior | Hiworld `Cmd 0x18` Code |
+| :---: | :---: | :---: | :--- | :--- | :---: |
+| **`0`** | `0x00` | `0x00` | **Normal / OK** | Normal tire graphic | `0x00` (Normal) |
+| **`1`** | `0x08` | `0x04` | **Under-inflated (Low Pressure)** | Amber `SERVICE` + wheel icon | `0x01` (Low) |
+| **`2`** | `0x10` | `0x08` | **Punctured / Flat** | Red `STOP` + flat tire icon | `0x02` (Puncture) |
+| **`3`** | `0x18` | `0x0C` | **Sensor Missing / Not Detected** | Missing sensor warning | `0x03` (Fault/Offline) |
+| **`4`** | `0x20` | `0x10` | **Sensor Battery Low / HW Fault** | Service / battery warning | `0x03` (Fault/Offline) |
+| **`8`** | `0x40` | `0x20` / default | **Default / Invalid (Unmonitored)** | Unmonitored (bench / offline sensor) | `0x03` (Fault/Offline) |
+| **`16`** | `0x80` | `0x40` / default | **Unequipped / Standby (Spare)** | Spare offline / unmonitored | `0x03` (Fault/Offline) |
 
 ### 2.2 Two-Tier Hybrid TPMS Architecture
 1. **Tier 1 (Basic Mode — Default on Peugeot 407 when only `0x1E1` is present):**
@@ -219,11 +220,7 @@ static inline void psa_tpms_process_can_0x3a1(psa_tpms_ctx_t *ctx, const uint8_t
 
 /* Decode single wheel from 0x1E1 byte */
 static inline uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw, uint8_t nominal_deci, uint8_t *out_synth_bar) {
-    if (raw & 0x80) {
-        if (out_synth_bar) *out_synth_bar = 0;
-        return 3; /* Fault / Unmonitored */
-    }
-    uint8_t code = (raw >> 3) & 0x07;
+    uint8_t code = (uint8_t)((raw >> 3) & 0x1F);
     switch (code) {
         case 0:
             if (out_synth_bar) *out_synth_bar = nominal_deci;
@@ -234,9 +231,13 @@ static inline uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw, uint8_t nominal_d
         case 2:
             if (out_synth_bar) *out_synth_bar = 8;
             return 2; /* Puncture */
+        case 3:
+        case 4:
+        case 8:  /* RT4 Default / Invalid: Unmonitored 0x40 */
+        case 16: /* Unequipped 0x80 */
         default:
             if (out_synth_bar) *out_synth_bar = 0;
-            return 3; /* Fault */
+            return 3; /* Fault / Offline */
     }
 }
 
@@ -244,10 +245,10 @@ static inline uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw, uint8_t nominal_d
 static inline void psa_tpms_process_can_0x1e1(psa_tpms_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
     if (!ctx || !data || dlc < 4) return;
 
-    /* Guard against standby / unequipped 80 80 80 80 frame before TPMS wakes up */
+    /* Guard against standby / unequipped / unmonitored frames before TPMS wakes up */
     if (!ctx->state.valid &&
-        (data[0] & 0x80) != 0 && (data[1] & 0x80) != 0 &&
-        (data[2] & 0x80) != 0 && (data[3] & 0x80) != 0) {
+        ((data[0] & 0xC0) != 0) && ((data[1] & 0xC0) != 0) &&
+        ((data[2] & 0xC0) != 0) && ((data[3] & 0xC0) != 0)) {
         return;
     }
 

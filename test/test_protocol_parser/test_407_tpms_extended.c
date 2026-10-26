@@ -238,6 +238,14 @@ void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void) {
     TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[0]);
     TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[1]);
 
+    // Also verify 0x40 (Bit 6 / enum 0x08 = RT4 Invalid/Default unmonitored) maps to Fault/Offline (3)
+    const uint8_t can_1e1_unmonitored[] = { 0x40, 0x40, 0x00, 0x00 };
+    psa_tpms_process_can_0x1e1(&tpms, can_1e1_unmonitored, sizeof(can_1e1_unmonitored));
+    TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[0]);
+    TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[1]);
+
     // Re-apply first test vector to verify packet builders
     psa_tpms_process_can_0x1e1(&tpms, can_1e1, sizeof(can_1e1));
 
@@ -269,6 +277,11 @@ void test_peugeot_407_tpms_standby_guard(void) {
 
     const uint8_t standby_masked_frame[] = { 0x88, 0x90, 0x80, 0x80, 0x00, 0x00, 0x00, 0x00 };
     psa_tpms_process_can_0x1e1(&tpms, standby_masked_frame, sizeof(standby_masked_frame));
+    TEST_ASSERT_FALSE(tpms.valid);
+
+    // Bench unmonitored frame (0x40 on road wheels, 0x80 on spare): should be ignored before TPMS wakes up
+    const uint8_t bench_unmonitored_frame[] = { 0x40, 0x40, 0x40, 0x40, 0x80, 0x20, 0x00, 0x00 };
+    psa_tpms_process_can_0x1e1(&tpms, bench_unmonitored_frame, sizeof(bench_unmonitored_frame));
     TEST_ASSERT_FALSE(tpms.valid);
 
     // When normal frame arrives, TPMS activates

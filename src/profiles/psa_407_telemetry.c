@@ -233,35 +233,33 @@ void psa_tpms_init(vehicle_tpms_t *tpms) {
 }
 
 static uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw_byte, uint8_t nominal_deci_bar, uint8_t *out_synth_bar) {
-    /* Bit 7 (0x80): Unmonitored / Standby / Sensor Offline Flag */
-    if ((raw_byte & 0x80) != 0) {
-        if (out_synth_bar) *out_synth_bar = 0;
-        return 3; /* Hiworld: Sensor Fault / Offline */
-    }
-
-    /* PSA 0x1E1 Bits 5..3 ((raw_byte >> 3) & 0x07) discrete wheel status enum:
-     * 0 (raw 0x00) = Normal / OK
-     * 1 (raw 0x08) = Under-inflated (Low pressure)
-     * 2 (raw 0x10) = Punctured (Flat)
-     * 3 (raw 0x18) = Sensor Missing / Not Detected
-     * 4 (raw 0x20) = Sensor Battery Low / Hardware Fault
+    /* RT4 / PSA CAN 0x1E1 Bits 7:3 (5-bit enum, (raw_byte >> 3) & 0x1F):
+     * 0x00 (raw 0x00) = Normal / OK
+     * 0x01 (raw 0x08) = Under-inflated (Low pressure)
+     * 0x02 (raw 0x10) = Punctured (Flat)
+     * 0x03 (raw 0x18) = Sensor Missing / Not Detected
+     * 0x04 (raw 0x20) = Sensor Battery Low / Hardware Fault
+     * 0x08 (raw 0x40) = RT4 Default / Invalid: Unmonitored / Standby
+     * 0x10 (raw 0x80) = Sensor Offline / Unequipped (e.g. spare wheel)
      */
-    uint8_t state_enum = (uint8_t)((raw_byte >> 3) & 0x07);
+    uint8_t state_enum = (uint8_t)((raw_byte >> 3) & 0x1F);
     switch (state_enum) {
-        case 0:
+        case 0x00:
             if (out_synth_bar) *out_synth_bar = nominal_deci_bar;
             return 0; /* Hiworld: Normal / OK */
-        case 1:
+        case 0x01:
             if (out_synth_bar) *out_synth_bar = 17; /* 1.7 Bar synthetic low */
             return 1; /* Hiworld: Low Pressure */
-        case 2:
+        case 0x02:
             if (out_synth_bar) *out_synth_bar = 8;  /* 0.8 Bar synthetic puncture */
             return 2; /* Hiworld: Puncture / Flat */
-        case 3:
-        case 4:
+        case 0x03:
+        case 0x04:
+        case 0x08: /* RT4 Default / Invalid: Unmonitored (raw 0x40) */
+        case 0x10: /* Sensor Offline / Unequipped (raw 0x80) */
         default:
             if (out_synth_bar) *out_synth_bar = 0;  /* 0.0 Bar / Offline */
-            return 3; /* Hiworld: Sensor Fault / Missing */
+            return 3; /* Hiworld: Sensor Fault / Offline / Missing */
     }
 }
 
@@ -287,10 +285,13 @@ void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
 void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
     if (!tpms || !data || dlc < 4) return;
 
-    /* Guard against standby / unequipped 80 80 80 80 frame before TPMS wakes up */
+    /* Guard against standby / unequipped / unmonitored frames before TPMS wakes up
+     * (Bit 7 set = unequipped 0x80, or Bit 6 set = unmonitored 0x40, i.e. (data & 0xC0) != 0).
+     * Bench frames (40 40 40 40) or unequipped frames (80 80 80 80) must not latch synthetic
+     * pressures or assert false normal tire states. */
     if (!tpms->valid &&
-        (data[0] & 0x80) != 0 && (data[1] & 0x80) != 0 &&
-        (data[2] & 0x80) != 0 && (data[3] & 0x80) != 0) {
+        ((data[0] & 0xC0) != 0) && ((data[1] & 0xC0) != 0) &&
+        ((data[2] & 0xC0) != 0) && ((data[3] & 0xC0) != 0)) {
         return;
     }
 
