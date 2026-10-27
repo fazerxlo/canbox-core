@@ -193,12 +193,12 @@ void test_peugeot_407_tpms_hiworld_0x3a1_pressures(void) {
     TEST_ASSERT_EQUAL_UINT32(11, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, out, sizeof(exp_numeric));
 
-    // Test 0xFF sentinel (invalid / offline sensor): RL = 0xFF -> 0 deci-bar
+    // Test 0xFF sentinel (invalid / offline sensor): RL = 0xFF -> 0xFF deci-bar (sentinel for --.-)
     const uint8_t can_3a1_invalid[] = { 48, 48, 44, 0xFF, 0x00, 0x00, 0x00, 0x00 };
     psa_tpms_process_can_0x3a1(&tpms, can_3a1_invalid, sizeof(can_3a1_invalid));
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[1]);
-    TEST_ASSERT_EQUAL_UINT8(0,  tpms.pressure_bar_deci[2]); // RL 0xFF -> 0
+    TEST_ASSERT_EQUAL_UINT8(0xFF,  tpms.pressure_bar_deci[2]); // RL 0xFF -> 0xFF
     TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[3]); // RR 44 -> 22
 }
 
@@ -222,29 +222,29 @@ void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void) {
 
     // In Basic Mode (no direct numeric frames yet), synthetic pressures are populated:
     // FL (OK): 24 (2.4 Bar)
-    // FR (LOW): 17 (1.7 Bar)
-    // RL (FAULT): 0 (0.0 Bar)
-    // RR (FLAT): 8 (0.8 Bar)
+    // FR (LOW): 15 (1.5 Bar)
+    // RL (FAULT): 0xFF (--.- on HU)
+    // RR (FLAT): 0 (0.0 Bar)
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[0]);
-    TEST_ASSERT_EQUAL_UINT8(17, tpms.pressure_bar_deci[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[2]);
-    TEST_ASSERT_EQUAL_UINT8(8, tpms.pressure_bar_deci[3]);
+    TEST_ASSERT_EQUAL_UINT8(15, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[3]);
 
     // Also verify enum 3 (0x18 = Sensor Missing) and Bit 7 (0x80 = Unmonitored) map to Fault (3)
     const uint8_t can_1e1_missing[] = { 0x18, 0x80, 0x00, 0x00 };
     psa_tpms_process_can_0x1e1(&tpms, can_1e1_missing, sizeof(can_1e1_missing));
     TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[0]); // FL Missing -> 3
     TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[1]); // FR Unmonitored (0x80) -> 3
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[1]);
 
     // Also verify 0x40 (Bit 6 / enum 0x08 = RT4 Invalid/Default unmonitored) maps to Fault/Offline (3)
     const uint8_t can_1e1_unmonitored[] = { 0x40, 0x40, 0x00, 0x00 };
     psa_tpms_process_can_0x1e1(&tpms, can_1e1_unmonitored, sizeof(can_1e1_unmonitored));
     TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[0]);
     TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[1]);
 
     // Re-apply first test vector to verify packet builders
     psa_tpms_process_can_0x1e1(&tpms, can_1e1, sizeof(can_1e1));
@@ -257,9 +257,9 @@ void test_peugeot_407_tpms_hiworld_0x1e1_status_enum(void) {
     TEST_ASSERT_EQUAL_UINT32(9, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_discrete, out, sizeof(exp_discrete));
 
-    // Numeric packet: Cmd 0x66, Len 0x06, Mode=1, FL=24, FR=17, RL=0, RR=8, Unit=0
-    // Checksum = (0x06 + 0x66 + 1 + 24 + 17 + 0 + 8 + 0 - 1) & 0xFF = 0x9D
-    const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 24, 17, 0, 8, 0x00, 0x9D };
+    // Numeric packet: Cmd 0x66, Len 0x06, Mode=1, FL=24, FR=15, RL=0xFF, RR=0, Unit=0
+    // Checksum = (0x06 + 0x66 + 1 + 24 + 15 + 255 + 0 + 0 - 1) & 0xFF = 0x92
+    const uint8_t exp_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 24, 15, 0xFF, 0, 0x00, 0x92 };
     len = build_hiworld_tpms_numeric(&tpms, out, sizeof(out));
     TEST_ASSERT_EQUAL_UINT32(11, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_numeric, out, sizeof(exp_numeric));
@@ -304,10 +304,10 @@ void test_peugeot_407_tpms_standby_guard(void) {
     TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[1]);
     TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[2]);
     TEST_ASSERT_EQUAL_UINT8(3, tpms.alarm_state[3]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[2]);
-    TEST_ASSERT_EQUAL_UINT8(0, tpms.pressure_bar_deci[3]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[0]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[1]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[2]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, tpms.pressure_bar_deci[3]);
 }
 
 void test_peugeot_407_tpms_two_tier_hybrid(void) {
@@ -319,7 +319,7 @@ void test_peugeot_407_tpms_two_tier_hybrid(void) {
     psa_tpms_process_can_0x1e1(&tpms, can_1e1_low, sizeof(can_1e1_low));
     TEST_ASSERT_TRUE(tpms.valid);
     TEST_ASSERT_EQUAL_UINT8(1, tpms.alarm_state[0]); // FL Low
-    TEST_ASSERT_EQUAL_UINT8(17, tpms.pressure_bar_deci[0]); // FL 1.7 Bar synthetic
+    TEST_ASSERT_EQUAL_UINT8(15, tpms.pressure_bar_deci[0]); // FL 1.5 Bar synthetic
     TEST_ASSERT_EQUAL_UINT8(24, tpms.pressure_bar_deci[1]); // FR 2.4 Bar nominal
     TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[2]); // RL 2.2 Bar nominal
     TEST_ASSERT_EQUAL_UINT8(22, tpms.pressure_bar_deci[3]); // RR 2.2 Bar nominal
@@ -327,7 +327,7 @@ void test_peugeot_407_tpms_two_tier_hybrid(void) {
     // Verify Vector 4 serialization against Hiworld packet builders
     uint8_t out[32];
     uint32_t len = build_hiworld_tpms_numeric(&tpms, out, sizeof(out));
-    const uint8_t exp_v4_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 17, 24, 22, 22, 0x00, 0xC1 };
+    const uint8_t exp_v4_numeric[] = { 0x5A, 0xA5, 0x06, 0x66, 0x01, 15, 24, 22, 22, 0x00, 0xBF };
     TEST_ASSERT_EQUAL_UINT32(11, len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_v4_numeric, out, sizeof(exp_v4_numeric));
 
@@ -342,12 +342,12 @@ void test_peugeot_407_tpms_two_tier_hybrid(void) {
     psa_tpms_process_can_0x3a1(&tpms, can_3a1, sizeof(can_3a1));
     TEST_ASSERT_EQUAL_UINT8(23, tpms.pressure_bar_deci[0]); // Real 2.3 Bar
 
-    // 3. Subsequent 0x1E1 frames must NOT overwrite real pressure readings!
+    // 3. Subsequent 0x1E1 frames must NOT overwrite real pressure readings while 0x3A1 is active!
     // (0x10 = 2 << 3 = Punctured / Flat)
     const uint8_t can_1e1_punct[] = { 0x10, 0x00, 0x00, 0x00 }; // FL Puncture (alarm 2)
     psa_tpms_process_can_0x1e1(&tpms, can_1e1_punct, sizeof(can_1e1_punct));
     TEST_ASSERT_EQUAL_UINT8(2, tpms.alarm_state[0]); // Alarm state updated to puncture
-    TEST_ASSERT_EQUAL_UINT8(23, tpms.pressure_bar_deci[0]); // Preserves direct reading 2.3 Bar (not overwritten by 8)
+    TEST_ASSERT_EQUAL_UINT8(23, tpms.pressure_bar_deci[0]); // Preserves direct reading 2.3 Bar (not overwritten by synthetic 0)
 }
 
 void test_peugeot_407_tpms_hiworld_pipeline_and_boundaries(void) {

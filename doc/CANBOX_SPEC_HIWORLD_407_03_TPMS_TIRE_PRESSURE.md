@@ -53,12 +53,12 @@ The Peugeot 407 features active TPMS (DSG — *Détection de Sous-Gonflage*) whe
    - Discrete wheel statuses from `0x1E1` are mapped to Hiworld `Cmd 0x18` (`0`=Normal, `1`=Low, `2`=Puncture, `3`=Fault).
    - Because standard Peugeot 407 configurations do not broadcast numeric pressures unless enabled via Diagbox, `0x1E1` also synthesizes representative pressures in `pressure_bar_deci[]` dispatched via `Cmd 0x66` so the Android Head Unit TPMS UI displays sensible pressures alongside the tire alert graphics:
      - Normal (`enum = 0`): Front = `24` ($2.4\text{ Bar}$), Rear = `22` ($2.2\text{ Bar}$)
-     - Low Pressure (`enum = 1`): `17` ($1.7\text{ Bar}$)
-     - Puncture (`enum = 2`): `8` ($0.8\text{ Bar}$)
-     - Missing / Fault (`enum >= 3` or `0x80`): `0` ($0.0\text{ Bar}$ / `--`)
+     - Low Pressure (`enum = 1`): `15` ($1.5\text{ Bar}$)
+     - Puncture / Flat (`enum = 2`): `0` ($0.0\text{ Bar}$)
+     - Missing / Fault (`enum >= 3` or `0x80`): `0xFF` (displays `--.-` on Head Unit)
 2. **Tier 2 (Direct Numeric Mode — `0x3A1` Active):**
-   - Upon receiving a valid direct numeric frame (`0x3A1` with `DLC >= 4`), the decoder latches `s_has_direct_pressures = true`.
-   - Once latched, `0x1E1` updates `alarm_state[]` only and **stops overwriting** `pressure_bar_deci[]`, preserving exact physical sensor measurements from `0x3A1`.
+   - Upon receiving a valid direct numeric frame (`0x3A1` with `DLC >= 4`), direct mode is active with a 3000 ms timeout window (`s_last_3a1_time_ms`).
+   - While `0x3A1` is active, `0x1E1` updates `alarm_state[]` for `Cmd 0x18` only and **stops overwriting** `pressure_bar_deci[]`, preserving exact physical sensor measurements from `0x3A1`. If `0x3A1` ceases for > 3000 ms, `0x1E1` resumes synthesizing pressures for `Cmd 0x66`.
 3. **Standby / Unequipped Guard (`1E1#8080808080800000`):**
    - On vehicles without TPMS or on bench/startup before sensor wake-up, the BSI broadcasts `80 80 80 80 80 80 00 00` (Bit 7 `0x80` set on all wheels and `Byte 5 = 0x80`).
    - If `tpms->valid` is `false` and all four road wheels have Bit 7 set (`(data[x] & 0x80) != 0`), the frame is ignored so no false `0.0 Bar` or fault frames are sent to the Head Unit.
@@ -80,7 +80,7 @@ The Peugeot 407 features active TPMS (DSG — *Détection de Sous-Gonflage*) whe
 | 4-7 | 31:0 | RESERVED | raw | 0x00000000 | Reserved |
 
 **Conversion to Decibar (0.1 Bar/LSB):**
-- $\text{deci\_bar} = \begin{cases} 0 & \text{if } \text{raw} = 0\text{xFF (Invalid/Sensor Offline)} \\ (\text{raw} \times 5 + 5) / 10 & \text{otherwise (integer rounding)} \end{cases}$
+- $\text{deci\_bar} = \begin{cases} 0\text{xFF} & \text{if } \text{raw} = 0\text{xFF (Invalid/Sensor Offline } \implies \text{displays --.-)} \\ (\text{raw} \times 5 + 5) / 10 & \text{otherwise (integer rounding)} \end{cases}$
 
 > [!NOTE]
 > Note the axle layout mapping: on PSA CAN 2004 bus, Byte 2 is **Rear Right (RR)** and Byte 3 is **Rear Left (RL)**. Hiworld protocol expects `RL` at byte index 3 and `RR` at byte index 4. The decoder explicitly swaps the rear axle positions into their correct logical slots.
@@ -226,11 +226,11 @@ static inline uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw, uint8_t nominal_d
             if (out_synth_bar) *out_synth_bar = nominal_deci;
             return 0; /* OK */
         case 1:
-            if (out_synth_bar) *out_synth_bar = 17;
+            if (out_synth_bar) *out_synth_bar = 15;
             return 1; /* Low */
         case 2:
-            if (out_synth_bar) *out_synth_bar = 8;
-            return 2; /* Puncture */
+            if (out_synth_bar) *out_synth_bar = 0;
+            return 2; /* Puncture / Flat */
         case 3:
         case 4:
         case 8:  /* RT4 Default / Invalid: Unmonitored 0x40 */
@@ -304,5 +304,5 @@ cansend vcan0 3A1#30302C2C
 cansend vcan0 1E1#0800000000200000
 ```
 * **Expected UART Output:**
-  - **Numeric (`Cmd 0x66`, Synthetic):** `5A A5 06 66 01 11 18 16 16 00 C1` (`FL=1.7, FR=2.4, RL=2.2, RR=2.2 Bar`)
+  - **Numeric (`Cmd 0x66`, Synthetic):** `5A A5 06 66 01 0F 18 16 16 00 BF` (`FL=1.5, FR=2.4, RL=2.2, RR=2.2 Bar`)
   - **Discrete (`Cmd 0x18`):** `5A A5 04 18 01 00 00 00 1C` (`FL alarm = 0x01 LOW`)

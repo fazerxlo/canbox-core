@@ -1,5 +1,6 @@
 #include "profiles/peugeot_407.h"
 #include "hal/hal_gpio.h"
+#include "hal/hal_system.h"
 #include <string.h>
 
 static inline uint16_t read_be16(const uint8_t *d) {
@@ -265,10 +266,17 @@ hal_status_t psa_trip_send_reset(uint8_t trip_index) {
 /* --------------------------------------------------------------------------
  * 2.1 Direct TPMS Numeric Readings & Fault Classification
  * -------------------------------------------------------------------------- */
-static bool s_has_direct_pressures = false;
+static uint32_t s_last_3a1_time_ms = 0;
+
+static inline bool psa_tpms_has_direct_pressures(void) {
+    if (s_last_3a1_time_ms == 0) {
+        return false;
+    }
+    return (uint32_t)(hal_get_tick_ms() - s_last_3a1_time_ms) < 3000;
+}
 
 void psa_tpms_init(vehicle_tpms_t *tpms) {
-    s_has_direct_pressures = false;
+    s_last_3a1_time_ms = 0;
     if (!tpms) return;
     memset(tpms, 0, sizeof(vehicle_tpms_t));
     tpms->pressure_bar_deci[0] = 24; /* FL: 2.4 Bar default */
@@ -293,24 +301,24 @@ static uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw_byte, uint8_t nominal_dec
             if (out_synth_bar) *out_synth_bar = nominal_deci_bar;
             return 0; /* Hiworld: Normal / OK */
         case 0x01:
-            if (out_synth_bar) *out_synth_bar = 17; /* 1.7 Bar synthetic low */
+            if (out_synth_bar) *out_synth_bar = 15; /* 1.5 Bar synthetic low */
             return 1; /* Hiworld: Low Pressure */
         case 0x02:
-            if (out_synth_bar) *out_synth_bar = 8;  /* 0.8 Bar synthetic puncture */
+            if (out_synth_bar) *out_synth_bar = 0;  /* 0.0 Bar synthetic flat / puncture */
             return 2; /* Hiworld: Puncture / Flat */
         case 0x03:
         case 0x04:
         case 0x08: /* RT4 Default / Invalid: Unmonitored (raw 0x40) */
         case 0x10: /* Sensor Offline / Unequipped (raw 0x80) */
         default:
-            if (out_synth_bar) *out_synth_bar = 0;  /* 0.0 Bar / Offline */
+            if (out_synth_bar) *out_synth_bar = 0xFF; /* 0xFF = Invalid / Offline / Missing (--.- on HU) */
             return 3; /* Hiworld: Sensor Fault / Offline / Missing */
     }
 }
 
 static inline uint8_t psa_tpms_scale_0x3a1_raw(uint8_t raw) {
     if (raw == 0xFF) {
-        return 0; /* Invalid / Offline / Default */
+        return 0xFF; /* Invalid / Offline / Default (--.- on HU) */
     }
     return (uint8_t)((raw * 5 + 5) / 10);
 }
@@ -318,7 +326,8 @@ static inline uint8_t psa_tpms_scale_0x3a1_raw(uint8_t raw) {
 void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
     if (!tpms || !data || dlc < 4) return;
 
-    s_has_direct_pressures = true;
+    uint32_t now = hal_get_tick_ms();
+    s_last_3a1_time_ms = (now == 0) ? 1 : now;
 
     tpms->pressure_bar_deci[0] = psa_tpms_scale_0x3a1_raw(data[0]);        /* FL */
     tpms->pressure_bar_deci[1] = psa_tpms_scale_0x3a1_raw(data[1]);        /* FR */
@@ -349,9 +358,9 @@ void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
     tpms->alarm_state[2] = psa_tpms_decode_0x1e1_wheel(data[3], 22, &synth_rl); /* RL */
     tpms->alarm_state[3] = psa_tpms_decode_0x1e1_wheel(data[2], 22, &synth_rr); /* RR */
 
-    /* If no direct numeric pressures (0x3A1) have been received,
+    /* If no active direct numeric pressures (0x3A1) have been received within 3000 ms,
      * populate synthetic pressures so Hiworld Cmd 0x66 matches the discrete states. */
-    if (!s_has_direct_pressures) {
+    if (!psa_tpms_has_direct_pressures()) {
         tpms->pressure_bar_deci[0] = synth_fl;
         tpms->pressure_bar_deci[1] = synth_fr;
         tpms->pressure_bar_deci[2] = synth_rl;
