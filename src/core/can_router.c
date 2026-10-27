@@ -10,6 +10,7 @@ static vehicle_state_t s_current_state;
 static vehicle_state_t s_last_sent_state;
 static uint16_t        s_tpms_periodic_timer = 0;
 static uint8_t         s_doors_periodic_timer = 0;
+static uint8_t         s_telemetry_periodic_timer = 0;
 static uint8_t         s_audio_sync_timer = 0;
 static uint16_t        s_bulk_resync_timer = 0;
 static bool            s_angle_reverse_synced = false;
@@ -60,8 +61,19 @@ void can_router_init(void) {
     s_current_state.audio.speed_volume = false;
     s_current_state.audio.active_mode = 0;
     s_last_sent_state.audio = s_current_state.audio;
+    s_current_state.coolant_temp_c = 0x7F;
+    s_current_state.oil_temp_c = 0x7F;
+    s_current_state.fuel_liters = 0xFF;
+    s_current_state.fuel_percentage = 0xFF;
+    s_current_state.trip.instant_fuel_deci = 0xFFFF;
+    s_last_sent_state.coolant_temp_c = 0x7F;
+    s_last_sent_state.oil_temp_c = 0x7F;
+    s_last_sent_state.fuel_liters = 0xFF;
+    s_last_sent_state.fuel_percentage = 0xFF;
+    s_last_sent_state.trip.instant_fuel_deci = 0xFFFF;
     s_tpms_periodic_timer = 0;
     s_doors_periodic_timer = 0;
+    s_telemetry_periodic_timer = 0;
     s_audio_sync_timer = 0;
     s_bulk_resync_timer = 0;
     s_angle_reverse_synced = false;
@@ -245,6 +257,31 @@ void can_router_process_can(const can_frame_t *frame) {
                 s_last_sent_state.trip.trip2_avg_speed = s_current_state.trip.trip2_avg_speed;
                 s_last_sent_state.trip.trip2_distance_km = s_current_state.trip.trip2_distance_km;
                 s_last_sent_state.trip.trip2_valid = true;
+            }
+        }
+    }
+
+    // Immediately push powertrain & fluid telemetry on significant change (>= 2 km/h or >= 50 RPM)
+    if (s_current_state.dirty.telemetry) {
+        s_current_state.dirty.telemetry = false;
+        if (s_current_state.ignition_on) {
+            int32_t d_spd = (int32_t)s_current_state.speed_kmh - (int32_t)s_last_sent_state.speed_kmh;
+            int32_t d_rpm = (int32_t)s_current_state.rpm - (int32_t)s_last_sent_state.rpm;
+            if (d_spd < 0) d_spd = -d_spd;
+            if (d_rpm < 0) d_rpm = -d_rpm;
+
+            if (d_spd >= 2 || d_rpm >= 50) {
+                hu_protocol_send_telemetry_state(&s_current_state);
+                s_last_sent_state.speed_kmh = s_current_state.speed_kmh;
+                s_last_sent_state.rpm = s_current_state.rpm;
+                s_last_sent_state.coolant_temp_c = s_current_state.coolant_temp_c;
+                s_last_sent_state.oil_temp_c = s_current_state.oil_temp_c;
+                s_last_sent_state.fuel_liters = s_current_state.fuel_liters;
+                s_last_sent_state.fuel_percentage = s_current_state.fuel_percentage;
+                s_last_sent_state.fuel_low_warning = s_current_state.fuel_low_warning;
+                s_last_sent_state.gear = s_current_state.gear;
+                s_last_sent_state.trip.instant_fuel_deci = s_current_state.trip.instant_fuel_deci;
+                s_telemetry_periodic_timer = 0;
             }
         }
     }
@@ -549,6 +586,8 @@ void can_router_trigger_full_state_push(void) {
         s_current_state.dirty.audio = false;
     }
 
+    hu_protocol_send_telemetry_state(&s_current_state);
+
     s_bulk_resync_timer = 0;
     s_media_resync_timer = 0;
 }
@@ -611,6 +650,25 @@ void can_router_periodic_100ms(void) {
 
     // Periodic PSA car config / virtual MDF tick (100ms)
     psa_car_config_periodic_100ms();
+
+    // Broadcast periodic powertrain & fluid telemetry (Cmd 0x1A) at 5 Hz (200ms) while ignition is ON
+    if (s_current_state.ignition_on) {
+        if (++s_telemetry_periodic_timer >= 2) {
+            s_telemetry_periodic_timer = 0;
+            hu_protocol_send_telemetry_state(&s_current_state);
+            s_last_sent_state.speed_kmh = s_current_state.speed_kmh;
+            s_last_sent_state.rpm = s_current_state.rpm;
+            s_last_sent_state.coolant_temp_c = s_current_state.coolant_temp_c;
+            s_last_sent_state.oil_temp_c = s_current_state.oil_temp_c;
+            s_last_sent_state.fuel_liters = s_current_state.fuel_liters;
+            s_last_sent_state.fuel_percentage = s_current_state.fuel_percentage;
+            s_last_sent_state.fuel_low_warning = s_current_state.fuel_low_warning;
+            s_last_sent_state.gear = s_current_state.gear;
+            s_last_sent_state.trip.instant_fuel_deci = s_current_state.trip.instant_fuel_deci;
+        }
+    } else {
+        s_telemetry_periodic_timer = 0;
+    }
 
     // Broadcast periodic states (Vehicle speed, RPM)
     if (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||

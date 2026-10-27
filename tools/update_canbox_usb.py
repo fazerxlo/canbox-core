@@ -272,6 +272,174 @@ def copy_iap_safely(src_iap: Path, target_dir: Path, target_filename: str = "can
     return dst_file
 
 
+def sync_drive() -> None:
+    """Flushes kernel filesystem caches and syncs storage devices."""
+    print("[*] Synchronizing filesystem caches to disk (sync)...")
+    if hasattr(os, "sync"):
+        os.sync()
+    sync_bin = shutil.which("sync")
+    if sync_bin:
+        try:
+            subprocess.run([sync_bin], check=False)
+        except Exception:
+            pass
+
+
+def get_mount_info(path: Path) -> tuple[Path | None, str | None]:
+    """
+    Finds the mount point and block device for a given filesystem path.
+    Returns (mount_point, source_device).
+    """
+    target = path.resolve()
+
+    # 1. Try /proc/mounts on Linux
+    if os.path.exists("/proc/mounts"):
+        best_mnt: Path | None = None
+        best_dev: str | None = None
+        best_len = -1
+        try:
+            with open("/proc/mounts", "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        dev, mnt = parts[0], parts[1]
+                        decoded_mnt = decode_octal_escapes(mnt)
+                        mnt_path = Path(decoded_mnt).resolve()
+                        if target == mnt_path or mnt_path in target.parents:
+                            if len(str(mnt_path)) > best_len:
+                                best_len = len(str(mnt_path))
+                                best_mnt = mnt_path
+                                best_dev = dev
+            if best_mnt:
+                return best_mnt, best_dev
+        except Exception:
+            pass
+
+    # 2. Try findmnt if available
+    findmnt = shutil.which("findmnt")
+    if findmnt:
+        try:
+            res = subprocess.run(
+                [findmnt, "-n", "-o", "TARGET,SOURCE", "--target", str(target)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                lines = res.stdout.strip().splitlines()
+                parts = lines[0].split()
+                if len(parts) >= 2:
+                    return Path(parts[0]).resolve(), parts[1]
+                elif len(parts) == 1:
+                    return Path(parts[0]).resolve(), None
+        except Exception:
+            pass
+
+    # 3. Fallback: walk up parents checking os.path.ismount
+    curr = target
+    while not os.path.ismount(str(curr)) and curr.parent != curr:
+        curr = curr.parent
+    if os.path.ismount(str(curr)):
+        return curr, None
+
+    return None, None
+
+
+def is_protected_mount(mount_point: Path) -> bool:
+    """Checks if a mount point is a critical system path or contains the repository/working dir."""
+    resolved = mount_point.resolve()
+    protected_exact = {
+        Path("/"),
+        Path("/home"),
+        Path("/root"),
+        Path("/boot"),
+        Path("/boot/efi"),
+        Path("/etc"),
+        Path("/usr"),
+        Path("/var"),
+        Path("/tmp"),
+        Path("/opt"),
+        Path("/run"),
+        Path("/media"),
+        Path("/mnt"),
+    }
+    if resolved in protected_exact:
+        return True
+
+    repo_root = REPO_ROOT.resolve()
+    if resolved == repo_root or resolved in repo_root.parents:
+        return True
+
+    cwd = Path.cwd().resolve()
+    if resolved == cwd or resolved in cwd.parents:
+        return True
+
+    return False
+
+
+def unmount_drive(mount_point: Path, dev: str | None = None) -> bool:
+    """Attempts to cleanly unmount the given storage device/mount point."""
+    if is_protected_mount(mount_point):
+        print(f"[*] Skipping unmount of system/working mount point: '{mount_point}'")
+        return False
+
+    target_desc = f"'{mount_point}'" + (f" ({dev})" if dev else "")
+    print(f"[*] Unmounting USB drive at {target_desc}...")
+
+    # 1. Linux udisksctl (preferred for user-mounted removable devices, does not require root)
+    if dev and dev.startswith("/dev/") and shutil.which("udisksctl"):
+        try:
+            res = subprocess.run(
+                ["udisksctl", "unmount", "-b", dev],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if res.returncode == 0:
+                print(f"[✓] Successfully unmounted '{dev}' via udisksctl.")
+                return True
+        except Exception:
+            pass
+
+    # 2. Standard umount command
+    umount_bin = shutil.which("umount")
+    if umount_bin:
+        try:
+            res = subprocess.run(
+                [umount_bin, str(mount_point)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if res.returncode == 0:
+                print(f"[✓] Successfully unmounted '{mount_point}' via umount.")
+                return True
+            else:
+                err = res.stderr.strip()
+                if err:
+                    print(f"[-] umount error: {err}")
+        except Exception as e:
+            print(f"[-] umount failed: {e}")
+
+    # 3. macOS diskutil
+    if sys.platform == "darwin" and shutil.which("diskutil"):
+        try:
+            res = subprocess.run(
+                ["diskutil", "unmount", str(mount_point)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if res.returncode == 0:
+                print(f"[✓] Successfully unmounted '{mount_point}' via diskutil.")
+                return True
+        except Exception:
+            pass
+
+    print(f"[-] Warning: Could not automatically unmount '{mount_point}'. Please eject manually.")
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Compile NUC131 firmware, convert to Hiworld IAP container, and write to USB flash drive."
@@ -310,6 +478,11 @@ def main():
         "--dry-run",
         action="store_true",
         help="Run compilation and IAP generation without writing to USB drive"
+    )
+    parser.add_argument(
+        "--no-unmount",
+        action="store_true",
+        help="Skip automatic unmount of USB drive after copying"
     )
 
     args = parser.parse_args()
@@ -395,7 +568,11 @@ def main():
     for target_dir in targets_to_write:
         try:
             copied_file = copy_iap_safely(local_iap_path, target_dir, target_filename="can_app.iap")
-            successful_copies.append(copied_file)
+            successful_copies.append({
+                "path": copied_file,
+                "size": copied_file.stat().st_size,
+                "sha256": calculate_sha256(copied_file),
+            })
         except Exception as e:
             print(f"[-] Failed copying to '{target_dir}': {e}")
 
@@ -407,12 +584,30 @@ def main():
     print(" >>> CANBOX FIRMWARE UPDATE PREPARED SUCCESSFULLY <<< ")
     print("=" * 68)
     for c in successful_copies:
-        print(f" [✓] Destination : {c}")
-        print(f"     Size        : {c.stat().st_size:,} bytes")
-        print(f"     SHA-256     : {calculate_sha256(c)[:16]}...")
+        print(f" [✓] Destination : {c['path']}")
+        print(f"     Size        : {c['size']:,} bytes")
+        print(f"     SHA-256     : {c['sha256'][:16]}...")
+    print("-" * 68)
+
+    # Step 4: Flush cache to storage and cleanly unmount
+    sync_drive()
+
+    unmounted_mounts = []
+    if not args.no_unmount:
+        seen_mounts = set()
+        for c in successful_copies:
+            mount_point, dev = get_mount_info(c["path"])
+            if mount_point and mount_point not in seen_mounts:
+                seen_mounts.add(mount_point)
+                if unmount_drive(mount_point, dev):
+                    unmounted_mounts.append(mount_point)
+
     print("-" * 68)
     print(" Next Steps on Android Head Unit:")
-    print(" 1. Safely unmount/eject the USB drive and plug it into the Android Head Unit.")
+    if unmounted_mounts:
+        print(" 1. USB drive is safely synced and unmounted. Unplug it and insert into the Android Head Unit.")
+    else:
+        print(" 1. Safely unmount/eject the USB drive and plug it into the Android Head Unit.")
     print(" 2. Open: Factory / Car Settings -> CAN Settings / Protocol Update.")
     print(" 3. Tap 'CAN MCU Update' (the button should become active).")
     print(" 4. Wait for the update progress to reach 100% and the box to reboot.")

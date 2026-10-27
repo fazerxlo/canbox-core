@@ -41,6 +41,7 @@
 | `[x]` | `0x13` | Instantaneous Trip | `0x0B` | `0x221` | `psa_407_telemetry.c`, `hiworld_psa_builders.c` | `CANBOX_SPEC_HIWORLD_407_06_TRIP_COMPUTER_TELEMETRY.md` |
 | `[x]` | `0x14` | Trip 1 Telemetry | `0x07` | `0x2A1` | `psa_407_telemetry.c`, `hiworld_psa_builders.c` | Avg fuel, avg speed, distance |
 | `[x]` | `0x15` | Trip 2 Telemetry | `0x07` | `0x261` | `psa_407_telemetry.c`, `hiworld_psa_builders.c` | Avg fuel, avg speed, distance |
+| `[x]` | `0x1A` | Powertrain & Fluid Telemetry | `0x11` | `0x0B6`, `0x0F6`, `0x161`, `0x221` | `psa_407_telemetry.c`, `hiworld_psa_builders.c` | Speed, RPM, Coolant, Oil temp, Fuel L & %, 5 Hz periodic / delta |
 | `[x]` | `0x18` | TPMS Discrete Warnings | `0x06` | `0x3A1`, `0x1E1` | `hiworld_psa_builders.c`, `proto_hiworld_adapter.c` | FL, FR, RL, RR status: normal, low, flat, missing |
 | `[x]` | `0x21` | Console Panel Buttons | `0x02` | `0x3E5` | `psa_407_hvac_body.c`, `proto_hiworld_adapter.c` | `PanelMap_407_06` (`0x07` Dark, `0x17` FM, `0x28` Clim, `0x40` Trip) |
 | `[ ]` | `0x22` | Console Rotary Encoders | `0x02` | `0x3E5` | `hiworld_connection.h` | Vol/tune knob cumulative delta (volume HUD uses `0x56`) |
@@ -81,7 +82,7 @@
 | `[x]` | `0x24` | Car Model & Baud Select | `0x02`/`0x03` | N/A | `hiworld_connection.c`, `hiworld_car_mapping.c` | ID 34 (Peugeot 407), ACK `5A A5 01 FF 24 23` |
 | `[x]` | `0x2F` | Diagnostic Journal Query | `0x02` | `0x39B` | `proto_hiworld_adapter.c`, `can_router.c` | Replays `0x42` & `0xEA` summary |
 | `[x]` | `0x30` | Firmware Version Query | `0x02` | N/A | `hiworld_connection.c` | Replies with `0xF0` |
-| `[-]` | `0x3B` | Climate Control Downlink | `0x0B` | `0x1D0`/`0x1E1` | `psa_407_car_config.c` | Sync toggle (`0x0F`) mapped; touchscreen temp/fan steps pending |
+| `[x]` | `0x3B` | Climate Control Downlink | `0x02` | `0x1ED` | `psa_407_car_config.c` | A/C switch (`0x02`) & Dual/Mono sync (`0x0F`) injected via `0x1ED` |
 | `[x]` | `0x71` | Personalization Toggle | `0x02`/`0x03` | `0x15B` | `psa_407_car_config.c` | DRL, follow-me-home write |
 | `[ ]` | `0x76` | Overspeed Warning Set | `0x03` | `0x39B` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` | Speed warning chime threshold |
 | `[ ]` | `0x79` | Navigation MFD Guidance | `0x08` | `0x3B6` | `CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md` | Turn arrows & distance to amber EMF-C |

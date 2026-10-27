@@ -525,16 +525,23 @@ static inline void psa_rd4_process_can_0x225(psa_rd4_media_ctx_t *ctx, const uin
     psa_rd4_send_hiworld_0x84(ctx);
 }
 
-/* Decode CAN 0x265 (INFO_TUNER — authoritative for TA indicator 0x80) */
+/* Decode CAN 0x265 (INFO_TUNER — authoritative for TA indicator 0x80 and ST 0x40) */
 static inline void psa_rd4_process_can_0x265(psa_rd4_media_ctx_t *ctx, const uint8_t *d, uint8_t dlc) {
     if (!ctx || !d || dlc < 1) return;
     s_have_0x265 = true;
 
-    /* Byte 0 Bit 5: TA (Traffic Announcement) */
-    if (d[0] & 0x20) {
-        ctx->radio.indicators |= 0x80; /* TA bit in Hiworld */
+    /* Byte 0 Bit 4 (0x10): TA (Traffic Announcement priority) -> Hiworld Indicator bit 7 (0x80) */
+    if (d[0] & 0x10) {
+        ctx->radio.indicators |= 0x80;
     } else {
         ctx->radio.indicators &= ~0x80;
+    }
+
+    /* Byte 0 Bit 5 (0x20): Stereo Reception (ST) -> Hiworld Indicator bit 6 (0x40) */
+    if (d[0] & 0x20) {
+        ctx->radio.indicators |= 0x40;
+    } else {
+        ctx->radio.indicators &= ~0x40;
     }
 }
 

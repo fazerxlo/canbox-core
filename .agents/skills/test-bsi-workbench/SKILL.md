@@ -12,7 +12,51 @@ This skill guides testing and validating **any** OpenCanbox Core subsystem (Pers
 
 ---
 
-## 1. Workbench Architecture & Topology
+## 0. Fast-Path Workbench Topology & Zero-Flounder Rules
+
+### Persistent USB Hardware Identification (Auto-Discovery by VID:PID)
+Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools resolve ports automatically via `tools/canbox_usb_ports.py` using persistent USB hardware IDs:
+
+| Role / Interface | Hardware Chip & USB VID:PID | Protocol & Parameters | Purpose & Auto-Discovery Behavior |
+| :--- | :--- | :--- | :--- |
+| **CAN Bus (SLCAN)** | **QinHeng CH340 (`1A86:7523`)** | PSA Comfort CAN @ **125 kbps** (`slcand -S 1000000 <dev> can0`) | Real Peugeot 407 BSI & RD4 bus. Automatically detected and excluded from UART probers. |
+| **Canbox UART** | **FTDI FT232R (`0403:6001`)** | **38,400 baud, 8N1** (Raise `0x2E` or Hiworld `0x5A`) | Physical canbox UART TX/RX. Auto-selected by all tools when `--port` is omitted. |
+| **Head Unit UART** | **Prolific PL2303 (`067B:2303`)** | **38,400 baud, 8N1** (Hiworld / Raise) | Android Head Unit serial connection. |
+| **Baud Rate Rule** | Fixed **38,400 bps** | **NEVER toggle or probe down to 19,200 bps** | Peugeot 407 Raise & Hiworld canboxes operate strictly at 38,400 baud. Toggling baud causes framing break errors (`0x00` bytes). |
+
+### Essential CAN Keepalives & Interlocks (Autonomous Wakeup Baseline)
+1. **Sleeping ECUs Baseline:** If ECUs are asleep or the engine ECU is absent, broadcast continuously at 25–40 ms:
+   - `0x036`: Phase de vie `0x01` (Active/Running): `0E 00 00 2A 01 00 00 A0`
+   - `0x0F6`: Economy mode OFF (`0x88`), Contact ON (+APC): `88 00 00 00 00 50 00 20`
+   - `0x128`: Key in ignition (+APC): `03 01 00 00 00 00 00 00`
+   - `0x15B`: BSI power state: `01 03 B1 40 00 D0 00 10`
+   - `0x168`: Instrument cluster status: `00 00 00 00 00 00 00 00`
+2. **Climate (HVAC) Canbox Requirement:**
+   - Commercial canboxes (Raise, Hiworld) **require CAN ID `0x1E3`** (`MSG_ETAT_CLIMAV_EMF`: `1C 40 0B 0B 00 00 07`) to report climate. `0x1D0` alone is silent.
+3. **High-Power Consumer Interlock (Rear Defrost / Heated Mirrors):**
+   - The BSI **completely blocks** Rear Defrost and Heated Mirrors if engine is stopped (`0x0B6` = `FF FF FF FF`).
+   - **Must inject running engine:** `0x0B6#1C200000000000D0` (900 RPM) and `0x12D#8032320064000080` (Compressor authorized) for BSI to accept Rear Defrost button presses.
+4. **Verified Rear Defrost CAN Ground Truth:**
+   - **Fascia Panel Button Request (`0x1D0`):** **Byte 0 Bit 6** (`0x40`): `0x29` (OFF) $\longleftrightarrow$ `0x69` (ON).
+   - **Climate ECU Status Indicator (`0x1E3`):** **Byte 1 Bit 3** (`0x08`): `0x00` (OFF) $\longleftrightarrow$ `0x08` (ON).
+   - Serialized in Hiworld `0x31` `payload[2]` bit 5 (`0x20`) and Raise `0x21` `payload[0]` bit 0 (`0x01`).
+
+---
+
+## 1. Workbench Toolchain Reference (Token-Friendly Execution)
+
+| Script | Purpose & Usage | Token-Friendly CLI Command |
+| :--- | :--- | :--- |
+| **`tools/probe_canbox_uart.py`** | Instant baud rate & protocol detection without port conflicts | `python3 tools/probe_canbox_uart.py --port /dev/ttyUSB0` |
+| **`tools/workbench_live_sniffer.py`** | Real-time dual CAN delta + UART stream sniffer with delta-filtering | `python3 tools/workbench_live_sniffer.py` |
+| **`tools/test_clima_canbox.py`** | Validates climate telemetry reporting across temperature sweeps | `python3 tools/test_clima_canbox.py` |
+| **`tools/workbench_defrost_live_test.py`** | Live test with 900 RPM engine simulation for high-power button presses | `python3 tools/workbench_defrost_live_test.py` |
+| **`tools/workbench_defrost_verifier.py`** | Automated 3-cycle state toggle auto-verifier & fuzzer | `python3 tools/workbench_defrost_verifier.py --port /dev/ttyUSB0 -v` |
+| **`tools/update_canbox_usb.py`** | Flashes `can_app.iap` to connected USB drive with auto-sync and unmount | `python3 tools/update_canbox_usb.py` |
+
+---
+
+## 2. Workbench Architecture & Topology
 
 ```
 +-------------------------------------------------------------------------+

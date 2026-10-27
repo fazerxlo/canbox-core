@@ -140,6 +140,44 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
 
 ---
 
+### `workbench_defrost_verifier.py`
+**Peugeot 407 Rear Defrost CAN Discovery & Verification Harness**
+- **Purpose:** Discovers and validates which PSA CAN2004 frames control rear defrost on OEM Raise and Hiworld canboxes connected alongside an RD4 radio. Emulates background ignition/wake-up frames, sweeps candidate CAN IDs/bits, and performs a 3-cycle auto-verification upon detecting state change.
+- **Safety:** Hardcoded whitelist of broadcast comfort IDs. Strictly blocks diagnostic ranges (`0x5E0..0x5EF`, `0x600..0x7FF`) and RD4 write frames to completely protect attached RD4 hardware.
+- **Usage:**
+  ```bash
+  # Run auto-detect discovery across high-probability candidates:
+  ./tools/workbench_defrost_verifier.py --can can0 --port /dev/ttyUSB1
+
+  # Force Raise protocol on custom port:
+  ./tools/workbench_defrost_verifier.py --proto raise --port /dev/ttyUSB0
+
+  # Target a specific CAN ID directly:
+  ./tools/workbench_defrost_verifier.py --custom-id 0x1D0
+  ```
+
+---
+
+### `canbox_usb_ports.py`
+**Hardware USB VID:PID Port Auto-Discovery**
+- **Purpose:** Automatically maps connected USB-to-serial hardware dongles by persistent USB Vendor/Product IDs (`CH340 1A86:7523` -> CAN, `FTDI 0403:6001` -> Canbox UART, `Prolific 067B:2303` -> HU UART) so scripts run without hardcoded `/dev/ttyUSB*` paths.
+- **Usage:**
+  ```bash
+  python3 tools/canbox_usb_ports.py
+  ```
+
+---
+
+### `analyze_can_state_changes.py`
+**Streaming CAN Capture Transition & State Change Analyzer**
+- **Purpose:** Stream-parses large CAN captures (CSV, candump, OpenCanbox dump_*.log) in O(1) memory, deduplicating repetitive heartbeats by >95% to isolate discrete button transitions, mux carousels, and bit-level masks.
+- **Usage:**
+  ```bash
+  python3 tools/analyze_can_state_changes.py dump_2026-10-25_22-00-00.log -t 10
+  ```
+
+---
+
 ### `test_bsi_workbench.py`
 **PSA 407 BSI & SLCAN Automated Workbench Verification Suite**
 - **Purpose:** Automates bidirectional verification of OpenCanbox Core against a physical bench (Peugeot 407 BSI, RD4, and SLCAN `can0`). Validates live BSI cyclic traffic (`0x036`, `0x0F6`, `0x361`, `0x165`), tests CAN-to-HU telemetry dispatch, and verifies HU downlink commands (ACK, atomic CAN injection on `0x361`, and immediate optimistic HU telemetry).

@@ -396,6 +396,7 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
         } else if (fan_bars <= 8) {
             climate->fan_speed = fan_bars;
         }
+        psa_clim_sync_1ed_from_1e3(data, dlc);
     }
 }
 

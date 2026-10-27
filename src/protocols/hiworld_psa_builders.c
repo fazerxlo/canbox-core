@@ -37,6 +37,63 @@ size_t build_hiworld_radar(const vehicle_radar_t *radar, uint8_t *out, size_t ma
     return 17;
 }
 
+size_t build_hiworld_telemetry_1a(const vehicle_state_t *state, uint8_t *out, size_t max_len) {
+    if (!state || !out || max_len < 17) {
+        return 0;
+    }
+
+    out[0] = HIWORLD_SYNC_1;
+    out[1] = HIWORLD_SYNC_2;
+    out[2] = 0x0C;                       /* Length: 12 payload bytes */
+    out[3] = HIWORLD_CMD_POWERTRAIN_TELEMETRY; /* Opcode: 0x1A */
+
+    /* Byte 0: Status Flags */
+    uint8_t flags = 0;
+    if (state->ignition_on)      flags |= 0x01;
+    if (state->rpm > 400)         flags |= 0x02;
+    if (state->reverse_gear)      flags |= 0x04;
+    if (state->handbrake)         flags |= 0x08;
+    if (state->fuel_low_warning)  flags |= 0x10;
+    out[4] = flags;
+
+    /* Byte 1: Gear Position (0=P, 1=R, 2=N, 3=D, 4=M1, etc.) */
+    out[5] = state->gear;
+
+    /* Byte 2..3: Vehicle Speed in km/h */
+    out[6] = (uint8_t)(state->speed_kmh >> 8);
+    out[7] = (uint8_t)(state->speed_kmh & 0xFF);
+
+    /* Byte 4..5: Engine RPM */
+    out[8] = (uint8_t)(state->rpm >> 8);
+    out[9] = (uint8_t)(state->rpm & 0xFF);
+
+    /* Byte 6: Coolant Temperature (°C) */
+    out[10] = (uint8_t)(state->coolant_temp_c);
+
+    /* Byte 7: Oil Temperature (°C) */
+    out[11] = (uint8_t)(state->oil_temp_c);
+
+    /* Byte 8: Fuel Level in Liters */
+    out[12] = state->fuel_liters;
+
+    /* Byte 9: Fuel Percentage (0..100%) */
+    out[13] = state->fuel_percentage;
+
+    /* Byte 10..11: Instantaneous Fuel Consumption (0.1 L/100km, or 0xFFFF) */
+    uint16_t instant_fuel = state->trip.instant_fuel_deci;
+    out[14] = (uint8_t)(instant_fuel >> 8);
+    out[15] = (uint8_t)(instant_fuel & 0xFF);
+
+    /* Checksum: (Length + Opcode + sum(payload) - 1) & 0xFF */
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 15; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[16] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 17;
+}
+
 size_t build_hiworld_trip_instant(const vehicle_trip_t *trip, uint8_t *out, size_t max_len) {
     if (!trip || !out || max_len < 15) {
         return 0;

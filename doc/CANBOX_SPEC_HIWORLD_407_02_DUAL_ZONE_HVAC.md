@@ -278,3 +278,16 @@ static inline void psa_hvac_send_hiworld(psa_hvac_ctx_t *ctx) {
 Rear defrost is decoded only from `0x1D0`: Byte 4 Bit 6 (`(data[4] >> 6) & 1`), dlc >= 5. `0x128` and `0x0F6` are intentionally not used.
 
 A cleared bit clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`). Implemented in `psa_hvac_process_can_0x1d0()`; test `test_peugeot_407_rear_defrost_detection`.
+
+## Downlink Climate Commands (`0x1ED` / `0x0DF`)
+
+The physical center-console HVAC panel has no physical buttons for A/C Compressor ON/OFF (Eco) or Mono/Dual sync. These functions are commanded via CAN ID `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, DLC 1) by the Multifunction Display (EMF/RT4) or OpenCanbox (Virtual MDF):
+- **Prerequisite:** `0x0DF` (`10 00 50`, DLC 3) broadcast every 500 ms.
+- **`0x1ED` Byte 0 Bitfield:**
+  - **Bit 4 (`0x10`):** `1` = Dual Mode, `0` = Mono Mode.
+  - **Bit 3 (`0x08`):** `0` = A/C ON, `1` = A/C OFF (Eco).
+  - Valid payloads: `0x00` (A/C ON, Mono), `0x08` (A/C OFF, Mono), `0x10` (A/C ON, Dual), `0x18` (A/C OFF, Dual).
+- **HU Mapping:**
+  - Hiworld `Cmd 0x3B` Setting `0x02` (A/C): `1` = ON (clear bit 3), `0` = OFF (set bit 3).
+  - Hiworld `Cmd 0x3B` Setting `0x0F` / `Cmd 0x7D` Setting `0x24` (Mono): `1` = Mono (clear bit 4), `0` = Dual (set bit 4).
+  - Raise `Cmd 0x8A` Setting `0x02` (A/C toggle/set), Setting `0x0B` (Dual toggle/set).

@@ -66,13 +66,13 @@ bool psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8
     /* Note: 0xFFFF sentinels in fuel/range represent valid PSA stationary/undefined
      * indicators ('--.-') and must NOT be suppressed so the HU displays '--.-'.
      *
-     * In PSA CAN2004 (RT4 8.31 OEM ground truth get_trip_data_inst offset 0x012454):
-     * - Bytes 1-2: CRUISING_RANGE (km)
-     * - Bytes 3-4: INST_CONSUMPTION (0.1 L/100km)
+     * In PSA CAN2004 (BSI / RT4 / OEM canbox ground truth):
+     * - Bytes 1-2: INST_CONSUMPTION (0.1 L/100km)
+     * - Bytes 3-4: CRUISING_RANGE (km)
      * - Bytes 5-6: DIST_TO_DEST (km)
      */
-    trip->range_km          = read_be16(&data[1]);
-    trip->instant_fuel_deci = read_be16(&data[3]);
+    trip->instant_fuel_deci = read_be16(&data[1]);
+    trip->range_km          = read_be16(&data[3]);
     trip->dest_dist_km      = read_be16(&data[5]);
     trip->instant_valid     = true;
     return true;
@@ -105,6 +105,7 @@ void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, u
 
     state->rpm = (raw_rpm == 0xFFFF) ? 0 : (raw_rpm >> 3);
     state->speed_kmh = (raw_spd == 0xFFFF) ? 0 : (raw_spd / 100);
+    state->dirty.telemetry = true;
 }
 
 void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
@@ -116,10 +117,37 @@ void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
 
 void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc) {
     if (!state || !data || dlc < 8) return;
+    state->ignition_on = (data[0] & 0x08) != 0;
+    state->coolant_temp_c = (data[1] == 0xFF) ? 0x7F : (int8_t)(data[1] - 40);
     state->reverse_gear = (data[7] & 0x80) != 0;
     if (data[5] != 0xFF) {
         state->climate.outdoor_temp_raw = data[5];
     }
+    state->dirty.telemetry = true;
+}
+
+void psa_bsi_process_can_0x161(vehicle_state_t *state, const uint8_t *data, uint8_t dlc) {
+    if (!state || !data || dlc < 4) return;
+    if (data[2] == 0xFF) {
+        state->oil_temp_c = 0x7F;
+    } else if (data[2] == 0x00) {
+        state->oil_temp_c = 0;
+    } else {
+        /* Workbench / combine calibration from simulator/signal-db (bsi.yaml):
+         * raw = round((79 * temp - 1360) / 50).
+         * Inverting: temp = (50 * raw + 1360 + 39) / 79
+         * e.g. raw 0x73 (115) -> 90 °C
+         */
+        state->oil_temp_c = (int8_t)(((int32_t)data[2] * 50 + 1360 + 39) / 79);
+    }
+    if (data[3] == 0xFF) {
+        state->fuel_percentage = 0xFF;
+        state->fuel_liters = 0xFF;
+    } else {
+        state->fuel_percentage = data[3];
+        state->fuel_liters = (uint8_t)(((uint16_t)data[3] * 66 + 50) / 100);
+    }
+    state->dirty.telemetry = true;
 }
 
 
@@ -176,6 +204,7 @@ void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
             }
             psa_stalk_process_tip_0x221(&state->wheel, frame->data, frame->dlc);
             if (psa_trip_process_can_0x221(&state->trip, frame->data, frame->dlc)) {
+                state->dirty.telemetry = true;
                 if (state->dirty.trip_page == 0) {
                     state->dirty.trip_page = 1;
                 }

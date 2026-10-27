@@ -290,15 +290,15 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
     if (!radio || !data || dlc < 5) return;
 
     /* Indicator flags: if 0x265 (INFO_TUNER / ETAT_RDS) is present on the bus, 0x265 is
-     * authoritative for TA (bit 7, 0x80). Otherwise fallback to 0x225 bit 2 (0x04). */
-    uint8_t ta_flag;
+     * authoritative for TA (bit 7, 0x80) and Stereo ST (bit 6, 0x40). Otherwise fallback to 0x225 bit 2 (0x04) for TA. */
+    uint8_t flags = (radio->indicators & 0x40); /* preserve Stereo */
     if (s_have_0x265) {
-        ta_flag = (radio->indicators & 0x80);
+        flags |= (radio->indicators & 0x80);
     } else {
-        ta_flag = (data[0] & 0x04) ? 0x80 : 0x00;
+        if (data[0] & 0x04) flags |= 0x80;
     }
 
-    radio->indicators = ta_flag;
+    radio->indicators = flags;
     if (data[0] & 0x20) radio->indicators |= 0x20; /* RDS */
     if (data[0] & 0x40) radio->indicators |= 0x10; /* SCAN */
     if (radio->radio_text_len > 0) radio->indicators |= 0x04; /* RDTEXT */
@@ -372,14 +372,19 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
 void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 1) return;
     s_have_0x265 = true;
-    if (data[0] & 0x20) {
-        if (!(radio->indicators & 0x80)) {
-            radio->indicators |= 0x80;
-        }
+
+    /* Bit 4 (0x10): TA (Traffic Announcement) -> Hiworld bit 7 (0x80) */
+    if (data[0] & 0x10) {
+        radio->indicators |= 0x80;
     } else {
-        if (radio->indicators & 0x80) {
-            radio->indicators &= ~0x80;
-        }
+        radio->indicators &= ~0x80;
+    }
+
+    /* Bit 5 (0x20): Stereo Reception (ST) -> Hiworld bit 6 (0x40) */
+    if (data[0] & 0x20) {
+        radio->indicators |= 0x40;
+    } else {
+        radio->indicators &= ~0x40;
     }
 }
 

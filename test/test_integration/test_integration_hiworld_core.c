@@ -401,11 +401,11 @@ void test_integration_hiworld_trip_pipeline(void) {
     size_t rx_len = 0;
 
     // 1. Vector 1: PSA CAN 0x221 (Instantaneous Trip)
-    // Range: 640 km (0x0280 in B1..2), Instant fuel: 6.8 L/100km (68 = 0x0044 in B3..4)
+    // Instant fuel: 6.8 L/100km (68 = 0x0044 in B1..2), Range: 640 km (0x0280 in B3..4)
     can_frame_t frame_221 = {
         .id = 0x221,
         .dlc = 7,
-        .data = { 0x00, 0x02, 0x80, 0x00, 0x44, 0x00, 0x00 }
+        .data = { 0x00, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 }
     };
     can_router_process_can(&frame_221);
 
@@ -443,11 +443,11 @@ void test_integration_hiworld_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_261, rx_buf, sizeof(expected_261));
 
     // 4. Test frames from dump_2026-09-28_20-24-29.log:
-    // CAN 0x221: Range: 536 km (0x0218 in B1-2), Instant fuel: 7.1 L/100km (0x0047 in B3-4), Dest: 1200 raw (0x04B0 in B5-6)
+    // CAN 0x221: Instant fuel: 7.1 L/100km (0x0047 in B1-2), Range: 536 km (0x0218 in B3-4), Dest: 1200 raw (0x04B0 in B5-6)
     can_frame_t dump_221 = {
         .id = 0x221,
         .dlc = 7,
-        .data = { 0x00, 0x02, 0x18, 0x00, 0x47, 0x04, 0xB0 }
+        .data = { 0x00, 0x00, 0x47, 0x02, 0x18, 0x04, 0xB0 }
     };
     can_router_process_can(&dump_221);
 
@@ -457,11 +457,11 @@ void test_integration_hiworld_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_dump_221, rx_buf, sizeof(expected_dump_221));
 
     // 5. Test frames from user dump_2026-09-29_19-37-10.log:
-    // CAN 0x221: Range: 619 km (0x026B in B1-2), Instant fuel: 7.1 (0x0047 in B3-4), Target mileage: 204 km (raw 2040 = 0x07F8 in B5-6)
+    // CAN 0x221: Instant fuel: 7.1 (0x0047 in B1-2), Range: 619 km (0x026B in B3-4), Target mileage: 204 km (raw 2040 = 0x07F8 in B5-6)
     can_frame_t log_221 = {
         .id = 0x221,
         .dlc = 7,
-        .data = { 0x00, 0x02, 0x6B, 0x00, 0x47, 0x07, 0xF8 }
+        .data = { 0x00, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8 }
     };
     can_router_process_can(&log_221);
 
@@ -505,7 +505,7 @@ void test_integration_hiworld_trip_pipeline(void) {
     can_frame_t masked_221 = {
         .id = 0x221,
         .dlc = 7,
-        .data = { 0x80, 0x02, 0x80, 0x00, 0x44, 0x00, 0x00 }
+        .data = { 0x80, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 }
     };
     can_router_process_can(&masked_221);
     rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
@@ -950,12 +950,12 @@ void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_stalk_trip_release), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_release, rx_buf, sizeof(expected_stalk_trip_release));
 
-    // Verify 0x167 is sent on release advancing trip page
+    // Verify 0x167 is sent on release advancing trip page from Idle (0x08) to Instant (0x09)
     can_frame_t sent_frame;
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
     TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
     TEST_ASSERT_EQUAL_UINT8(8, sent_frame.dlc);
-    TEST_ASSERT_EQUAL_HEX8(0x0A, sent_frame.data[0]); // Advance from Instant (0x09) to Trip 1 (0x0A)
+    TEST_ASSERT_EQUAL_HEX8(0x09, sent_frame.data[0]); // First stalk press advances from Idle (0x08) to Instant (0x09)
     TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent_frame.data[3]);
