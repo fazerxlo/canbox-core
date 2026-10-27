@@ -256,6 +256,13 @@ void psa_decode_console_0x3e5(const uint8_t *data, uint8_t dlc, psa_panel_key_ca
 
 /* --------------------------------------------------------------------------
  * 1.2 Dual-Zone Climate Control (HVAC)
+ *
+ * NOTE ON LEGACY FUNCTION psa_decode_hvac_0x1d0:
+ * This function preserves the Raise protocol struct mapping (hvac_state_t)
+ * for legacy test harnesses. In PSA CAN2004 (RT4 ground truth), 0x1E3
+ * (MSG_ETAT_CLIMAV_EMF) is the sole authoritative status frame for HVAC UI
+ * presentation, while 0x1D0 (MSG_CDE_CLIMAV) is the fascia demand frame and is
+ * only used by psa_hvac_process_can_0x1d0() to extract rear_defrost (Byte 4 Bit 6).
  * -------------------------------------------------------------------------- */
 void psa_decode_hvac_0x1d0(const uint8_t *data, uint8_t dlc, hvac_state_t *st) {
     if (!data || !st || dlc < 4) {
@@ -296,8 +303,6 @@ static const uint8_t peugeot_temp_map[23] = {
     0xFE, 28, 30, 32, 34, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50, 52, 54, 56, 0xFF
 };
 
-
-
 static const uint8_t psa_wind_to_hiworld[16] = {
     [0] = 0,   // Auto
     [1] = 11,  // Windshield / Screen (0x0B)
@@ -313,53 +318,43 @@ static const uint8_t psa_wind_to_hiworld[16] = {
 void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
     if (!climate || !data) return;
 
-    /* Rear defrost demand: Byte 4 Bit 6 (0x40) */
-    if (dlc >= 5) climate->rear_defrost = ((data[4] >> 6) & 0x01) != 0;
-
-    if (dlc < 7) return;
-
-    climate->power_on = (data[0] != 0xA8);
-    climate->ac_on = climate->power_on;
-    climate->front_max_defrost = (data[0] == 0x19);
-
-    uint8_t fan = data[2] & 0x0F;
-    if (fan == 0x0F) {
-        climate->fan_speed = 0;
-    } else if (fan <= 8) {
-        climate->fan_speed = fan + 1;
+    /* RT4 Demand vs. Status Rule:
+     * 0x1D0 (MSG_CDE_CLIMAV) is the physical fascia panel demand frame.
+     * All HVAC operational states (fan speed, setpoints, A/C compressor, dual/mono,
+     * airflow distribution, recirculation/AQS, front defrost, power) are driven
+     * exclusively by the Climate ECU status frame 0x1E3 (MSG_ETAT_CLIMAV_EMF) so
+     * refused or clamped demands never cause display oscillation.
+     * Only rear window defrost (Byte 4 Bit 6, 0x40) is extracted here as it is not
+     * carried in 0x1E3. */
+    if (dlc >= 5) {
+        climate->rear_defrost = ((data[4] >> 6) & 0x01) != 0;
     }
-
-    /* Air distribution: Byte 3 upper nibble is Left (Driver), lower nibble is Right (Passenger) */
-    uint8_t left_code = (data[3] >> 4) & 0x0F;
-    uint8_t right_code = data[3] & 0x0F;
-
-    climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
-    climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
-
-    if (data[0] == 0x19) {
-        /* When front defrost is active, Byte 4 (0x20) reflects physical forced fresh air flaps.
-         * Do not overwrite aqs_auto from Byte 4; preserve aqs_auto as decoded by 0x1E3. */
-        climate->recirculate = false;
-    } else if ((data[4] & 0x10) != 0) {
-        climate->recirculate = true;
-        climate->aqs_auto = false;
-    } else if ((data[4] & 0x20) != 0) {
-        climate->recirculate = false;
-        climate->aqs_auto = false;
-    } else {
-        climate->recirculate = false;
-        climate->aqs_auto = true;
-    }
-
-    uint8_t l_temp = data[5];
-    uint8_t r_temp = data[6];
-    if (l_temp < 23) climate->temp_driver = peugeot_temp_map[l_temp];
-    if (r_temp < 23) climate->temp_passenger = peugeot_temp_map[r_temp];
 }
 
 void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
     if (!climate || !data || dlc < 2) return;
 
+    /* PSA CAN 0x1E3 (MSG_ETAT_CLIMAV_EMF) - Authoritative Climate ECU Status
+     * Byte 0:
+     *   Bit 7: Recirc status (0x80)
+     *   Bit 6: AC_OFF (1 = Compressor OFF / ECO mode, 0 = AC ON) (0x40)
+     *   Bit 5: CLIM_OFF (1 = Full HVAC system powered OFF, 0 = ON) (0x20)
+     *   Bit 4: Auto airflow / AQS auto intake (0x10)
+     *   Bit 3: Auto blower (0x08)
+     *   Bit 2: Hide fan bars (0x04)
+     *   Bit 0: Dual active (1 = Dual independent, 0 = Mono/SYNC) (0x01)
+     * Byte 1:
+     *   Bit 7: Front max defrost / demist (0x80)
+     *   Bits 6:4: Temperature calibration offset (factory default 0x3 = +3.0 C)
+     * Byte 2: Left display setpoint temperature (raw code: 0..22)
+     * Byte 3: Right display setpoint temperature (raw code: 0..22)
+     * Byte 4: Airflow distribution pattern left (bits 7:4)
+     * Byte 5: Airflow distribution pattern right (bits 7:4)
+     * Byte 6:
+     *   Bits 3:0: Display fan bars (0..7, 0xF=Max)
+     */
+    climate->power_on  = ((data[0] & 0x20) == 0);
+    climate->ac_on     = ((data[0] & 0x40) == 0);
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
     climate->front_max_defrost = (data[1] & 0x80) != 0;
@@ -378,6 +373,13 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
         climate->aqs_auto = false;
     }
 
+    if (dlc >= 4) {
+        uint8_t l_temp = data[2];
+        uint8_t r_temp = data[3];
+        if (l_temp < 23) climate->temp_driver = peugeot_temp_map[l_temp];
+        if (r_temp < 23) climate->temp_passenger = peugeot_temp_map[r_temp];
+    }
+
     if (dlc >= 6) {
         /* Air distribution: Byte 4 upper nibble is Left (Driver), Byte 5 upper nibble is Right (Passenger) */
         uint8_t left_code = (data[4] >> 4) & 0x0F;
@@ -385,6 +387,16 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
 
         climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
         climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
+    }
+
+    if (dlc >= 7) {
+        uint8_t fan_bars = data[6] & 0x0F;
+        if (fan_bars == 0x0F) {
+            climate->fan_speed = 8;
+        } else if (fan_bars <= 8) {
+            climate->fan_speed = fan_bars;
+        }
+        psa_clim_sync_1ed_from_1e3(data, dlc);
     }
 }
 
@@ -501,15 +513,17 @@ void psa_stalk_process_tip_0x221(vehicle_wheel_t *wheel, const uint8_t *data, ui
     if (!wheel || !data || dlc < 1) return;
     bool curr_trip = (data[0] & 0x08) != 0;
     bool curr_left = (data[0] & 0x01) != 0;
+    bool prev_trip = (g_stalk_state.prev_trip_tip != 0);
+    bool prev_left = (g_stalk_state.prev_left_tip != 0);
 
-    if (curr_trip) {
+    if (curr_trip && !prev_trip) {
         wheel->active_key = WHEEL_KEY_TRIP;
         wheel->press_state = 1;
-    } else if (curr_left) {
+    } else if (curr_left && !prev_left) {
         wheel->active_key = WHEEL_KEY_STALK_LEFT;
         wheel->press_state = 1;
-    } else if (g_stalk_state.prev_trip_tip != 0 || g_stalk_state.prev_left_tip != 0 ||
-               wheel->active_key == WHEEL_KEY_TRIP || wheel->active_key == WHEEL_KEY_STALK_LEFT) {
+    } else if ((!curr_trip && prev_trip && wheel->active_key == WHEEL_KEY_TRIP) ||
+               (!curr_left && prev_left && wheel->active_key == WHEEL_KEY_STALK_LEFT)) {
         wheel->active_key = WHEEL_KEY_NONE;
         wheel->press_state = 0;
     }
@@ -565,7 +579,8 @@ void psa_doors_process_can_0x220(vehicle_doors_t *doors, bool *handbrake, const 
 void psa_doors_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state) return;
     if (frame->id == PSA_CAN_ID_DOORS_BODY_220) {
-        psa_doors_process_can_0x220(&state->doors, &state->handbrake, frame->data, frame->dlc);
+        /* Pass NULL for handbrake so 0x220 only updates door openings and never collides with 0x036 */
+        psa_doors_process_can_0x220(&state->doors, NULL, frame->data, frame->dlc);
     }
 }
 

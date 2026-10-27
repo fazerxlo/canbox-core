@@ -18,6 +18,10 @@ Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004
 10. **Spec Implementation Fast Path:** Treat user specs (`doc/CANBOX_SPEC_*.md`) as pre-verified ground truth. Do not run exploratory greps or subagent audits on documented bitfields/formulas. Run `./tools/code_map.py <CAN_ID|Cmd>` + surgical reads in parallel (Turn 1), batch all code edits (Turn 2), and batch test + doc updates (Turn 3).
 11. **Pre-Diagnosed Bug Fast Path:** When the user provides target files, functions, log evidence, or root causes (or when resuming from a compacted summary with established RCA), execute strictly via the 3-turn pipeline: Turn 1 (parallel surgical reads of target function + test via `./tools/code_map.py`), Turn 2 (batch edits across source, builders, tests, and specs in a single turn), Turn 3 (run `./tools/test_fast.sh` with `WaitMsBeforeAsync=10000`, then `./tools/verify_all.sh` once with zero status polling). Never run broad exploratory greps, archive scans, or external decompiled codebase searches (`QF_Canbus_system/`) on diagnosed bugs.
 12. **External Firmware & Disassembly Audits (`research` Subagent):** When cross-checking external decompiled codebases or disassembly (`hiworld-canbus-PSA/`, `payload.asm`, `payload.bin`, `QF_Canbus_system/`) exceeding ~300 lines, delegate the binary/ASM audit to `invoke_subagent(TypeName="research")` so raw disassembly stays out of the main context window and avoids triggering `/compact`. Never dump multi-thousand-line annotated `.asm` files to `/tmp/*.txt` and page through them with `read_file`/`sed`.
+13. **Interpreting Disassembly Data (RT4 PowerPC / IDA / Ghidra):**
+    - **Word Jump Table Offsets ($4\times$ multiplier):** In 32-bit PowerPC, switch statements index 4-byte pointer words via `slwi r, 2` (or `rlwinm`). Disassembly tables listing enum values like `0x00, 0x04, 0x08, 0x0C, 0x10` represent jump table byte offsets ($0\times 4, 1\times 4, 2\times 4, 3\times 4, 4\times 4$); the underlying logical enum values are $0, 1, 2, 3, 4$.
+    - **Bitfield Bit-Width & Truncation:** Always verify bit ranges: `Bits 7:3` spans 5 bits (mask `0x1F`, values $0\dots 31$). Never apply an artificial 3-bit mask (`& 0x07`); doing so truncates high bits (e.g., `(0x40 >> 3) & 0x07 = 0x00`, turning unmonitored `0x08` into false normal `0x00`).
+    - **Invalid / Default Sentinels:** Values listed under `Invalid / Default` (e.g., `0x8` in bits 7:3 $\to$ raw CAN byte `0x40`, or `0x10` $\to$ raw CAN byte `0x80`) represent unmonitored / offline / fault states and must never decode as normal or trigger synthetic pressures.
 
 ---
 
@@ -35,14 +39,14 @@ Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004
 | Subsystem | CAN IDs (RX / TX) | Hiworld UART Cmds | Source & Unit Test Files | Spec File (`doc/`) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Keys / Stalk / Console** | `0x21F`, `0x221`, `0x3E5` | `0x11`, `0x21` | `psa_407_hvac_body.c`, `test_407_swc_hvac_radar.c` | `CANBOX_SPEC_HIWORLD_407_01_STEERING_STALK_KEYS.md` |
-| **HVAC / Climate** | `0x1D0`, `0x208`, `0x0F6` | `0x31` | `psa_407_hvac_body.c`, `test_407_swc_hvac_radar.c` | `CANBOX_SPEC_HIWORLD_407_02_DUAL_ZONE_HVAC.md` |
+| **HVAC / Climate** | `0x1E3`, `0x1D0`, `0x0F6` | `0x31` | `psa_407_hvac_body.c`, `test_407_swc_hvac_radar.c` | `CANBOX_SPEC_HIWORLD_407_02_DUAL_ZONE_HVAC.md` |
 | **TPMS** | `0x268` | `0x66`, `0x65` | `psa_407_telemetry.c`, `test_407_tpms_extended.c` | `CANBOX_SPEC_HIWORLD_407_03_TPMS_TIRE_PRESSURE.md` |
 | **Parking Radar (AAS)** | `0x0E1` | `0x41`, `0x43` | `psa_407_hvac_body.c`, `test_407_swc_hvac_radar.c` | `CANBOX_SPEC_HIWORLD_407_04_PARKING_RADAR_AAS.md` |
 | **Steering Angle (SAS)** | `0x305` | `0x11` (Bytes 8–9) | `psa_407_hvac_body.c`, `test_407_swc_hvac_radar.c` | `CANBOX_SPEC_HIWORLD_407_05_STEERING_ANGLE_SAS.md` |
 | **Trip Computer** | `0x2A1`, `0x261`, `0x221`, `0x167` (TX) | `0x13`–`0x15`, `0x1B` | `psa_407_telemetry.c`, `psa_407_car_config.c`, `test_407_trip_doors.c` | `CANBOX_SPEC_HIWORLD_407_06_TRIP_COMPUTER_TELEMETRY.md` |
-| **Doors / Body / Speed** | `0x168`, `0x220`, `0x128`, `0x0B6` | `0x11`, `0x12`, `0x79` | `psa_407_telemetry.c`, `test_407_trip_doors.c` | `CANBOX_SPEC_HIWORLD_407_07_DOORS_BODY_STATUS.md` |
+| **Doors / Body / Speed** | `0x220`, `0x036`, `0x0F6`, `0x128`, `0x0B6` | `0x11`, `0x12`, `0x79` | `psa_407_telemetry.c`, `test_407_trip_doors.c` | `CANBOX_SPEC_HIWORLD_407_07_DOORS_BODY_STATUS.md` |
 | **JBL Amplifier / DSP** | `0x1E5`, `0x1A5` | `0x56`, `0x86`, `0xAD` | `psa_407_rd4_audio.c`, `test_407_rd4_media.c` | `CANBOX_SPEC_HIWORLD_407_08_JBL_AMPLIFIER_DSP.md` |
-| **RD4 Audio & Arbiter** | `0x165`, `0x225`, `0x2A5`, `0x3A5`, `0x0A4` | `0x84`, `0x85`, `0x97`, `0x60` | `psa_407_rd4_audio.c`, `psa_source_arbiter.c`, `test_407_rd4_media.c`, `test_407_source_arbiter.c` | `CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md` |
+| **RD4 Audio & Arbiter** | `0x165`, `0x225`, `0x265`, `0x2A5`, `0x0A4`, `0x325`–`0x3A6` | `0x84`, `0x85`, `0x97`, `0x60` | `psa_407_rd4_audio.c`, `psa_source_arbiter.c`, `test_407_rd4_media.c`, `test_407_source_arbiter.c` | `CANBOX_SPEC_HIWORLD_407_09_RD4_MFD_MEDIA_TEXT.md` |
 | **Clock / MFD Emulation** | `0x3F6` (TX), `0x0DF` (TX), `0x167` (TX), `0x525` | `0xCB`, `0xA6`, `0x9A`, `0xCA` | `psa_407_car_config.c`, `test_407_car_config.c` | `CANBOX_SPEC_HIWORLD_407_10_BSI_SETTINGS_CLOCK_SYNC.md` |
 | **Car Config (BSI)** | `0x361`, `0x260`, `0x15B` (TX) | `0x71`, `0x72`, `0x76`, `0x79`, `0x7B`, `0x7D` | `psa_407_car_config.c`, `test_407_car_config.c` | `CANBOX_SPEC_HIWORLD_407_11_CAR_CONFIGURATION_OPTIONS.md` |
 | **Alerts & Diagnostics** | `0x120`, `0x1A1` | `0x42`, `0xEA`, `0xFA` | `psa_407_alerts.c`, `test_407_alerts.c` | `CANBOX_SPEC_HIWORLD_407_12_ALERTS_DIAGNOSTICS.md` |
@@ -50,7 +54,11 @@ Embedded C99 automotive firmware & CAN bus bridge for **Peugeot 407 (PSA CAN2004
 | **OEM Firmware Diffs** | All 407 IDs | All 407 Cmds | `profile_psa.c`, `hiworld_psa_builders.c` | `CANBOX_SPEC_HIWORLD_CUSTOMIZATIONS_AND_DIFFERENCES.md` |
 
 ### Key State-Machine & Timing Rules
-* **RD4 Audio (`0x165` Authority):** `0x165` owns `present`, `sleep`, `power_status`, and `source_mode` (`<0x20` Tuner, `0x20` CD, `0x31` CDC, `0x40..0x41` AUX, `0xFF` OFF). Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) only update cached fields without turning radio ON or overwriting `source_mode >= 0x20`.
+* **RD4 Audio (`0x165` Authority):** `0x165` owns `present`, `sleep`, `power_status`, and `source_mode` (`<0x20` Tuner, `0x20` CD, `0x31` CDC, `0x40..0x41` AUX, `0xFF` OFF). Sub-frames (`0x225`, `0x2A5`, `0x0A4`, `0x3A5`, etc.) only update cached fields without turning radio ON or overwriting `source_mode >= 0x20`. `0x265` owns the `TA` indicator (`0x80`) when present (`0x225` fallback only); internal CD (`0x325`/`0x365`/`0x3A5`) and external CDC (`0x3A6`) are isolated by `source_mode`.
+* **Single-Authority Multi-Frame Isolation:**
+  - **HVAC (`0x1E3` vs `0x1D0`):** `0x1E3` is the sole authority for all climate status fields (`power_on`, `ac_on`, `auto_mode`, `dual_mode`, `front_max_defrost`, `recirculate`, `aqs_auto`, setpoints, airflow, and `fan_speed` in `data[6] & 0x0F`). `0x1D0` only updates `rear_defrost` (`Byte 4 Bit 6`).
+  - **Keys (`0x21F` / `0x221` vs `0x128`):** Steering and stalk keys come strictly from edge-triggered `0x21F` and `0x221`; `0x128` (`SIGNALISATION_COMBINES`) only updates `state->lights` (Byte 4).
+  - **Body (`0x0F6` vs `0x036` vs `0x220`):** Once `0x0F6` is seen on the bus, `0x0F6` is sole authority for `ignition_on` and `reverse_gear` (`0x036` fallback only). Handbrake comes exclusively from `0x036` (never `0x220`).
 * **Serial Dispatch Classes (38,400 baud protection):**
   - **Immediate Event (0 ms cooldown, on change):** Keys (`0x11`, `0x21`), Doors (`0x12`), Radar (`0x41`), Alerts (`0x42`, `0xEA`), Audio/DSP (`0x56`, `0x84`–`0x86`, `0x97`).
   - **Throttled Fast Telemetry ($\le 10\text{ Hz}$):** SAS steering angle (`0x11` in reverse), speed/RPM.

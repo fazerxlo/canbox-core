@@ -13,11 +13,11 @@
 # 1. Functional Domain & Architecture Overview
 
 The Peugeot 407 automatic climate control system drives three CAN frames on the PSA Comfort CAN bus:
-- **`0x1D0` (Climate Panel State, 100 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost (Byte 4 Bit 6, `0x40`), and zone temperature indices.
-- **`0x1E3` (Climate EMF / Display State, 100 ms):** Carries A/C compressor state, dual mode, front demist, cabin air recycling popup notification triggers (`intake_notify`), and display indices.
+- **`0x1E3` (Climate EMF / Display Status, 100 ms):** Broadcast by the Climate ECU (`MSG_ETAT_CLIMAV_EMF`). In accordance with the RT4 Demand-vs-Status rule (`Fp_Network_CAN.out` / `mmi_airc.out`), **`0x1E3` is the sole authoritative source** for all HVAC UI presentation (power, A/C compressor state, dual/mono mode, blower fan speed bars, zone temperature setpoints, airflow distribution, recirculation/AQS intake, and front max defrost).
+- **`0x1D0` (Climate Panel Demand, 100 ms):** Sent by the physical fascia panel (`MSG_CDE_CLIMAV`) when a user adjusts controls, or injected by the CAN adapter on downlink (`Cmd 0x3B` / `0x7D`). Because panel demands can be refused or clamped by the Climate ECU (e.g. in Battery Economy mode or when refrigerant pressure is missing on a bench), `0x1D0` is **never** used to overwrite HVAC display state; only **Rear Window Defrost** (Byte 4 Bit 6, `0x40`) is extracted from `0x1D0` as it is not carried in `0x1E3`.
 - **`0x12D` (Climate Compressor State, 100 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
 
-The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x8A`) to inject corresponding control frames back to the vehicle.
+The CAN adapter decodes `0x1E3` (plus `rear_defrost` from `0x1D0` and `outdoor_temp_raw` from `0x0F6`) into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x7D`) to inject corresponding `0x1D0` demand frames back to the vehicle.
 
 ---
 
@@ -66,11 +66,30 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 ### 2.4 PSA Climate EMF / Display State Frame (`0x1E3`)
 - **CAN ID:** `0x1E3` (DLC: 7 bytes, Period: 100 ms per RT4 firmware)
 - **Direction:** Climate ECU → RT4 / Multifunction Display (EMF)
-- **Standby Frame (Ignition ON, Climate Off):** `1C 40 0B 0B 00 00 0F 00`
+- **Description:** Authoritative dual-zone HVAC system status broadcast from the Climate ECU to the multifunction display / RT4. Carries system power, A/C compressor state, setpoints, air distribution, and blower fan bar levels.
 
-**Active Byte Layout:**
+**Byte Layout Table:**
 
-**Byte 0 mode bit combinations (bench-verified):**
+| Byte | Bits | Mask | Signal / Field | Encoding & Description |
+|:---:|:---:|:---:|:---|:---|
+| **0** | 7 | `0x80` | `RECIRC_STATUS` | `1` = Recirculation active, `0` = Fresh air |
+| **0** | 6 | `0x40` | `AC_OFF` | `1` = A/C compressor disabled (ECO mode), `0` = A/C active / authorized |
+| **0** | 5 | `0x20` | `CLIM_OFF` | `1` = HVAC system powered OFF, `0` = HVAC active |
+| **0** | 4 | `0x10` | `AUTO_AIRFLOW` | `1` = Automated airflow pattern active |
+| **0** | 3 | `0x08` | `AUTO_BLOWER` | `1` = Automated fan blower regulation active |
+| **0** | 2 | `0x04` | `HIDE_FAN_BARS` | `1` = Hide blower fan bar graph on display |
+| **0** | 0 | `0x01` | `DUAL_ACTIVE` | `1` = Dual independent zones, `0` = Mono / SYNC |
+| **1** | 7 | `0x80` | `UNFROST_FRONT` | `1` = Rapid front demist / defrost active |
+| **1** | 6:4 | `0x70` | `TEMP_OFFSET` | Temperature calibration offset (`0x3` = $+3.0\ ^\circ\text{C}$ neutral factory default) |
+| **2** | 7:0 | `0xFF` | `DISPLAY_TEMP_L` | Driver temperature setpoint: `0x00` = LO, `0x01..0x15` = 14.0–28.0 °C (`peugeot_temp_map`), `0x16` = HI |
+| **3** | 7:0 | `0xFF` | `DISPLAY_TEMP_R` | Passenger temperature setpoint (mirrors Driver in Mono mode) |
+| **4** | 7:4 | `0xF0` | `AIR_FLOW_L` | Driver air distribution pattern code (see Section 2.3) |
+| **5** | 7:4 | `0xF0` | `AIR_FLOW_R` | Passenger air distribution pattern code (see Section 2.3) |
+| **6** | 3:0 | `0x0F` | `DISPLAY_FAN_BARS`| Blower fan level bar graph ($0\dots 8$ segments, `0` = off) |
+
+**Standby Frame (Ignition ON, Climate Off):** `20 00 00 00 00 00 00` (or `1C 40 0B 0B 00 00 0F 00` with AC off)
+
+**Byte 0 Mode Bit Combinations (Bench-Verified):**
 
 | Byte 0 value | Meaning |
 |:---:|:---|
@@ -259,3 +278,16 @@ static inline void psa_hvac_send_hiworld(psa_hvac_ctx_t *ctx) {
 Rear defrost is decoded only from `0x1D0`: Byte 4 Bit 6 (`(data[4] >> 6) & 1`), dlc >= 5. `0x128` and `0x0F6` are intentionally not used.
 
 A cleared bit clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`). Implemented in `psa_hvac_process_can_0x1d0()`; test `test_peugeot_407_rear_defrost_detection`.
+
+## Downlink Climate Commands (`0x1ED` / `0x0DF`)
+
+The physical center-console HVAC panel has no physical buttons for A/C Compressor ON/OFF (Eco) or Mono/Dual sync. These functions are commanded via CAN ID `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, DLC 1) by the Multifunction Display (EMF/RT4) or OpenCanbox (Virtual MDF):
+- **Prerequisite:** `0x0DF` (`10 00 50`, DLC 3) broadcast every 500 ms.
+- **`0x1ED` Byte 0 Bitfield:**
+  - **Bit 4 (`0x10`):** `1` = Dual Mode, `0` = Mono Mode.
+  - **Bit 3 (`0x08`):** `0` = A/C ON, `1` = A/C OFF (Eco).
+  - Valid payloads: `0x00` (A/C ON, Mono), `0x08` (A/C OFF, Mono), `0x10` (A/C ON, Dual), `0x18` (A/C OFF, Dual).
+- **HU Mapping:**
+  - Hiworld `Cmd 0x3B` Setting `0x02` (A/C): `1` = ON (clear bit 3), `0` = OFF (set bit 3).
+  - Hiworld `Cmd 0x3B` Setting `0x0F` / `Cmd 0x7D` Setting `0x24` (Mono): `1` = Mono (clear bit 4), `0` = Dual (set bit 4).
+  - Raise `Cmd 0x8A` Setting `0x02` (A/C toggle/set), Setting `0x0B` (Dual toggle/set).

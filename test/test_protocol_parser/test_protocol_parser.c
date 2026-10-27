@@ -46,6 +46,7 @@ void test_peugeot_407_verification_vector_1_vol_up(void);
 void test_peugeot_407_verification_vector_2_climate(void);
 void test_peugeot_407_hvac_defrost_and_recirc(void);
 void test_peugeot_407_rear_defrost_detection(void);
+void test_peugeot_407_hvac_0x1e3_full_decoding(void);
 void test_peugeot_407_verification_vector_3_parking_radar(void);
 void test_peugeot_407_front_parking_radar(void);
 void test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center(void);
@@ -64,6 +65,9 @@ void test_peugeot_407_trip_hiworld_bsi_slow_data_0x0f6(void);
 void test_peugeot_407_trip_hiworld_speed_fallback(void);
 void test_peugeot_407_trip_hiworld_boundary_and_null_safety(void);
 void test_peugeot_407_trip_reset_frames(void);
+void test_peugeot_407_telemetry_1a_vector1(void);
+void test_peugeot_407_telemetry_1a_vector2(void);
+void test_peugeot_407_telemetry_1a_can_decoding_and_guards(void);
 void test_peugeot_407_verification_vector_4_doors(void);
 void test_peugeot_407_doors_all_open_with_handbrake(void);
 void test_peugeot_407_doors_0x220_idle_data_04_00(void);
@@ -155,6 +159,11 @@ void test_peugeot_407_mdf_coexistence_suppression(void);
 void test_peugeot_407_matrix_cluster_page_cycling(void);
 void test_peugeot_407_matrix_cluster_inactivity_timeout(void);
 void test_peugeot_407_trip_reset_0x167(void);
+void test_peugeot_407_clim_1ed_ac_on_to_off(void);
+void test_peugeot_407_clim_1ed_ac_off_to_on(void);
+void test_peugeot_407_clim_1ed_dual_to_mono(void);
+void test_peugeot_407_clim_1ed_mono_to_dual(void);
+void test_peugeot_407_clim_1ed_combined_state_preservation(void);
 
 // Hiworld protocol test declarations
 void test_hiworld_serialize_valid_packet(void);
@@ -224,6 +233,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_verification_vector_2_climate);
     RUN_TEST(test_peugeot_407_hvac_defrost_and_recirc);
     RUN_TEST(test_peugeot_407_rear_defrost_detection);
+    RUN_TEST(test_peugeot_407_hvac_0x1e3_full_decoding);
     RUN_TEST(test_peugeot_407_verification_vector_3_parking_radar);
     RUN_TEST(test_peugeot_407_front_parking_radar);
     RUN_TEST(test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center);
@@ -242,6 +252,9 @@ int main(void) {
     RUN_TEST(test_peugeot_407_trip_hiworld_speed_fallback);
     RUN_TEST(test_peugeot_407_trip_hiworld_boundary_and_null_safety);
     RUN_TEST(test_peugeot_407_trip_reset_frames);
+    RUN_TEST(test_peugeot_407_telemetry_1a_vector1);
+    RUN_TEST(test_peugeot_407_telemetry_1a_vector2);
+    RUN_TEST(test_peugeot_407_telemetry_1a_can_decoding_and_guards);
     RUN_TEST(test_peugeot_407_verification_vector_4_doors);
     RUN_TEST(test_peugeot_407_doors_all_open_with_handbrake);
     RUN_TEST(test_peugeot_407_doors_0x220_idle_data_04_00);
@@ -333,6 +346,11 @@ int main(void) {
     RUN_TEST(test_peugeot_407_matrix_cluster_page_cycling);
     RUN_TEST(test_peugeot_407_matrix_cluster_inactivity_timeout);
     RUN_TEST(test_peugeot_407_trip_reset_0x167);
+    RUN_TEST(test_peugeot_407_clim_1ed_ac_on_to_off);
+    RUN_TEST(test_peugeot_407_clim_1ed_ac_off_to_on);
+    RUN_TEST(test_peugeot_407_clim_1ed_dual_to_mono);
+    RUN_TEST(test_peugeot_407_clim_1ed_mono_to_dual);
+    RUN_TEST(test_peugeot_407_clim_1ed_combined_state_preservation);
 
     // Hiworld Protocol Unit Tests
     RUN_TEST(test_hiworld_serialize_valid_packet);

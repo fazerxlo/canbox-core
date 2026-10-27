@@ -456,6 +456,31 @@ void test_peugeot_407_rear_defrost_detection(void) {
     TEST_ASSERT_TRUE(rd_feed(0x1D0, 4, s1));
 }
 
+void test_peugeot_407_hvac_0x1e3_full_decoding(void) {
+    vehicle_climate_t clim;
+    memset(&clim, 0, sizeof(clim));
+
+    /* Golden Trace vector from bench step 3: 0x1E3: 1C 30 0B 0B 00 00 02 */
+    const uint8_t can_1e3[] = { 0x1C, 0x30, 0x0B, 0x0B, 0x00, 0x00, 0x02 };
+    psa_hvac_process_can_0x1e3(&clim, can_1e3, sizeof(can_1e3));
+
+    TEST_ASSERT_TRUE(clim.power_on);
+    TEST_ASSERT_TRUE(clim.ac_on);
+    TEST_ASSERT_TRUE(clim.auto_mode);
+    TEST_ASSERT_FALSE(clim.dual_mode);
+    TEST_ASSERT_FALSE(clim.recirculate);
+    TEST_ASSERT_TRUE(clim.aqs_auto);
+    TEST_ASSERT_EQUAL_UINT8(2, clim.fan_speed);
+    TEST_ASSERT_EQUAL_UINT8(42, clim.temp_driver);    /* peugeot_temp_map[0x0B = 11] = 42 (21.0 C) */
+    TEST_ASSERT_EQUAL_UINT8(42, clim.temp_passenger); /* peugeot_temp_map[0x0B = 11] = 42 (21.0 C) */
+
+    /* Test CLIM_OFF (data[0] bit 5 = 1) and AC_OFF (data[0] bit 6 = 1) */
+    const uint8_t can_off[] = { 0x60, 0x00, 0x0B, 0x0B, 0x00, 0x00, 0x00 };
+    psa_hvac_process_can_0x1e3(&clim, can_off, sizeof(can_off));
+    TEST_ASSERT_FALSE(clim.power_on);
+    TEST_ASSERT_FALSE(clim.ac_on);
+}
+
 /* --------------------------------------------------------------------------
  * 1.3 Ultrasonic Parking Sensors (Front & Rear AAS) Tests
  * -------------------------------------------------------------------------- */

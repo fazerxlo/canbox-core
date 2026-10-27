@@ -8,6 +8,17 @@ static inline uint16_t read_be16(const uint8_t *d) {
 
 /* --------------------------------------------------------------------------
  * 1.4 Trip Computer & Engine Telemetry
+ *
+ * NOTE ON LEGACY FUNCTIONS (psa_decode_trip_0x165 / 0x1a5 / 0x2a5):
+ * These legacy functions are preserved for backwards compatibility with
+ * external test harnesses. In genuine PSA CAN2004 architecture:
+ *   - CAN 0x165 is MSG_ETAT_AUTORADIO (radio status)
+ *   - CAN 0x1A5 is MSG_VOLUME_RADIO_OR_CD_STATUS (RD4 volume or RT4 CD)
+ *   - CAN 0x2A5 is MSG_NOM_STATION (RDS station name)
+ * Real PSA trip computer telemetry is decoded below via:
+ *   - CAN 0x221 (MSG_INFO_GEN_ODB): psa_trip_process_can_0x221
+ *   - CAN 0x2A1 (MSG_INFOS_TRAJET1_ODB): psa_trip_process_can_0x2a1
+ *   - CAN 0x261 (MSG_INFOS_TRAJET2_ODB): psa_trip_process_can_0x261
  * -------------------------------------------------------------------------- */
 void psa_decode_trip_0x165(const uint8_t *data, uint8_t dlc,
                            uint16_t *instant_fuel, uint16_t *range_dte,
@@ -54,6 +65,11 @@ bool psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8
 
     /* Note: 0xFFFF sentinels in fuel/range represent valid PSA stationary/undefined
      * indicators ('--.-') and must NOT be suppressed so the HU displays '--.-'.
+     *
+     * In PSA CAN2004 (BSI / RT4 / OEM canbox ground truth):
+     * - Bytes 1-2: INST_CONSUMPTION (0.1 L/100km)
+     * - Bytes 3-4: CRUISING_RANGE (km)
+     * - Bytes 5-6: DIST_TO_DEST (km)
      */
     trip->instant_fuel_deci = read_be16(&data[1]);
     trip->range_km          = read_be16(&data[3]);
@@ -89,6 +105,7 @@ void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, u
 
     state->rpm = (raw_rpm == 0xFFFF) ? 0 : (raw_rpm >> 3);
     state->speed_kmh = (raw_spd == 0xFFFF) ? 0 : (raw_spd / 100);
+    state->dirty.telemetry = true;
 }
 
 void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
@@ -100,10 +117,37 @@ void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
 
 void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc) {
     if (!state || !data || dlc < 8) return;
+    state->ignition_on = (data[0] & 0x08) != 0;
+    state->coolant_temp_c = (data[1] == 0xFF) ? 0x7F : (int8_t)(data[1] - 40);
     state->reverse_gear = (data[7] & 0x80) != 0;
     if (data[5] != 0xFF) {
         state->climate.outdoor_temp_raw = data[5];
     }
+    state->dirty.telemetry = true;
+}
+
+void psa_bsi_process_can_0x161(vehicle_state_t *state, const uint8_t *data, uint8_t dlc) {
+    if (!state || !data || dlc < 4) return;
+    if (data[2] == 0xFF) {
+        state->oil_temp_c = 0x7F;
+    } else if (data[2] == 0x00) {
+        state->oil_temp_c = 0;
+    } else {
+        /* Workbench / combine calibration from simulator/signal-db (bsi.yaml):
+         * raw = round((79 * temp - 1360) / 50).
+         * Inverting: temp = (50 * raw + 1360 + 39) / 79
+         * e.g. raw 0x73 (115) -> 90 °C
+         */
+        state->oil_temp_c = (int8_t)(((int32_t)data[2] * 50 + 1360 + 39) / 79);
+    }
+    if (data[3] == 0xFF) {
+        state->fuel_percentage = 0xFF;
+        state->fuel_liters = 0xFF;
+    } else {
+        state->fuel_percentage = data[3];
+        state->fuel_liters = (uint8_t)(((uint16_t)data[3] * 66 + 50) / 100);
+    }
+    state->dirty.telemetry = true;
 }
 
 
@@ -160,6 +204,7 @@ void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
             }
             psa_stalk_process_tip_0x221(&state->wheel, frame->data, frame->dlc);
             if (psa_trip_process_can_0x221(&state->trip, frame->data, frame->dlc)) {
+                state->dirty.telemetry = true;
                 if (state->dirty.trip_page == 0) {
                     state->dirty.trip_page = 1;
                 }
@@ -233,35 +278,33 @@ void psa_tpms_init(vehicle_tpms_t *tpms) {
 }
 
 static uint8_t psa_tpms_decode_0x1e1_wheel(uint8_t raw_byte, uint8_t nominal_deci_bar, uint8_t *out_synth_bar) {
-    /* Bit 7 (0x80): Unmonitored / Standby / Sensor Offline Flag */
-    if ((raw_byte & 0x80) != 0) {
-        if (out_synth_bar) *out_synth_bar = 0;
-        return 3; /* Hiworld: Sensor Fault / Offline */
-    }
-
-    /* PSA 0x1E1 Bits 5..3 ((raw_byte >> 3) & 0x07) discrete wheel status enum:
-     * 0 (raw 0x00) = Normal / OK
-     * 1 (raw 0x08) = Under-inflated (Low pressure)
-     * 2 (raw 0x10) = Punctured (Flat)
-     * 3 (raw 0x18) = Sensor Missing / Not Detected
-     * 4 (raw 0x20) = Sensor Battery Low / Hardware Fault
+    /* RT4 / PSA CAN 0x1E1 Bits 7:3 (5-bit enum, (raw_byte >> 3) & 0x1F):
+     * 0x00 (raw 0x00) = Normal / OK
+     * 0x01 (raw 0x08) = Under-inflated (Low pressure)
+     * 0x02 (raw 0x10) = Punctured (Flat)
+     * 0x03 (raw 0x18) = Sensor Missing / Not Detected
+     * 0x04 (raw 0x20) = Sensor Battery Low / Hardware Fault
+     * 0x08 (raw 0x40) = RT4 Default / Invalid: Unmonitored / Standby
+     * 0x10 (raw 0x80) = Sensor Offline / Unequipped (e.g. spare wheel)
      */
-    uint8_t state_enum = (uint8_t)((raw_byte >> 3) & 0x07);
+    uint8_t state_enum = (uint8_t)((raw_byte >> 3) & 0x1F);
     switch (state_enum) {
-        case 0:
+        case 0x00:
             if (out_synth_bar) *out_synth_bar = nominal_deci_bar;
             return 0; /* Hiworld: Normal / OK */
-        case 1:
+        case 0x01:
             if (out_synth_bar) *out_synth_bar = 17; /* 1.7 Bar synthetic low */
             return 1; /* Hiworld: Low Pressure */
-        case 2:
+        case 0x02:
             if (out_synth_bar) *out_synth_bar = 8;  /* 0.8 Bar synthetic puncture */
             return 2; /* Hiworld: Puncture / Flat */
-        case 3:
-        case 4:
+        case 0x03:
+        case 0x04:
+        case 0x08: /* RT4 Default / Invalid: Unmonitored (raw 0x40) */
+        case 0x10: /* Sensor Offline / Unequipped (raw 0x80) */
         default:
             if (out_synth_bar) *out_synth_bar = 0;  /* 0.0 Bar / Offline */
-            return 3; /* Hiworld: Sensor Fault / Missing */
+            return 3; /* Hiworld: Sensor Fault / Offline / Missing */
     }
 }
 
@@ -287,10 +330,13 @@ void psa_tpms_process_can_0x3a1(vehicle_tpms_t *tpms, const uint8_t *data, uint8
 void psa_tpms_process_can_0x1e1(vehicle_tpms_t *tpms, const uint8_t *data, uint8_t dlc) {
     if (!tpms || !data || dlc < 4) return;
 
-    /* Guard against standby / unequipped 80 80 80 80 frame before TPMS wakes up */
+    /* Guard against standby / unequipped / unmonitored frames before TPMS wakes up
+     * (Bit 7 set = unequipped 0x80, or Bit 6 set = unmonitored 0x40, i.e. (data & 0xC0) != 0).
+     * Bench frames (40 40 40 40) or unequipped frames (80 80 80 80) must not latch synthetic
+     * pressures or assert false normal tire states. */
     if (!tpms->valid &&
-        (data[0] & 0x80) != 0 && (data[1] & 0x80) != 0 &&
-        (data[2] & 0x80) != 0 && (data[3] & 0x80) != 0) {
+        ((data[0] & 0xC0) != 0) && ((data[1] & 0xC0) != 0) &&
+        ((data[2] & 0xC0) != 0) && ((data[3] & 0xC0) != 0)) {
         return;
     }
 

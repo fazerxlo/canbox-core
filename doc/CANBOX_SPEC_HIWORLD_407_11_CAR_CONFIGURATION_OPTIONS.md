@@ -128,9 +128,14 @@ v                                                     |
 Hardware bench captures (`only_mdf_can_log_min2.csv`) prove a critical behavioral distinction between the factory PSA Multifunction Display (MDF / EMF-C) and aftermarket Chinese CAN boxes:
 - **OEM EMF-C MDF Behavior:** The physical MDF **does NOT broadcast `0x15B` periodically**. It remains completely silent on `0x15B` while idle or browsing menus, and transmits a **single event-driven `0x15B` frame** (~1.5 to 10 ms after the user presses `OK` on the RD4 fascia `0x3E5 = 00 00 40 00 00 00`). The BSI latches this single frame into EEPROM and echoes the new state on the very next `0x260` Profile 1 broadcast.
 - **OEM Hiworld PA12.20 (`H1H2PA123A-240717`) Quirk:** The commercial Hiworld PA12.20 box continuously broadcasts `0x15B` every ~520 ms (alongside `0x525`, `0x3F6`, and `0x0DF`). If a physical MDF is connected on the same CAN bus (e.g., on a test workbench), the PA12.20's periodic `0x15B` transmissions collide with and overwrite settings changed on the MDF. *(When using a PA12.20 on a workbench with an MDF for passive UART comparison, its CAN_TX line must be disconnected).*
-- **OpenCanbox Coexistence Architecture:**
-  - `canbox-core` **never** transmits `0x15B` periodically.
-  - It passively updates `s_cached_profile1_raw[8]` from every incoming `0x260` Profile 1 frame and **only** transmits `0x15B` as an event-driven frame when `psa_car_config_apply_downlink()` is invoked by the Android Head Unit (`Cmd 0x7B` / `0x7D`).
+- **OpenCanbox Coexistence & Virtual MDF Architecture:**
+  - When no physical MDF is present on the bus (3000 ms timeout on `0x525`), OpenCanbox enters **Virtual MDF mode** and broadcasts the 4 required display supervision frames at 1000 ms intervals:
+    - `0x525` (`DLC 8`: `05 00 01 00 00 00 00 00` - presence / diagnostic heartbeat)
+    - `0x3F6` (`DLC 7`: `00 00 <cnt> 00 00 C0 01` - cluster trip supervision)
+    - `0x0DF` (`DLC 3`: `10 00 50` - display status)
+    - `0x167` (`DLC 8`: `(s_mdf_trip_page_mask | s_mdf_trip_reset_mask) 06 FF FF 00 00 00 00` - active trip page supervisory frame)
+  - When a physical MDF is connected and broadcasts `0x525`, OpenCanbox suppresses all Virtual MDF frames (`0x525`, `0x3F6`, `0x0DF`, `0x167`) and ISO-TP Flow Control (`0x11F` / `0x09F`) within 100 ms.
+  - `canbox-core` **never** transmits `0x15B` periodically. It passively updates `s_cached_profile1_raw[8]` from incoming `0x260` Profile 1 and **only** transmits `0x15B` as an event-driven write frame when `psa_car_config_apply_downlink()` is invoked by the Android Head Unit (`Cmd 0x7B` / `0x7D`).
   - Consequently, `canbox-core` works identically in a target vehicle **without an MDF** and on a development workbench **with a physical MDF connected**, allowing settings to be modified and persisted from either the RD4/MDF or the Android Head Unit without bus conflicts.
 
 ---
@@ -214,18 +219,20 @@ When the user taps an option on Android, the headunit sends a serial command to 
 | **TPMS Re-Learn Trigger** | `0x7D` | `0x03` | `3` | `1` = Pulse Trigger | `0x221` (Demands EMF) | Injects one-shot `0x221` with Byte 3 = `0x10` |
 | **Driver Profile Select** | `0x7D` | `0x0B` | `11` | `0` = Profile 1, `1` = Profile 2, `2` = Profile 3 | `0x15B` (`MSG_BSI_PERSO_REQ`) | Injects `0x15B#0[prof]...` (`prof` = `(val & 0x03) + 1`) |
 | **Backlight Dimmer** | `0x7D` | `0x0E` | `14` | `0 \dots 15` | `0x036` (Dimmer Level) | Update cluster dimmer state |
-| **Zone Temp Mono/Sync** | `0x7D` | `0x24` | `36` | `0` = Dual, `1` = Mono / SYNC | `0x1D0` (`MSG_CDE_CLIMAV`) | Injects `0x1D0` with Byte 0 Bit 0 (`0x01`) |
+| **Zone Temp Mono/Sync** | `0x7D` | `0x24` | `36` | `0` = Dual, `1` = Mono / SYNC | `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`) | Updates `0x1ED` Byte 0 Bit 4 (`0x10`) |
 
 ---
 
-### 3.3 Climate Dual/Mono Sync Settings (`Cmd 0x3B` / `0x7D`)
+### 3.3 Climate Dual/Mono Sync & A/C Settings (`Cmd 0x3B` / `0x7D`)
 
-The Android Climate UI sends `Cmd 0x3B` with sub-setting `0x0F` to toggle Mono / SYNC mode:
-- **Downlink Serial:** `5A A5 02 3B 0F [val] [CS]` (`val == 1` $\implies$ SYNC Mono, `val == 0` $\implies$ Dual).
-- **Injected PSA CAN Frame (`0x1D0` - DLC 7):**
-  - `Byte 0`: `0x01` (`DUAL_REQ`)
-  - `Byte 5`: Driver Temperature setpoint
-  - `Byte 6`: Passenger Temperature setpoint (when commanding Mono mode, Byte 6 **must strictly equal Byte 5**).
+The Android Climate UI sends `Cmd 0x3B` (or `Cmd 0x7D`) to control Mono / Dual and A/C compressor cut-off:
+- **Downlink Serial (Mono/Dual):** `5A A5 02 3B 0F [val] [CS]` or `5A A5 02 7D 24 [val] [CS]` (`val == 1` $\implies$ SYNC Mono, `val == 0` $\implies$ Dual).
+- **Downlink Serial (A/C Switch):** `5A A5 02 3B 02 [val] [CS]` (`val == 1` $\implies$ A/C ON, `val == 0` $\implies$ A/C OFF / Eco).
+- **Injected PSA CAN Frame (`0x1ED` - DLC 1, Periodic 500 ms + Event-Driven):**
+  - Controlled by Multifunction Display / Telematics unit (`DEMANDES_AFFICHEUR_CLIM`).
+  - **Bit 4 (`0x10`):** `1` = Dual Mode, `0` = Mono Mode.
+  - **Bit 3 (`0x08`):** `0` = A/C Compressor ON, `1` = A/C Compressor OFF (Eco).
+  - Prerequisites: `0x0DF` (`10 00 50`) must be actively broadcast every 500 ms for Climate ECU to accept `0x1ED`. Note that `0x1D0` is emitted by the Climate panel and is NOT used for A/C or Mono/Dual injection.
 
 ---
 
@@ -382,19 +389,33 @@ Byte 7: Profile options mask (0x10)
 - **Byte 2 Bit 7 (`0x80`):** `ECONOMY_MODE` (`1` = Active, `0` = Normal)
 - **Byte 3 Bit 5 (`0x20`):** `ILLUMINATION_NIGHT` (`1` = Night illumination active)
 - **Byte 3 Bits 3..0 (`0x0F`):** `RHEOSTAT_LEVEL` (`0..15` instrument cluster dimmer brightness level; e.g., `0x0F` = 15 $\implies$ `0x0F << 2 = 0x3C` in `Cmd 0x79` Byte 2)
-- **Byte 4 Bits 2..0 (`0x07`):** `PHASE_VIE` (`0x00` = Sleep, `0x01` = Normal/+APC, `0x02` = Shutdown)
+- **Byte 4 Bits 7..4 (`0xF0`):** `POWER_MODE` (Contact state):
+  - `0x00`: Contact OFF / Standby
+  - `0x10`: Accessory (ACC)
+  - `0x20`: Ignition ON (+APC)
+  - `0x50`: Engine Running
+- **Byte 4 Bits 2..0 (`0x07`):** `PHASE_VIE` (Comfort bus network lifecycle):
+  - `0x00`: Deep Sleep / Standby
+  - `0x01`: Normal / Bus Awake (+APC active)
+  - `0x02`: Shutdown countdown / Preparing sleep
+  - `0x03`: Wakeup transition
+> [!IMPORTANT]
+> **Power Mode Masking Rule:** Never apply an artificial 3-bit mask (`data[4] & 0x07`) to determine ignition. Doing so strips the upper nibble `POWER_MODE` (`0x20` or `0x50`), causing ignition state to read as OFF whenever `PHASE_VIE` transitions away from `0x01` during engine running (`0x50`). Byte 4 must be evaluated as `(data[4] >= 0x20) || (data[4] & 0x07) == 0x01`.
 
 ---
 
-### 5.5 Climate Dual/Mono Regulation (`0x1E3` Status & `0x1D0` Command)
-- **`0x1E3` (`MSG_ETAT_CLIMAV_EMF`, 100 ms, DLC 7):**
+### 5.5 Climate Dual/Mono & A/C Regulation (`0x1E3` Status & `0x1ED` / `0x0DF` Command)
+- **`0x1E3` (`MSG_ETAT_CLIMAV_EMF`, 200 ms, DLC 7 from Climate ECU):**
+  - `Byte 0 Bit 6`: `AC_OFF_STATUS` (`0` = A/C ON, `1` = A/C OFF / Eco).
   - `Byte 0 Bit 0`: `DUAL_ACTIVE` (`1` = Dual independent zones, `0` = Mono / SYNC mode).
   - `Byte 2`: Driver setpoint ($14.0 + \text{raw} \times 0.5\ ^\circ\text{C}$).
   - `Byte 3`: Passenger setpoint (in Mono mode, mirrors Driver setpoint).
-- **`0x1D0` (`MSG_CDE_CLIMAV`, Event, DLC 7):**
-  - `Byte 0 Bit 0`: `DUAL_REQ` (`0x01` = Toggle Dual/Mono mode).
-  - `Byte 5`: Driver setpoint.
-  - `Byte 6`: Passenger setpoint (must equal Byte 5 when commanding Mono mode).
+- **`0x0DF` (`ETAT_EMF`, 500 ms, DLC 3):**
+  - Payload: `10 00 50` (MDF display presence heartbeat; mandatory prerequisite for Climate ECU to accept `0x1ED`).
+- **`0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, 500 ms + Event, DLC 1):**
+  - `Byte 0 Bit 4`: `DUAL_MODE` (`1` = Dual, `0` = Mono).
+  - `Byte 0 Bit 3`: `AC_OFF_REQ` (`0` = A/C ON, `1` = A/C OFF / Eco).
+  - Four valid payloads: `0x00` (A/C ON, Mono), `0x08` (A/C OFF, Mono), `0x10` (A/C ON, Dual), `0x18` (A/C OFF, Dual). Note: `0x1D0` is broadcast by the climate console and is NOT injected for MDF A/C or Mono toggles.
 
 ---
 

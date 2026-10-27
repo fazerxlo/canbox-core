@@ -16,6 +16,7 @@ void hu_protocol_send_panel_key(const vehicle_panel_key_t *panel_key);
 void hu_protocol_send_doors(const vehicle_doors_t *doors);
 void hu_protocol_send_climate(const vehicle_climate_t *climate);
 void hu_protocol_send_telemetry(uint16_t speed, uint16_t rpm, int16_t angle);
+void hu_protocol_send_telemetry_state(const vehicle_state_t *state);
 void hu_protocol_send_tpms(const vehicle_tpms_t *tpms);
 void hu_protocol_send_tpms_numeric(const vehicle_tpms_t *tpms);
 void hu_protocol_send_tpms_discrete(const vehicle_tpms_t *tpms);

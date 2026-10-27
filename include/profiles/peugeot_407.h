@@ -36,6 +36,7 @@ extern "C" {
 #define PSA_CAN_ID_VOLUME_RADIO     0x1A5
 #define PSA_CAN_ID_CRUISE_CONTROL   0x1A8
 #define PSA_CAN_ID_CLIMATE_HVAC     0x1D0
+#define PSA_CAN_ID_ETAT_CLIMAV_1E3  0x1E3
 #define PSA_CAN_ID_RD4_AUDIO_SETTINGS 0x1E5
 #define PSA_CAN_ID_REGLAGES_SON     0x1E5
 #define PSA_CAN_ID_STALK_21F        0x21F
@@ -45,11 +46,13 @@ extern "C" {
 #define PSA_CAN_ID_ETAT_TUNER       0x225
 #define PSA_CAN_ID_BSI_PERSO_REQ_15B 0x15B
 #define PSA_CAN_ID_MDF_STATUS_0DF   0x0DF
+#define PSA_CAN_ID_MDF_CLIM_REQ_1ED 0x1ED
 #define PSA_CAN_ID_MDF_TRIP_CMD_167 0x167
 #define PSA_CAN_ID_MDF_TRIP_3F6     0x3F6
 #define PSA_CAN_ID_MDF_DIAG_525     0x525
 
 /* Virtual MDF / Cluster Matrix Trip Page Masks (0x167 Byte 0) */
+#define PSA_MDF_TRIP_PAGE_IDLE      0x08
 #define PSA_MDF_TRIP_PAGE_INSTANT   0x09
 #define PSA_MDF_TRIP_PAGE_TRIP1     0x0A
 #define PSA_MDF_TRIP_PAGE_TRIP2     0x0C
@@ -233,6 +236,7 @@ void psa_trip_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 void psa_engine_process_can_0x0b6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
 void psa_engine_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
+void psa_bsi_process_can_0x161(vehicle_state_t *state, const uint8_t *data, uint8_t dlc);
 
 void psa_stalk_process_tip_0x221(vehicle_wheel_t *wheel, const uint8_t *data, uint8_t dlc);
 
@@ -405,6 +409,9 @@ void psa_decode_config_0x260(vehicle_config_t *cfg, const uint8_t *data, uint8_t
 void psa_car_config_get_feature_enables(uint8_t feat1[2], uint8_t feat2[8]);
 hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, uint8_t val);
 void psa_car_config_get_cached(vehicle_config_t *cfg);
+void psa_clim_sync_1ed_from_1e3(const uint8_t *data, uint8_t dlc);
+hal_status_t psa_clim_send_1ed(void);
+uint8_t psa_clim_get_1ed_state(void);
 void psa_car_config_notify_mdf_seen(void);
 bool psa_car_config_is_mdf_present(void);
 bool psa_car_config_is_cached_valid(void);

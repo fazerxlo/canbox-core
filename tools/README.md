@@ -105,6 +105,79 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
 
 ## 2. Hardware-in-the-Loop (HIL) & E2E Testing
 
+### `hil_preinstall_407_hiworld.py`
+**Peugeot 407 Pre-Installation Vehicle-Integration HIL Verification Suite**
+- **Purpose:** Comprehensive automated pre-installation test harness validating 8 critical vehicle-integration scenarios on the physical Raise NUC131 CAN box hardware over `slcan0` (125 kbps Comfort CAN), Head Unit UART (`38,400` baud 8N1), and ST-Link SWD (OpenOCD TCL port 6666).
+- **Test Scenarios:**
+  1. **Virtual MDF Takeover & ISO-TP:** 3.5s timeout on `0x525`, verifies periodic `0x525`, `0x3F6`, `0x0DF`, `0x167` broadcast, ISO-TP Flow Control (`0x09F` / `0x11F` `< 15 ms`), and reassembly of RadioText (`Cmd 0x86`) and Presets (`Cmd 0x85`).
+  2. **MDF Coexistence Suppression:** Physical `0x525` heartbeat suppresses Virtual MDF broadcast within `< 100 ms` for 3000 ms.
+  3. **Discrete Hardware Outputs:** Reads `PA->DOUT` and `PB->DOUT` via SWD; verifies silent buzzer state (`PB.3=1, PB.12=1`), and dynamic driving of `PA.8` (ACC), `PA.9` (ILL), `PA.13` (REV) alongside Hiworld `Cmd 0x11`.
+  4. **Economy Mode & RD4 Wake:** Validates `PA.8` (ACC) behavior on Ignition OFF, user manual RD4 power knob push (`0x165#C8C01000` rising edge $\to$ `PA.8=1`), and power off (`0x165#08800000` $\to$ `PA.8=0`).
+  5. **Matrix Cluster Trip Cycling & Reset:** Wiper stalk tip pulses on `0x221` cycle matrix display page on `0x167` (`0x09` $\to$ `0x0A` $\to$ `0x0C` $\to$ `0x09`); Head Unit `Cmd 0x1B` sustains `0x167` reset pulse `0x8A` for 300 ms.
+  6. **Two-Mode `0x24` Round-Robin & Reboot Recovery:** Verifies immediate ACK `5A A5 01 FF 24 23`, Cycle 1 full discovery burst, Cycles 2..4 paced round-robin, and full resync re-emission after >4500 ms reboot pause.
+  7. **BSI Personalization `0x260` Cache & Event-Driven `0x15B`:** Caches initial `0x260` Profile 1; confirms zero periodic `0x15B` frames while idle; verifies immediate `0x15B` write on `Cmd 0x7B` DRL setting toggle.
+  8. **In-Car Upgrade Readiness & IAP Isolation:** Sends `0xE0` firmware upgrade trigger; verifies zero CAN error frames, `PA.8=1` (ACC kept alive), `PC.3=1` (CAN Standby), and `PD.7=1` (CAN TX recessive); cleanly restores application via SWD.
+- **Usage:**
+  ```bash
+  ./tools/hil_preinstall_407_hiworld.py
+  ```
+
+---
+
+### `hil_test_nuc131_changes.py`
+**Automated Nuvoton NUC131 HAL Regression Suite**
+- **Purpose:** Verifies low-level NUC131 HAL driver changes (`hal_can_nuc131.c`, `hal_system_nuc131.c`, and `hal_uart_nuc131.c`) on the physical target using `slcan0`, UART, and ST-Link register reads.
+- **Test Scenarios:**
+  - **TC-01:** RX FIFO & 64-frame ring buffer stress during 45 ms blocking UART burst (~600 fps CAN flood).
+  - **TC-02:** 6-mailbox CAN TX contention and periodic Virtual MDF transmission under heavy load.
+  - **TC-03:** Deterministic deep sleep entry & wake-source latching with `PRIMASK=1` (UART glitch/false-wake immunity vs true CAN dominant edge wake).
+  - **TC-04:** UART error recovery from framing, break, and overrun conditions (`UART0->FSR`).
+  - **TC-05:** Rate-limited Bus-Off recovery (200 ms cooldown) and Watchdog/BOD survival (`SYS->RSTSRC`).
+- **Usage:**
+  ```bash
+  ./tools/hil_test_nuc131_changes.py
+  ```
+
+---
+
+### `workbench_defrost_verifier.py`
+**Peugeot 407 Rear Defrost CAN Discovery & Verification Harness**
+- **Purpose:** Discovers and validates which PSA CAN2004 frames control rear defrost on OEM Raise and Hiworld canboxes connected alongside an RD4 radio. Emulates background ignition/wake-up frames, sweeps candidate CAN IDs/bits, and performs a 3-cycle auto-verification upon detecting state change.
+- **Safety:** Hardcoded whitelist of broadcast comfort IDs. Strictly blocks diagnostic ranges (`0x5E0..0x5EF`, `0x600..0x7FF`) and RD4 write frames to completely protect attached RD4 hardware.
+- **Usage:**
+  ```bash
+  # Run auto-detect discovery across high-probability candidates:
+  ./tools/workbench_defrost_verifier.py --can can0 --port /dev/ttyUSB1
+
+  # Force Raise protocol on custom port:
+  ./tools/workbench_defrost_verifier.py --proto raise --port /dev/ttyUSB0
+
+  # Target a specific CAN ID directly:
+  ./tools/workbench_defrost_verifier.py --custom-id 0x1D0
+  ```
+
+---
+
+### `canbox_usb_ports.py`
+**Hardware USB VID:PID Port Auto-Discovery**
+- **Purpose:** Automatically maps connected USB-to-serial hardware dongles by persistent USB Vendor/Product IDs (`CH340 1A86:7523` -> CAN, `FTDI 0403:6001` -> Canbox UART, `Prolific 067B:2303` -> HU UART) so scripts run without hardcoded `/dev/ttyUSB*` paths.
+- **Usage:**
+  ```bash
+  python3 tools/canbox_usb_ports.py
+  ```
+
+---
+
+### `analyze_can_state_changes.py`
+**Streaming CAN Capture Transition & State Change Analyzer**
+- **Purpose:** Stream-parses large CAN captures (CSV, candump, OpenCanbox dump_*.log) in O(1) memory, deduplicating repetitive heartbeats by >95% to isolate discrete button transitions, mux carousels, and bit-level masks.
+- **Usage:**
+  ```bash
+  python3 tools/analyze_can_state_changes.py dump_2026-10-25_22-00-00.log -t 10
+  ```
+
+---
+
 ### `test_bsi_workbench.py`
 **PSA 407 BSI & SLCAN Automated Workbench Verification Suite**
 - **Purpose:** Automates bidirectional verification of OpenCanbox Core against a physical bench (Peugeot 407 BSI, RD4, and SLCAN `can0`). Validates live BSI cyclic traffic (`0x036`, `0x0F6`, `0x361`, `0x165`), tests CAN-to-HU telemetry dispatch, and verifies HU downlink commands (ACK, atomic CAN injection on `0x361`, and immediate optimistic HU telemetry).

@@ -14,7 +14,7 @@ hal_status_t hal_uart_init(uart_baudrate_t baudrate) {
 
     // Enable UART0 peripheral clock
     CLK_EnableModuleClock(UART0_MODULE);
-    
+
     // Select UART module clock source as PLL and set divider
     CLK_SetModuleClock(UART0_MODULE, CLK_CLKSEL1_UART_S_PLL, CLK_CLKDIV_UART(1));
 
@@ -34,8 +34,8 @@ hal_status_t hal_uart_init(uart_baudrate_t baudrate) {
     // Reset and enable RX FIFO with 1-byte trigger threshold
     UART0->FCR = UART_FCR_RFR_Msk | UART_FCR_TFR_Msk | UART_FCR_RFITL_1BYTE;
 
-    // Enable RX Interrupt
-    UART_EnableInt(UART0, UART_IER_RDA_IEN_Msk);
+    // Enable RX Data Available + Buffer Error / Line Status Interrupts
+    UART_EnableInt(UART0, UART_IER_RDA_IEN_Msk | UART_IER_RLS_IEN_Msk | UART_IER_BUF_ERR_IEN_Msk);
     NVIC_SetPriority(UART02_IRQn, 1);
     NVIC_EnableIRQ(UART02_IRQn);
 
@@ -74,10 +74,17 @@ hal_status_t hal_uart_flush_tx(void) {
 }
 
 void UART02_IRQHandler(void) {
-    if (UART0->ISR & UART_ISR_RDA_INT_Msk) {
+    uint32_t isr = UART0->ISR;
+
+    if (isr & (UART_ISR_RDA_INT_Msk | UART_ISR_TOUT_IF_Msk)) {
         while (!UART_GET_RX_EMPTY(UART0)) {
             uint8_t byte = (uint8_t)UART_READ(UART0);
             ring_buffer_push(&s_uart_rx_rb, &byte);
         }
+    }
+
+    /* Clear Break, Framing, Parity, and FIFO Overrun errors caused by Head Unit power transitions */
+    if (UART0->FSR & (UART_FSR_BIF_Msk | UART_FSR_FEF_Msk | UART_FSR_PEF_Msk | UART_FSR_RX_OVER_IF_Msk)) {
+        UART0->FSR = (UART_FSR_BIF_Msk | UART_FSR_FEF_Msk | UART_FSR_PEF_Msk | UART_FSR_RX_OVER_IF_Msk);
     }
 }

@@ -99,7 +99,7 @@ void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void) {
     vehicle_trip_t trip;
     memset(&trip, 0, sizeof(trip));
 
-    // Vector 1: Instant Fuel 6.8 L/100km (68 = 0x0044), Range 640 km (0x0280)
+    // Vector 1: Instant Fuel 6.8 L/100km (68 = 0x0044 in B1-2), Range 640 km (0x0280 in B3-4)
     // CAN ID 0x221 injection: cansend vcan0 221#00004402800000
     const uint8_t can_221[] = { 0x00, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 };
     psa_trip_process_can_0x221(&trip, can_221, sizeof(can_221));
@@ -121,8 +121,8 @@ void test_peugeot_407_trip_hiworld_vector_target_mileage_dump(void) {
     vehicle_trip_t trip;
     memset(&trip, 0, sizeof(trip));
 
-    // CAN ID 0x221 injection from dump_2026-09-29_19-37-10.log:
-    // Fuel: 7.1 (0x0047), Range: 619 km (0x026B), Target mileage: 204 km (raw 2040 = 0x07F8)
+    // CAN ID 0x221 injection:
+    // Fuel: 7.1 L/100km (0x0047 in B1-2), Range: 619 km (0x026B in B3-4), Target mileage: 2040 = 204.0 km (0x07F8 in B5-6)
     const uint8_t can_221[] = { 0x00, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8 };
     psa_trip_process_can_0x221(&trip, can_221, sizeof(can_221));
 
@@ -617,5 +617,109 @@ void test_peugeot_407_steering_wheel_angle(void) {
     angle = -125;
     len = build_raise_steering_angle(angle, out);
     TEST_ASSERT_EQUAL_UINT32(6, len);
+}
+
+/* --------------------------------------------------------------------------
+ * 1.7 Powertrain & Fluid Telemetry (Cmd 0x1A) Tests
+ * -------------------------------------------------------------------------- */
+void test_peugeot_407_telemetry_1a_vector1(void) {
+    /* Vector 1 from Spec:
+     * Speed 50 km/h, RPM 850, Coolant 90 C, Oil 95 C, Fuel 45 L, Fuel 68%, Instant 6.8 L/100km
+     * Gear = 3 (D), Ignition = ON -> Flags = 0x03
+     * Expected Wire: 5AA50C1A0303003203525A5F2D44004420
+     */
+    vehicle_state_t state;
+    memset(&state, 0, sizeof(state));
+
+    state.ignition_on = true;
+    state.rpm = 850;
+    state.speed_kmh = 50;
+    state.gear = 3; /* D */
+    state.coolant_temp_c = 90;
+    state.oil_temp_c = 95;
+    state.fuel_liters = 45;
+    state.fuel_percentage = 68;
+    state.trip.instant_fuel_deci = 68;
+
+    uint8_t out[32];
+    size_t len = build_hiworld_telemetry_1a(&state, out, sizeof(out));
+    TEST_ASSERT_EQUAL_size_t(17, len);
+
+    const uint8_t expected_wire[17] = {
+        0x5A, 0xA5, 0x0C, 0x1A,
+        0x03, 0x03, 0x00, 0x32, 0x03, 0x52, 0x5A, 0x5F, 0x2D, 0x44, 0x00, 0x44,
+        0x20
+    };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_wire, out, 17);
+}
+
+void test_peugeot_407_telemetry_1a_vector2(void) {
+    /* Vector 2 from Spec:
+     * Stationary Idle: Speed 0 km/h, RPM 750, Coolant 85 C, Oil 88 C, Fuel 45 L, Fuel 68%,
+     * Instant Stationary --.- (0xFFFF). Gear = 0 (P), Ignition = ON -> Flags = 0x03
+     * Expected Wire: 5AA50C1A0300000002EE55582D44FFFF1F
+     */
+    vehicle_state_t state;
+    memset(&state, 0, sizeof(state));
+
+    state.ignition_on = true;
+    state.rpm = 750;
+    state.speed_kmh = 0;
+    state.gear = 0; /* P */
+    state.coolant_temp_c = 85;
+    state.oil_temp_c = 88;
+    state.fuel_liters = 45;
+    state.fuel_percentage = 68;
+    state.trip.instant_fuel_deci = 0xFFFF;
+
+    uint8_t out[32];
+    size_t len = build_hiworld_telemetry_1a(&state, out, sizeof(out));
+    TEST_ASSERT_EQUAL_size_t(17, len);
+
+    const uint8_t expected_wire[17] = {
+        0x5A, 0xA5, 0x0C, 0x1A,
+        0x03, 0x00, 0x00, 0x00, 0x02, 0xEE, 0x55, 0x58, 0x2D, 0x44, 0xFF, 0xFF,
+        0x34
+    };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_wire, out, 17);
+}
+
+void test_peugeot_407_telemetry_1a_can_decoding_and_guards(void) {
+    vehicle_state_t state;
+    memset(&state, 0, sizeof(state));
+
+    /* Test 0x0F6 decoding: Coolant 90 C (data[1] = 130), Ignition ON (data[0] & 0x08), Reverse ON (data[7] & 0x80) */
+    const uint8_t can_0f6[8] = { 0x88, 130, 0x00, 0x00, 0x00, 128, 128, 0x80 };
+    psa_bsi_process_can_0x0f6(&state, can_0f6, sizeof(can_0f6));
+    TEST_ASSERT_TRUE(state.ignition_on);
+    TEST_ASSERT_EQUAL_INT8(90, state.coolant_temp_c);
+    TEST_ASSERT_TRUE(state.reverse_gear);
+    TEST_ASSERT_TRUE(state.dirty.telemetry);
+
+    /* Test 0x161 decoding: Oil temp 90 C (data[2] = 0x73 / 115), Fuel 68% (data[3] = 68) */
+    state.dirty.telemetry = false;
+    const uint8_t can_161[7] = { 0x00, 0x00, 0x73, 68, 0x00, 0x00, 0x00 };
+    psa_bsi_process_can_0x161(&state, can_161, sizeof(can_161));
+    TEST_ASSERT_EQUAL_INT8(90, state.oil_temp_c);
+    TEST_ASSERT_EQUAL_UINT8(68, state.fuel_percentage);
+    TEST_ASSERT_EQUAL_UINT8(45, state.fuel_liters); /* (68 * 66 + 50) / 100 = 45 */
+    TEST_ASSERT_TRUE(state.dirty.telemetry);
+
+    /* Test 0x161 invalid/unequipped sentinels: data[2] = 0xFF, data[3] = 0xFF */
+    const uint8_t can_161_inv[7] = { 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00 };
+    psa_bsi_process_can_0x161(&state, can_161_inv, sizeof(can_161_inv));
+    TEST_ASSERT_EQUAL_INT8(0x7F, state.oil_temp_c);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, state.fuel_percentage);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, state.fuel_liters);
+
+    /* Null & buffer size boundary tests */
+    uint8_t small_out[16];
+    TEST_ASSERT_EQUAL_size_t(0, build_hiworld_telemetry_1a(NULL, small_out, sizeof(small_out)));
+    TEST_ASSERT_EQUAL_size_t(0, build_hiworld_telemetry_1a(&state, NULL, sizeof(small_out)));
+    TEST_ASSERT_EQUAL_size_t(0, build_hiworld_telemetry_1a(&state, small_out, 16));
+
+    psa_bsi_process_can_0x161(NULL, can_161, 7);
+    psa_bsi_process_can_0x161(&state, NULL, 7);
+    psa_bsi_process_can_0x161(&state, can_161, 3); /* Short DLC guard */
 }
 

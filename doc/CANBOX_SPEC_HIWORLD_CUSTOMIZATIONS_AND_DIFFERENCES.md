@@ -47,7 +47,7 @@ This document formally records all customizations, bug fixes, architectural enha
 | **Custom Alerts (`0xEA`)** | Not supported | Full concurrent transmission of Custom Extended Protocol `Cmd 0xEA` (15-bit native CAN IDs, status byte $D2$, 5-byte records, empty clearance `5A A5 04 EA 00 00 00 00 ED`, CHECK debounce reset via `0x0000`) |
 | **Alert Journal (`0x120`)** | Often omitted or imperfectly decoded | Full Mode A 3-block multiplexed reassembly (`0x7C`, `0xBC`, `0xFC`) + Mode B fallback ISO-TP; 168-bit zero-heap bitmap extractor |
 | **Alert UI Flooding** | Periodic broadcast of 24-byte table triggers continuous floating overlay toasts on Android | Strict edge-triggered single alerts (0 &rarr; 1 transitions only); 24-byte summary sent only on change or `0x2F` query |
-| **HVAC Air Quality (`0x31`)** | Frame `0x1E3` bit 4 mistaken for AC compressor; overrides `aqs_auto = false` on manual fan change | Proper bit separation between AQS auto-intake (`0x1E3` bit 4) and AC compressor status; independent AQS state machine |
+| **HVAC Air Quality (`0x31`)** | Collisions between `0x1D0` panel demand and `0x1E3` status; `0x1E3` bit 4 mistaken for AC compressor | Strict RT4 Demand-vs-Status separation: `0x1E3` is sole authority for all HVAC status (`fan_speed` in `data[6] & 0x0F`, `dual_mode` in `B0[0]`, `aqs_auto` in `B0[4]`); `0x1D0` only reads `rear_defrost` (`B4[6]`) |
 | **Trip Telemetry (`0x13`-`0x15`)** | Unthrottled continuous broadcast on CAN arrival; no sentinel handling for uninitialized sensors | Delta-detection dispatch with rate-limiting; Motorola BE decoding; `0xFF` / `0xFFFF` sensor sentinels normalized |
 | **Door Status (`0x12`)** | Rapid periodic flooding; boot/bonnet discrete bits frequently desynced | State-change dispatch with slow periodic heartbeat; precise individual door, boot, bonnet, and handbrake decoding |
 | **Parking Radar (`0x41`)** | Fixed rear-only or erratic front sensor support on older firmware revisions | Bidirectional front & rear 4-sensor bar mapping (0..4); reverse gear interlock; non-blocking radar timeout clear |
@@ -102,14 +102,12 @@ This document formally records all customizations, bug fixes, architectural enha
 
 ### 3.2 Dual-Zone Climate Control & Air Quality (`0x31`)
 
-#### The AQS Air Intake Glitch Fix
+#### Single-Authority `0x1E3` Status & AQS Air Intake Fix
 - **Original Adapter Bug:**
-  In the commercial firmware, frame `0x1E3` byte 0 bit 4 was mistakenly parsed as the Air Conditioning compressor flag (`ac_on`). Whenever the driver adjusted the blower speed manually, frame `0x1E3` was received with bit 4 cleared, causing the firmware to forcefully overwrite `aqs_auto = false` (Auto Air Recirculation turned off).
+  In the commercial firmware, both `0x1D0` (fascia panel demand) and `0x1E3` (Climate ECU display status) wrote to the same HVAC state fields, causing fan speed and mode oscillations when panel demands differed from ECU status (e.g. on bench or in Economy Mode). Additionally, `0x1E3` byte 0 bit 4 was mistakenly parsed as `ac_on`.
 - **OpenCanbox Core Fix:**
-  - `0x1D0` byte 4 bit 4 correctly represents manual Recirculation, and bit 5 represents forced fresh air.
-  - `0x1E3` byte 0 bit 4 correctly represents Auto Air Intake (AQS - Air Quality System).
-  - **Front Defrost (`0x19` / `UNFROST_FRONT`) Decoupling:** When front defrost is selected, `0x1D0` reports `0x19` in Byte 0 and `0x20` in Byte 4 (physical flap opening to outside air). OpenCanbox decodes `front_max_defrost = true` while preserving the driver's active AQS Auto Intake setting (`aqs_auto = true` as broadcast by `0x1E3` byte 0 bit 4), matching OEM Canbox ground truth and preventing rapid cycling between auto and fresh air.
-  - OpenCanbox keeps these states strictly decoupled in `vehicle_climate_t`: adjusting fan speed, temperature, or activating front defrost never causes intake state chatter.
+  - **RT4 Demand-vs-Status Rule (`mmi_airc.out` / `Fp_Network_CAN.out`):** `0x1E3` is the sole authority for all HVAC display status (`power_on`, `ac_on`, `auto_mode`, `dual_mode` from `B0[0]`, `aqs_auto` from `B0[4]`, `recirculate` from `B0[7]`, `front_max_defrost` from `B1[7]`, setpoints from `B2..B3`, airflow from `B4..B5`, and `fan_speed` from `B6[3:0]`).
+  - `0x1D0` only updates `rear_defrost` (`Byte 4 Bit 6`, `0x40`), which is not present in `0x1E3`.
 
 ---
 
@@ -131,18 +129,18 @@ This document formally records all customizations, bug fixes, architectural enha
   Repeatedly floods packet `0x12` at 10 Hz even when no doors are changing, causing unnecessary CPU load on the Android SoC.
 - **OpenCanbox Core:**
   - Dispatches `0x12` immediately upon state transition (door opened or closed, handbrake changed).
-  - Low-priority background sync timer maintains a 1 Hz heartbeat to guarantee display consistency without bus spam.
+  - Isolates `0x220` (door switches only) from `0x036` (handbrake in Byte 1 Bit 0), and enforces `0x0F6` as primary authority over `0x036` for `ignition_on` and `reverse_gear`.
+  - Low-priority background sync timer maintains a 500 ms refresh while any door is open without bus spam.
 
 ---
 
 ### 3.5 Parking Radar & Distance Zone Mapping (`0x41`)
 
 - **Original Adapter:**
-  Only supports rear radar (`0x260`) on older revisions; front radar (`0x270` / `0x0E1`) is either dropped or improperly mapped to side zones.
+  Erratic front sensor support or delayed overlay dismissal on older firmware revisions.
 - **OpenCanbox Core:**
-  - Full support for both Rear Radar (`0x260`) and Front Radar (`0x270` / `0x0E1`).
-  - Converts raw vehicle distance steps into 4-bar Hiworld visualization (`0x00` clear to `0x04` danger/critical).
-  - Gated by reverse gear and speed threshold to avoid false chimes while driving forward above parking speeds.
+  - Full support for PSA CAN2004 Parking Aid ECU (`0x0E1` AAS) with both Rear and Front 4-sensor zones (`0x260` is exclusively BSI personalization profiles, never radar).
+  - Converts raw 3-bit vehicle distance steps into 4-bar Hiworld visualization (`0x01` farthest to `0x04` danger/critical, `0x00` clear).
 
 ---
 
@@ -151,8 +149,8 @@ This document formally records all customizations, bug fixes, architectural enha
 - **Original Adapter:**
   Rotary encoder dials on the Peugeot stalk (e.g. scroll wheel) often skip steps or suffer from long debounce delays.
 - **OpenCanbox Core:**
-  - Event-driven dispatch for press and release events (`0x0F6` / `0x128`).
-  - Immediate packet emission on rotary encoder step changes with zero delay.
+  - Edge-driven dispatch for press and release events on `0x21F` (remote stalk paddles & chorded Mute debounce) and `0x221` (stalk tip buttons). Frame `0x128` (`SIGNALISATION_COMBINES`) is isolated to dashboard lights (Byte 4) so it never clears held stalk buttons.
+  - Immediate packet emission on `0x21F` Byte 1 rotary encoder step changes with zero delay.
 
 ---
 
