@@ -13,11 +13,11 @@
 # 1. Functional Domain & Architecture Overview
 
 The Peugeot 407 automatic climate control system drives three CAN frames on the PSA Comfort CAN bus:
-- **`0x1D0` (Climate Panel State, 100 ms):** Transmits operational mode, fan speed, dual air distribution, recirculation state, rear defrost (Byte 4 Bit 6, `0x40`), and zone temperature indices.
-- **`0x1E3` (Climate EMF / Display State, 100 ms):** Carries A/C compressor state, dual mode, front demist, cabin air recycling popup notification triggers (`intake_notify`), and display indices.
+- **`0x1E3` (Climate EMF / Display Status, 100 ms):** Broadcast by the Climate ECU (`MSG_ETAT_CLIMAV_EMF`). In accordance with the RT4 Demand-vs-Status rule (`Fp_Network_CAN.out` / `mmi_airc.out`), **`0x1E3` is the sole authoritative source** for all HVAC UI presentation (power, A/C compressor state, dual/mono mode, blower fan speed bars, zone temperature setpoints, airflow distribution, recirculation/AQS intake, and front max defrost).
+- **`0x1D0` (Climate Panel Demand, 100 ms):** Sent by the physical fascia panel (`MSG_CDE_CLIMAV`) when a user adjusts controls, or injected by the CAN adapter on downlink (`Cmd 0x3B` / `0x7D`). Because panel demands can be refused or clamped by the Climate ECU (e.g. in Battery Economy mode or when refrigerant pressure is missing on a bench), `0x1D0` is **never** used to overwrite HVAC display state; only **Rear Window Defrost** (Byte 4 Bit 6, `0x40`) is extracted from `0x1D0` as it is not carried in `0x1E3`.
 - **`0x12D` (Climate Compressor State, 100 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
 
-The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x8A`) to inject corresponding control frames back to the vehicle.
+The CAN adapter decodes `0x1E3` (plus `rear_defrost` from `0x1D0` and `outdoor_temp_raw` from `0x0F6`) into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x7D`) to inject corresponding `0x1D0` demand frames back to the vehicle.
 
 ---
 
@@ -80,7 +80,8 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 | **0** | 2 | `0x04` | `HIDE_FAN_BARS` | `1` = Hide blower fan bar graph on display |
 | **0** | 0 | `0x01` | `DUAL_ACTIVE` | `1` = Dual independent zones, `0` = Mono / SYNC |
 | **1** | 7 | `0x80` | `UNFROST_FRONT` | `1` = Rapid front demist / defrost active |
-| **2** | 7:0 | `0xFF` | `DISPLAY_TEMP_L` | Driver temperature setpoint: `0x00` = LO, `0x01..0x15` = 14.5–27.0 °C ($14.0 + \text{raw} \times 0.5$), `0x16` = HI |
+| **1** | 6:4 | `0x70` | `TEMP_OFFSET` | Temperature calibration offset (`0x3` = $+3.0\ ^\circ\text{C}$ neutral factory default) |
+| **2** | 7:0 | `0xFF` | `DISPLAY_TEMP_L` | Driver temperature setpoint: `0x00` = LO, `0x01..0x15` = 14.0–28.0 °C (`peugeot_temp_map`), `0x16` = HI |
 | **3** | 7:0 | `0xFF` | `DISPLAY_TEMP_R` | Passenger temperature setpoint (mirrors Driver in Mono mode) |
 | **4** | 7:4 | `0xF0` | `AIR_FLOW_L` | Driver air distribution pattern code (see Section 2.3) |
 | **5** | 7:4 | `0xF0` | `AIR_FLOW_R` | Passenger air distribution pattern code (see Section 2.3) |

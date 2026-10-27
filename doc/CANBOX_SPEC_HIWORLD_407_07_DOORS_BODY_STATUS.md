@@ -16,8 +16,10 @@ The Peugeot 407 BSI broadcasts body opening events and physical microswitch cont
 - **`0x221` (Generic CAN Box Alias):** Commercial CAN box firmware models listen for `0x220` and re-map to internal `0x221` representations.
 
 > [!IMPORTANT]
-> **Distinction from CAN ID `0x036`:**
-> Frame `0x036` on Peugeot 407 / PSA CAN2004 carries **Ignition Status** (Byte 4), **Dashboard Illumination** (Byte 3), and **Reverse Gear / Handbrake** flags (Byte 1). Byte 0 of `0x036` carries internal BSI power state bits (e.g. `0x15` or `0x0E`) and **must not** be decoded as door switches. Door status is exclusively decoded from `0x220` and `0x221`.
+> **Single-Authority Isolation Across `0x220`, `0x036`, and `0x0F6`:**
+> - **Doors (`0x220` only):** Frame `0x036` Byte 0 carries internal BSI power state bits (e.g. `0x15` or `0x0E`) and **must not** be decoded as door switches. Door status is exclusively decoded from `0x220`.
+> - **Handbrake (`0x036` only):** Handbrake status (`state->handbrake`) is decoded exclusively from `0x036` Byte 1 Bit 0 (`0x01`). `0x220` passes `NULL` for handbrake so door frames never collide with `0x036`.
+> - **Ignition & Reverse Gear (`0x0F6` primary, `0x036` fallback):** Once `0x0F6` (`s_have_0f6`) is observed on the bus, `0x0F6` is the sole authority for `state->ignition_on` and `state->reverse_gear`. `0x036` only updates those two fields as a fallback when `0x0F6` is absent.
 
 The CAN adapter decodes these discrete opening flags and dispatches Hiworld (`Cmd 0x12`) / Raise (`Cmd 0x38`) door status packets to the Android headunit, which renders an animated 3D vehicle opening popup overlay.
 

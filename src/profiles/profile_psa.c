@@ -103,7 +103,7 @@ static void psa_decode_bsi_slow_0x0f6(const can_frame_t *frame, vehicle_state_t 
         state->ignition_on = s_ignition_from_0f6;
 
         s_reverse_from_0f6 = (frame->data[7] & (1 << 7)) != 0;
-        state->reverse_gear = s_reverse_from_0f6 || s_reverse_from_036;
+        state->reverse_gear = s_reverse_from_0f6;
 
         /* Outside temperature: Byte 5, Raw * 0.5 - 40 C (0xFF = invalid; keep last value) */
         if (frame->data[5] != 0xFF) {
@@ -126,20 +126,9 @@ static void psa_decode_steering_angle_0x10b_profile(const can_frame_t *frame, ve
 }
 
 static void psa_decode_wheel_keys_0x128(const can_frame_t *frame, vehicle_state_t *state) {
-    if (frame->dlc < 1) return;
-
-    uint8_t btn = frame->data[0];
-    switch (btn) {
-        case 0x01: state->wheel.active_key = WHEEL_KEY_VOL_UP; break;
-        case 0x02: state->wheel.active_key = WHEEL_KEY_VOL_DOWN; break;
-        case 0x04: state->wheel.active_key = WHEEL_KEY_NEXT; break;
-        case 0x08: state->wheel.active_key = WHEEL_KEY_PREV; break;
-        case 0x10: state->wheel.active_key = WHEEL_KEY_SRC; break;
-        case 0x20: state->wheel.active_key = WHEEL_KEY_MUTE; break;
-        default:   state->wheel.active_key = WHEEL_KEY_NONE; break;
-    }
-    state->wheel.press_state = (state->wheel.active_key != WHEEL_KEY_NONE) ? 1 : 0;
-
+    /* PSA CAN 0x128 (SIGNALISATION_COMBINES) carries instrument cluster warning and
+     * exterior lighting indicator lamps. Steering wheel / stalk keys are decoded
+     * exclusively from 0x21F and 0x221 so periodic 0x128 frames never overwrite held keys. */
     if (frame->dlc >= 5) {
         uint8_t light_flags = frame->data[4];
         state->lights.side_light = (light_flags & (1 << 7)) != 0;
@@ -200,7 +189,7 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
     if (frame->dlc < 2) return;
 
     s_reverse_from_036 = (frame->data[1] & (1 << 7)) != 0;
-    state->reverse_gear = s_reverse_from_0f6 || s_reverse_from_036;
+    state->reverse_gear = s_have_0f6 ? s_reverse_from_0f6 : s_reverse_from_036;
     state->handbrake    = (frame->data[1] & (1 << 0)) != 0;
 
     if (frame->dlc >= 3) {
@@ -221,13 +210,12 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
         uint8_t phase_vie = frame->data[4];
         uint8_t p_mode = (phase_vie >> 4) & 0x0F;
         uint8_t p_raw  = phase_vie & 0x0F;
-        if (phase_vie == 0x00 || (p_raw == 0x02 && p_mode == 0x00)) {
-            /* 0x00: Deep sleep, 0x02: Shutdown countdown -> Ignition is definitively OFF */
-            state->ignition_on = false;
-            s_ignition_from_0f6 = false;
-        } else if (s_have_0f6) {
+        if (s_have_0f6) {
             /* 0x0F6 Byte 0 Bit 3 is the authoritative vehicle ground truth for +APC */
             state->ignition_on = s_ignition_from_0f6;
+        } else if (phase_vie == 0x00 || (p_raw == 0x02 && p_mode == 0x00)) {
+            /* 0x00: Deep sleep, 0x02: Shutdown countdown -> Ignition is definitively OFF */
+            state->ignition_on = false;
         } else {
             /* Fallback for standalone/synthetic test environments without 0x0F6:
              * RT4 POWER_MODE (bits 7:4): 0x20 = Ignition ON (+APC), 0x50 = Running
@@ -237,20 +225,6 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
     }
 
     psa_update_derived_power_state(state);
-}
-
-static void psa_decode_cruise_0x1a8_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    (void)state;
-    bool active = false;
-    uint8_t set_spd = 0;
-    uint32_t odo = 0;
-    psa_decode_cruise_0x1a8(frame->data, frame->dlc, &active, &set_spd, &odo);
-}
-
-static void psa_decode_alerts_0x168_profile(const can_frame_t *frame, vehicle_state_t *state) {
-    (void)state;
-    bool tpms_fault = false, tpms_under = false, tpms_punc = false, esp_fault = false;
-    psa_decode_alerts_0x168(frame->data, frame->dlc, &tpms_fault, &tpms_under, &tpms_punc, &esp_fault);
 }
 
 static psa_journal_iso_tp_t s_journal_ctx;
@@ -335,10 +309,8 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_STATION_LIST_125,   psa_rd4_decode_frame },
     { 0x128,                         psa_decode_wheel_keys_0x128 },
     { PSA_CAN_ID_ETAT_AUTORADIO,     psa_decode_etat_autoradio_0x165_profile },
-    { PSA_CAN_ID_ALERTS_INDICATORS,  psa_decode_alerts_0x168_profile },
     { PSA_CAN_ID_ALERT_MESSAGE,      psa_decode_alert_message_0x1a1_profile },
     { PSA_CAN_ID_RD4_VOLUME,         psa_rd4_decode_frame },
-    { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
     { 0x0B6,                         psa_engine_decode_frame },
     { PSA_CAN_ID_CLIMATE_HVAC,       psa_hvac_decode_frame },
     { PSA_CAN_ID_ETAT_CLIMAV_1E3,    psa_hvac_decode_frame },

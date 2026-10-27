@@ -4,11 +4,11 @@
 void test_integration_bagoo_steering_wheel_volume_up_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_BAGOO);
 
-    // Inject PSA CAN frame: Volume Up press (CAN ID 0x128)
+    // Inject PSA CAN2004 COM2000 stalk frame: Volume Up press (CAN ID 0x21F, Byte 0 Bit 3 = 0x08)
     can_frame_t frame = {
-        .id = 0x128,
+        .id = 0x21F,
         .dlc = 2,
-        .data = { 0x01, 0x00 }
+        .data = { 0x08, 0x00 }
     };
     can_router_process_can(&frame);
 

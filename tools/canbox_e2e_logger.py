@@ -502,7 +502,7 @@ class CanSniffer(threading.Thread):
                     else:
                         self.stats["CAN_RX_FRAMES"] = self.stats.get("CAN_RX_FRAMES", 0) + 1
 
-                    if can_id == 0x525:
+                    if can_id == 0x525 and not is_tx:
                         self.stats["LAST_MDF_SEEN"] = time.time()
                         self.stats["MDF_FRAMES"] = self.stats.get("MDF_FRAMES", 0) + 1
                         if not self.stats.get("MDF_PRESENT", False):

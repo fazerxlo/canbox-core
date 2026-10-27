@@ -493,42 +493,51 @@ void test_peugeot_407_hvac_hiworld(void) {
     vehicle_climate_t climate;
     memset(&climate, 0, sizeof(climate));
 
-    // Vector 1: Auto AC 21.0°C Dual Mode, Fan Speed 3 (CAN=2)
-    // Wait, the test uses CAN `03` which is Fan Speed 4!
-    const uint8_t can_1d0[] = { 0x08, 0x00, 0x03, 0x00, 0x00, 0x0B, 0x0B, 0x00 };
-    psa_hvac_process_can_0x1d0(&climate, can_1d0, 8);
-    
-    TEST_ASSERT_TRUE(climate.power_on);
-    TEST_ASSERT_EQUAL_UINT8(4, climate.fan_speed);  // 03 + 1 = 4
-    
-    // can_1d0 byte 3 is 0x00 -> Auto
-    TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
-    TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
+    // Vector 1: 0x1E3 is the sole authoritative source for HVAC status (RT4 rule).
+    // Feed 0x1E3: Dual Auto AC 21.0°C (0x0B = 42), Fan Speed 3, Auto airflow (0x00)
+    const uint8_t can_1e3_v1[] = { 0x1D, 0x30, 0x0B, 0x0B, 0x00, 0x00, 0x03 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v1, 7);
 
-    const uint8_t can_1e3[] = { 0x1D, 0x00 };
-    psa_hvac_process_can_0x1e3(&climate, can_1e3, 2);
-    
+    TEST_ASSERT_TRUE(climate.power_on);
     TEST_ASSERT_TRUE(climate.ac_on);
     TEST_ASSERT_TRUE(climate.auto_mode);
     TEST_ASSERT_TRUE(climate.dual_mode);
     TEST_ASSERT_TRUE(climate.aqs_auto);
     TEST_ASSERT_FALSE(climate.recirculate);
+    TEST_ASSERT_EQUAL_UINT8(3, climate.fan_speed);
+    TEST_ASSERT_EQUAL_UINT8(42, climate.temp_driver);
+    TEST_ASSERT_EQUAL_UINT8(42, climate.temp_passenger);
+    TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
 
-    // Vector 2: Dual Zone air distribution - Left=4 (Windshield 11), Right=2 (Floor 3)
-    const uint8_t can_1d0_v2[] = { 0x28, 0x00, 0x00, 0x42, 0x00, 0x0E, 0x0B, 0x00 };
-    psa_hvac_process_can_0x1d0(&climate, can_1d0_v2, 8);
+    // Feeding conflicting 0x1D0 demand frame (e.g. standby 0xA8, different fan/temps/winds)
+    // MUST NOT overwrite any 0x1E3 status field; 0x1D0 only updates rear_defrost (Byte 4 Bit 6).
+    const uint8_t can_1d0_conflict[] = { 0xA8, 0x00, 0x07, 0x42, 0x40, 0x01, 0x15, 0x00 };
+    psa_hvac_process_can_0x1d0(&climate, can_1d0_conflict, 8);
+    TEST_ASSERT_TRUE(climate.rear_defrost);
+    TEST_ASSERT_TRUE(climate.power_on);
+    TEST_ASSERT_TRUE(climate.ac_on);
+    TEST_ASSERT_EQUAL_UINT8(3, climate.fan_speed);
+    TEST_ASSERT_EQUAL_UINT8(42, climate.temp_driver);
+    TEST_ASSERT_EQUAL_UINT8(42, climate.temp_passenger);
+    TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
+    TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
+
+    // Vector 2: 0x1E3 Dual Zone air distribution - Left=4 (Windshield 11), Right=2 (Floor 3)
+    const uint8_t can_1e3_v2[] = { 0x11, 0x30, 0x0E, 0x0B, 0x40, 0x20, 0x03 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v2, 7);
     TEST_ASSERT_EQUAL_UINT8(11, climate.driver_wind_mode);
     TEST_ASSERT_EQUAL_UINT8(3, climate.pass_wind_mode);
 
-    // Vector 3: Left=2 (Floor 3), Right=4 (Windshield 11)
-    const uint8_t can_1d0_v3[] = { 0x28, 0x00, 0x00, 0x24, 0x00, 0x0E, 0x0B, 0x00 };
-    psa_hvac_process_can_0x1d0(&climate, can_1d0_v3, 8);
+    // Vector 3: 0x1E3 Left=2 (Floor 3), Right=4 (Windshield 11)
+    const uint8_t can_1e3_v3[] = { 0x11, 0x30, 0x0E, 0x0B, 0x20, 0x40, 0x03 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v3, 7);
     TEST_ASSERT_EQUAL_UINT8(3, climate.driver_wind_mode);
     TEST_ASSERT_EQUAL_UINT8(11, climate.pass_wind_mode);
 
-    // Vector 4: Left=3 (Face 6), Right=7 (Windshield+Face 13)
-    const uint8_t can_1d0_v4[] = { 0x28, 0x00, 0x00, 0x37, 0x00, 0x0E, 0x0B, 0x00 };
-    psa_hvac_process_can_0x1d0(&climate, can_1d0_v4, 8);
+    // Vector 4: 0x1E3 Left=3 (Face 6), Right=7 (Windshield+Face 13)
+    const uint8_t can_1e3_v4[] = { 0x11, 0x30, 0x0E, 0x0B, 0x30, 0x70, 0x03 };
+    psa_hvac_process_can_0x1e3(&climate, can_1e3_v4, 7);
     TEST_ASSERT_EQUAL_UINT8(6, climate.driver_wind_mode);
     TEST_ASSERT_EQUAL_UINT8(13, climate.pass_wind_mode);
 
@@ -556,50 +565,28 @@ void test_peugeot_407_hvac_hiworld(void) {
     TEST_ASSERT_FALSE(climate.recirculate);
     TEST_ASSERT_FALSE(climate.aqs_auto);
 
-    // Vector 9: Provenance scenario from dump_2026-10-02_13-43-03.log:
-    // 0x1D0 sets Auto Air Intake (Byte 4 = 0x00) with manual fan speed 3 (Byte 2 = 0x02)
-    const uint8_t can_1d0_v9[] = { 0x08, 0x00, 0x02, 0x43, 0x00, 0x06, 0x11, 0x00 };
-    psa_hvac_process_can_0x1d0(&climate, can_1d0_v9, 8);
-    TEST_ASSERT_TRUE(climate.power_on);
-    TEST_ASSERT_TRUE(climate.ac_on);
-    TEST_ASSERT_TRUE(climate.aqs_auto);
-    TEST_ASSERT_FALSE(climate.recirculate);
-
-    // 0x1E3 arrives ~80ms later: Byte 0 = 0x15 (Bit 4 = Auto intake AQS, Bit 0 = Dual)
+    // Vector 9: 0x1E3 Byte 0 = 0x15 (Bit 4 = Auto intake AQS, Bit 0 = Dual), fan = 2
     const uint8_t can_1e3_v9[] = { 0x15, 0x30, 0x06, 0x11, 0x40, 0x30, 0x02 };
     psa_hvac_process_can_0x1e3(&climate, can_1e3_v9, 7);
     TEST_ASSERT_TRUE(climate.aqs_auto);
     TEST_ASSERT_FALSE(climate.recirculate);
     TEST_ASSERT_TRUE(climate.ac_on);
     TEST_ASSERT_TRUE(climate.dual_mode);
+    TEST_ASSERT_EQUAL_UINT8(2, climate.fan_speed);
 
-    // Vector 10: Issue 3 Provenance scenario from dump_2026-10-05_21-28-30.log
-    // and dump_2026-10-06_14-44-27.log: Front defrost active with AQS intake.
-    // 0x1E3 arrives: Byte 0 = 0x14 (AQS active), Byte 1 = 0xB0 (Bit 7 = Front Demist active)
+    // Vector 10: Front defrost active with AQS intake in 0x1E3, unaffected by 0x1D0
     const uint8_t can_1e3_v10[] = { 0x14, 0xB0, 0x0B, 0x0B, 0x00, 0x00, 0x01, 0x00 };
     psa_hvac_process_can_0x1e3(&climate, can_1e3_v10, 8);
     TEST_ASSERT_TRUE(climate.front_max_defrost);
     TEST_ASSERT_TRUE(climate.aqs_auto);
     TEST_ASSERT_FALSE(climate.recirculate);
 
-    // 0x1D0 arrives: Byte 0 = 0x19 (Front Demist active), Byte 4 = 0x20 (Forced Fresh Air physical flap)
     const uint8_t can_1d0_v10[] = { 0x19, 0x00, 0x01, 0x00, 0x20, 0x0B, 0x0B, 0x00 };
     psa_hvac_process_can_0x1d0(&climate, can_1d0_v10, 8);
     TEST_ASSERT_TRUE(climate.front_max_defrost);
     TEST_ASSERT_TRUE(climate.aqs_auto);
     TEST_ASSERT_FALSE(climate.recirculate);
-
-    // Re-feed 0x1E3: verify zero state jitter / oscillation
-    psa_hvac_process_can_0x1e3(&climate, can_1e3_v10, 8);
-    TEST_ASSERT_TRUE(climate.front_max_defrost);
-    TEST_ASSERT_TRUE(climate.aqs_auto);
-    TEST_ASSERT_FALSE(climate.recirculate);
-
-    // Turn off Front Demist back to Auto:
-    const uint8_t can_1d0_auto[] = { 0x08, 0x00, 0x02, 0x00, 0x00, 0x0B, 0x0B, 0x00 };
-    psa_hvac_process_can_0x1d0(&climate, can_1d0_auto, 8);
-    TEST_ASSERT_FALSE(climate.front_max_defrost);
-    TEST_ASSERT_TRUE(climate.aqs_auto);
+    TEST_ASSERT_FALSE(climate.rear_defrost);
 
     const uint8_t can_1e3_auto[] = { 0x1C, 0x30, 0x0B, 0x0B, 0x00, 0x00, 0x02 };
     psa_hvac_process_can_0x1e3(&climate, can_1e3_auto, 7);

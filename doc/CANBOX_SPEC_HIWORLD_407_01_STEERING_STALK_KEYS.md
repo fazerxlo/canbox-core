@@ -14,9 +14,9 @@
 In Peugeot 407 (PSA CAN2004 architecture), the steering column multifunction remote stalk (COM2000 / COM2005) communicates audio buttons, track changes, source selection, and thumbwheel rotary ticks over the Comfort CAN bus at 125 kbps:
 
 - **Native PSA CAN2004 Remote Stalk Frame (`0x21F`):** A 3-byte command frame (`x_commandes_volant` / `CDE_RADIO`) broadcast by COM2000. It conveys Volume (+/-), chorded Mute, Source, Next/Prev Seek, and the rotary thumbwheel position counter.
-- **Native PSA CAN2004 Stalk Tips Frame (`0x221`):** A 7-byte frame (`INFOS_GEN_ODB`) transmitting push-button presses on the stalk tips: Trip Computer (ODB) on Byte 0 Bit 3 (`0x08`), toggling `0xC0` (idle) to `0xC8` (pressed).
+- **Native PSA CAN2004 Stalk Tips Frame (`0x221`):** A 7-byte frame (`INFOS_GEN_ODB`) transmitting push-button presses on the stalk tips: Trip Computer (ODB) on Byte 0 Bit 3 (`0x08`, toggling `0xC0` idle to `0xC8` pressed) and Left Stalk Tip on Byte 0 Bit 0 (`0x01`). Decoded strictly on press/release edges so periodic `0x221` frames never overwrite held `0x21F` buttons.
 - **Native PSA CAN2004 RD4 Console Frame (`0x3E5`):** A 6-byte frame carrying RD4 fascia keys (AUDIO, TRIP, CLIM, DARK, MENU, OK, ESC, arrows) as 2-bit fields; see section 3.3.
-- **Generic CAN Box Alias (`0x0F6`):** An aftermarket normalized frame definition used in legacy Chinese CAN boxes (e.g. Raise, Bagoo).
+- **Cluster Lamps Isolation (`0x128`):** Frame `0x128` (`SIGNALISATION_COMBINES`) carries instrument cluster indicator lamps in Byte 0 and dashboard lighting flags in Byte 4. It is **never** decoded as steering wheel keys, preventing periodic `0x128` frames from clearing held `0x21F`/`0x221` keys or emitting phantom key events.
 
 ---
 
@@ -81,8 +81,9 @@ Proven by real vehicle captures (`dump_2026-10-06_16-56-18.log` & `dump_2026-10-
 
 ---
 
-### 2.4 Legacy Aftermarket CAN Box Alias (`0x0F6`)
-For compatibility with aftermarket Chinese CAN bus adapters that pre-process stalk inputs into internal `0x0F6` frames:
+### 2.4 Multi-Frame Key Isolation Rules (`0x21F` vs `0x221` vs `0x128`)
+- **Edge-Triggered Stalk Tips (`0x221`):** Because `0x221` (`INFOS_GEN_ODB`) is broadcast periodically every 1000 ms for trip telemetry while `0x21F` is event-driven on stalk paddle changes, `psa_stalk_process_tip_0x221()` only modifies `state->wheel` on a rising or falling edge of Byte 0 Bit 3 (`0x08` Trip) or Bit 0 (`0x01` Left Stalk Tip).
+- **No Key Decoding on `0x128`:** Frame `0x128` (`SIGNALISATION_COMBINES`) only updates `state->lights` (Byte 4) and never touches `state->wheel`.
 
 ---
 

@@ -484,18 +484,17 @@ static inline void psa_rd4_process_can_0x165(psa_rd4_media_ctx_t *ctx, const uin
 static inline void psa_rd4_process_can_0x225(psa_rd4_media_ctx_t *ctx, const uint8_t *d, uint8_t dlc) {
     if (!ctx || !d || dlc < 5) return;
 
-    /* Indicator flags */
-    ctx->radio.indicators = 0;
-    if (d[0] & 0x04) ctx->radio.indicators |= 0x80; /* TA */
-    if (d[0] & 0x20) ctx->radio.indicators |= 0x20; /* RDS */
-    if (d[0] & 0x40) ctx->radio.indicators |= 0x10; /* SCAN */
-    if (ctx->radio.radio_text_len > 0) ctx->radio.indicators |= 0x04; /* RDTEXT */
+    /* Indicator flags: preserve TA bit (0x80) if 0x265 is authoritative on bus */
+    uint8_t indicators = s_have_0x265 ? (ctx->radio.indicators & 0x80) : 0;
+    if (!s_have_0x265 && (d[0] & 0x04)) indicators |= 0x80; /* TA fallback */
+    if (d[0] & 0x20) indicators |= 0x20; /* RDS */
+    if (d[0] & 0x40) indicators |= 0x10; /* SCAN */
+    if (ctx->radio.radio_text_len > 0) indicators |= 0x04; /* RDTEXT */
+    ctx->radio.indicators = indicators;
 
-    /* Seeking / Tuning status */
-    if (d[0] & 0x08) {
-        ctx->radio.power_status = 0x02; /* Seeking */
-    } else if (ctx->radio.power_status == 0x02) {
-        ctx->radio.power_status = 0x01; /* Restored to playing */
+    /* Seeking / Tuning status (do not overwrite source transition mute 0x03) */
+    if (ctx->radio.power_status == 0x01 || ctx->radio.power_status == 0x02) {
+        ctx->radio.power_status = (d[0] & 0x08) ? 0x02 : 0x01;
     }
 
     /* Preset memory: 0=manual, 1..6 (encoded as 0x10..0x60 or 0x01..0x06) */
@@ -508,14 +507,15 @@ static inline void psa_rd4_process_can_0x225(psa_rd4_media_ctx_t *ctx, const uin
     else if (raw_band == 0x40 || raw_band == 0xC0) ctx->radio.band = 0x04; /* FM-AST */
     else if (raw_band == 0x50 || raw_band == 0xD0) ctx->radio.band = 0x10; /* AM */
 
-    /* Frequency conversion: Raw to 0.1 MHz */
+    /* Frequency conversion: Raw to 0.1 MHz (clear RDS text only on frequency change) */
     uint16_t raw_freq = ((uint16_t)d[3] << 8) | d[4];
-    if (ctx->radio.band < 0x10) {
-        /* FM: Freq * 10 = (raw * 0.05 + 50.0) * 10 = (raw / 2) + 500 */
-        ctx->radio.freq_0_1mhz = (raw_freq / 2) + 500;
-    } else {
-        /* AM: kHz direct */
-        ctx->radio.freq_0_1mhz = raw_freq;
+    uint16_t new_freq = (ctx->radio.band < 0x10) ? ((raw_freq / 2) + 500) : raw_freq;
+    if (ctx->radio.freq_0_1mhz != new_freq) {
+        ctx->radio.freq_0_1mhz = new_freq;
+        memset(ctx->radio.station_name, 0, sizeof(ctx->radio.station_name));
+        memset(ctx->radio.radio_text, 0, sizeof(ctx->radio.radio_text));
+        ctx->radio.radio_text_len = 0;
+        ctx->radio.indicators &= (uint8_t)~0x04;
     }
 
     if (ctx->radio.source_mode < 0x20) {
@@ -525,9 +525,10 @@ static inline void psa_rd4_process_can_0x225(psa_rd4_media_ctx_t *ctx, const uin
     psa_rd4_send_hiworld_0x84(ctx);
 }
 
-/* Decode CAN 0x265 (INFO_TUNER) */
+/* Decode CAN 0x265 (INFO_TUNER — authoritative for TA indicator 0x80) */
 static inline void psa_rd4_process_can_0x265(psa_rd4_media_ctx_t *ctx, const uint8_t *d, uint8_t dlc) {
     if (!ctx || !d || dlc < 1) return;
+    s_have_0x265 = true;
 
     /* Byte 0 Bit 5: TA (Traffic Announcement) */
     if (d[0] & 0x20) {

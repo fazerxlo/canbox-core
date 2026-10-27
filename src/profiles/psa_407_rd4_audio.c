@@ -184,8 +184,12 @@ void psa_decode_rds_name_0x396(const uint8_t *data, uint8_t dlc, char out_name[9
 
 static psa_isotp_rx_ctx_t s_rd4_isotp_ctx;
 static psa_isotp_rx_ctx_t s_rd4_list_isotp_ctx;
+static bool s_have_0x265 = false;
+static bool s_cd_disc_present = true;
 
 void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp) {
+    s_have_0x265 = false;
+    s_cd_disc_present = true;
     if (media) {
         memset(media, 0, sizeof(*media));
         media->radio.source_mode = 0xFF; /* Standby / Off */
@@ -285,17 +289,22 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
 void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 5) return;
 
-    /* Indicator flags: preserve TA (bit 7) if already set by 0x265 or set by 0x225 bit 2 */
-    uint8_t ta_flag = (radio->indicators & 0x80);
-    if (data[0] & 0x04) ta_flag = 0x80; /* TA from 0x225 */
+    /* Indicator flags: if 0x265 (INFO_TUNER / ETAT_RDS) is present on the bus, 0x265 is
+     * authoritative for TA (bit 7, 0x80). Otherwise fallback to 0x225 bit 2 (0x04). */
+    uint8_t ta_flag;
+    if (s_have_0x265) {
+        ta_flag = (radio->indicators & 0x80);
+    } else {
+        ta_flag = (data[0] & 0x04) ? 0x80 : 0x00;
+    }
 
     radio->indicators = ta_flag;
     if (data[0] & 0x20) radio->indicators |= 0x20; /* RDS */
     if (data[0] & 0x40) radio->indicators |= 0x10; /* SCAN */
     if (radio->radio_text_len > 0) radio->indicators |= 0x04; /* RDTEXT */
 
-    /* Seeking / Tuning status (only when radio is already powered ON) */
-    if (radio->power_status != 0) {
+    /* Seeking / Tuning status (only when radio is in normal playing/seeking state, never overwrite transition mute 3) */
+    if (radio->power_status == 0x01 || radio->power_status == 0x02) {
         if (data[0] & 0x08) {
             radio->power_status = 0x02; /* Seeking */
         } else if (radio->power_status == 0x02) {
@@ -333,20 +342,14 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
         new_freq_0_1mhz = raw_freq;
     }
 
-    /* If frequency changed or RDS sync is lost, clear previous station name and radio text */
-    if (radio->freq_0_1mhz != new_freq_0_1mhz || !(radio->indicators & 0x20)) {
-        if (radio->freq_0_1mhz != new_freq_0_1mhz) {
-            radio->freq_0_1mhz = new_freq_0_1mhz;
-            memset(radio->station_name, ' ', 8);
-            radio->station_name[8] = '\0';
-            radio->radio_text[0] = '\0';
-            radio->radio_text_len = 0;
-        } else if (!(radio->indicators & 0x20) && radio->station_name[0] != ' ') {
-            memset(radio->station_name, ' ', 8);
-            radio->station_name[8] = '\0';
-            radio->radio_text[0] = '\0';
-            radio->radio_text_len = 0;
-        }
+    /* Only clear station name and radio text when frequency changes; on the same frequency,
+     * 0x2A5 (NOM_STATION) and 0x0A4 (TEXTE_RADIO) are authoritative. */
+    if (radio->freq_0_1mhz != new_freq_0_1mhz) {
+        radio->freq_0_1mhz = new_freq_0_1mhz;
+        memset(radio->station_name, ' ', 8);
+        radio->station_name[8] = '\0';
+        radio->radio_text[0] = '\0';
+        radio->radio_text_len = 0;
     }
 
     /* Cache frequency into preset slot (1..6) if valid preset active */
@@ -368,6 +371,7 @@ void psa_rd4_process_can_0x225(vehicle_radio_t *radio, const uint8_t *data, uint
 
 void psa_rd4_process_can_0x265(vehicle_radio_t *radio, const uint8_t *data, uint8_t dlc) {
     if (!radio || !data || dlc < 1) return;
+    s_have_0x265 = true;
     if (data[0] & 0x20) {
         if (!(radio->indicators & 0x80)) {
             radio->indicators |= 0x80;
@@ -625,7 +629,10 @@ bool psa_rd4_process_can_0x325(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
      * For internal in-dash CD, OEM Canbox keeps active_disc = 0x00, discs_loaded_mask = 0x00.
      */
     if (data[1] == 0x00) {
+        s_cd_disc_present = false;
         cdc->play_status = 0x0C; /* Eject */
+    } else {
+        s_cd_disc_present = true;
     }
     return true;
 }
@@ -673,12 +680,18 @@ bool psa_rd4_process_can_0x3a5(vehicle_cdc_t *cdc, const uint8_t *data, uint8_t 
     /* Drive status (Byte 2) */
     uint8_t raw_status = data[2];
     if (raw_status == 0x01) {
+        s_cd_disc_present = true;
         cdc->play_status = 0x01; /* Pause */
     } else if (raw_status == 0x00) {
-        cdc->play_status = 0x06; /* Stop */
+        /* Only set Stop (0x06) if disc is present; if 0x325 reported Eject (0x0C), keep 0x0C */
+        if (s_cd_disc_present) {
+            cdc->play_status = 0x06; /* Stop */
+        }
     } else if (raw_status == 0x25) {
+        s_cd_disc_present = true;
         cdc->play_status = 0x02; /* Fast Forward / Seeking playback */
     } else {
+        s_cd_disc_present = true;
         cdc->play_status = 0x02; /* Play (0x19, 0x1E, etc. all map to 0x02 Play) */
     }
 
@@ -780,9 +793,11 @@ void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
             }
             break;
         case PSA_CAN_ID_CD_TRAY_325:
-            /* Ignore 325#000000 reset frames emitted while RD4 is powered off/rebooting */
+            /* Ignore 325#000000 reset frames emitted while RD4 is powered off/rebooting,
+             * and ignore internal CD frames while external CD Changer (0x31) is active */
             if (state->media.radio.present &&
-                (state->media.radio.power_status == 0 || state->media.radio.sleep)) {
+                (state->media.radio.power_status == 0 || state->media.radio.sleep ||
+                 state->media.radio.source_mode == 0x31)) {
                 break;
             }
             if (psa_rd4_process_can_0x325(&state->media.cdc, frame->data, frame->dlc)) {
@@ -790,16 +805,27 @@ void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
             }
             break;
         case PSA_CAN_ID_CD_DISC_INFO_365:
+            if (state->media.radio.present && state->media.radio.source_mode == 0x31) {
+                break;
+            }
             if (psa_rd4_process_can_0x365(&state->media.cdc, frame->data, frame->dlc)) {
                 state->dirty.cdc = true;
             }
             break;
         case PSA_CAN_ID_CD_PLAY_3A5:
+            if (state->media.radio.present && state->media.radio.source_mode == 0x31) {
+                break;
+            }
             if (psa_rd4_process_can_0x3a5(&state->media.cdc, frame->data, frame->dlc)) {
                 state->dirty.cdc = true;
             }
             break;
         case PSA_CAN_ID_CD_CHANGER:
+            /* Ignore external CDC frames when internal CD (0x20 / 0x30) is active */
+            if (state->media.radio.present &&
+                (state->media.radio.source_mode == 0x20 || state->media.radio.source_mode == 0x30)) {
+                break;
+            }
             if (psa_rd4_process_can_0x3a6(&state->media.cdc, frame->data, frame->dlc)) {
                 state->dirty.cdc = true;
             }
