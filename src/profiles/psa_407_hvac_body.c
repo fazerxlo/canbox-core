@@ -256,6 +256,11 @@ void psa_decode_console_0x3e5(const uint8_t *data, uint8_t dlc, psa_panel_key_ca
 
 /* --------------------------------------------------------------------------
  * 1.2 Dual-Zone Climate Control (HVAC)
+ *
+ * NOTE ON LEGACY FUNCTION psa_decode_hvac_0x1d0:
+ * This function preserves the Raise protocol struct mapping (hvac_state_t)
+ * for legacy test harnesses. Real PSA CAN2004 0x1D0 climate messages are decoded
+ * into vehicle_climate_t by psa_hvac_process_can_0x1d0() below.
  * -------------------------------------------------------------------------- */
 void psa_decode_hvac_0x1d0(const uint8_t *data, uint8_t dlc, hvac_state_t *st) {
     if (!data || !st || dlc < 4) {
@@ -360,6 +365,26 @@ void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data,
 void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
     if (!climate || !data || dlc < 2) return;
 
+    /* PSA CAN 0x1E3 (MSG_ETAT_CLIMAV_EMF)
+     * Byte 0:
+     *   Bit 7: Recirc status
+     *   Bit 6: AC_OFF (1 = Compressor OFF / ECO mode, 0 = AC ON)
+     *   Bit 5: CLIM_OFF (1 = Full HVAC system powered OFF, 0 = ON)
+     *   Bit 4: Auto airflow
+     *   Bit 3: Auto blower
+     *   Bit 2: Hide fan bars
+     *   Bit 0: Dual active
+     * Byte 1:
+     *   Bit 7: Front max defrost / demist
+     * Byte 2: Left display setpoint temperature (raw code: 0..22)
+     * Byte 3: Right display setpoint temperature (raw code: 0..22)
+     * Byte 4: Airflow distribution pattern left
+     * Byte 5: Airflow distribution pattern right
+     * Byte 6:
+     *   Bits 3:0: Display fan bars (0..7, 0xF=Max)
+     */
+    climate->power_on  = ((data[0] & 0x20) == 0);
+    climate->ac_on     = ((data[0] & 0x40) == 0);
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
     climate->front_max_defrost = (data[1] & 0x80) != 0;
@@ -378,6 +403,13 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
         climate->aqs_auto = false;
     }
 
+    if (dlc >= 4) {
+        uint8_t l_temp = data[2];
+        uint8_t r_temp = data[3];
+        if (l_temp < 23) climate->temp_driver = peugeot_temp_map[l_temp];
+        if (r_temp < 23) climate->temp_passenger = peugeot_temp_map[r_temp];
+    }
+
     if (dlc >= 6) {
         /* Air distribution: Byte 4 upper nibble is Left (Driver), Byte 5 upper nibble is Right (Passenger) */
         uint8_t left_code = (data[4] >> 4) & 0x0F;
@@ -385,6 +417,15 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
 
         climate->driver_wind_mode = psa_wind_to_hiworld[left_code];
         climate->pass_wind_mode = psa_wind_to_hiworld[right_code];
+    }
+
+    if (dlc >= 7) {
+        uint8_t fan_bars = data[6] & 0x0F;
+        if (fan_bars == 0x0F) {
+            climate->fan_speed = 8;
+        } else if (fan_bars <= 8) {
+            climate->fan_speed = fan_bars;
+        }
     }
 }
 

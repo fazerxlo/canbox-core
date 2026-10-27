@@ -99,9 +99,9 @@ void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void) {
     vehicle_trip_t trip;
     memset(&trip, 0, sizeof(trip));
 
-    // Vector 1: Instant Fuel 6.8 L/100km (68 = 0x0044), Range 640 km (0x0280)
-    // CAN ID 0x221 injection: cansend vcan0 221#00004402800000
-    const uint8_t can_221[] = { 0x00, 0x00, 0x44, 0x02, 0x80, 0x00, 0x00 };
+    // Vector 1: Range 640 km (0x0280 in B1-2), Instant Fuel 6.8 L/100km (68 = 0x0044 in B3-4)
+    // CAN ID 0x221 injection: cansend vcan0 221#00028000440000
+    const uint8_t can_221[] = { 0x00, 0x02, 0x80, 0x00, 0x44, 0x00, 0x00 };
     psa_trip_process_can_0x221(&trip, can_221, sizeof(can_221));
 
     TEST_ASSERT_EQUAL_UINT16(68, trip.instant_fuel_deci);
@@ -121,9 +121,9 @@ void test_peugeot_407_trip_hiworld_vector_target_mileage_dump(void) {
     vehicle_trip_t trip;
     memset(&trip, 0, sizeof(trip));
 
-    // CAN ID 0x221 injection from dump_2026-09-29_19-37-10.log:
-    // Fuel: 7.1 (0x0047), Range: 619 km (0x026B), Target mileage: 204 km (raw 2040 = 0x07F8)
-    const uint8_t can_221[] = { 0x00, 0x00, 0x47, 0x02, 0x6B, 0x07, 0xF8 };
+    // CAN ID 0x221 injection:
+    // Range: 619 km (0x026B in B1-2), Fuel: 7.1 L/100km (0x0047 in B3-4), Target mileage: 2040 = 204.0 km (0x07F8 in B5-6)
+    const uint8_t can_221[] = { 0x00, 0x02, 0x6B, 0x00, 0x47, 0x07, 0xF8 };
     psa_trip_process_can_0x221(&trip, can_221, sizeof(can_221));
 
     TEST_ASSERT_EQUAL_UINT16(71, trip.instant_fuel_deci);

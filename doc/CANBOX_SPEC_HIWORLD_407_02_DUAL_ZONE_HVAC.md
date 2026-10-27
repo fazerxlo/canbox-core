@@ -66,11 +66,29 @@ The CAN adapter decodes `0x1D0` and `0x1E3` into standardized Hiworld HVAC frame
 ### 2.4 PSA Climate EMF / Display State Frame (`0x1E3`)
 - **CAN ID:** `0x1E3` (DLC: 7 bytes, Period: 100 ms per RT4 firmware)
 - **Direction:** Climate ECU → RT4 / Multifunction Display (EMF)
-- **Standby Frame (Ignition ON, Climate Off):** `1C 40 0B 0B 00 00 0F 00`
+- **Description:** Authoritative dual-zone HVAC system status broadcast from the Climate ECU to the multifunction display / RT4. Carries system power, A/C compressor state, setpoints, air distribution, and blower fan bar levels.
 
-**Active Byte Layout:**
+**Byte Layout Table:**
 
-**Byte 0 mode bit combinations (bench-verified):**
+| Byte | Bits | Mask | Signal / Field | Encoding & Description |
+|:---:|:---:|:---:|:---|:---|
+| **0** | 7 | `0x80` | `RECIRC_STATUS` | `1` = Recirculation active, `0` = Fresh air |
+| **0** | 6 | `0x40` | `AC_OFF` | `1` = A/C compressor disabled (ECO mode), `0` = A/C active / authorized |
+| **0** | 5 | `0x20` | `CLIM_OFF` | `1` = HVAC system powered OFF, `0` = HVAC active |
+| **0** | 4 | `0x10` | `AUTO_AIRFLOW` | `1` = Automated airflow pattern active |
+| **0** | 3 | `0x08` | `AUTO_BLOWER` | `1` = Automated fan blower regulation active |
+| **0** | 2 | `0x04` | `HIDE_FAN_BARS` | `1` = Hide blower fan bar graph on display |
+| **0** | 0 | `0x01` | `DUAL_ACTIVE` | `1` = Dual independent zones, `0` = Mono / SYNC |
+| **1** | 7 | `0x80` | `UNFROST_FRONT` | `1` = Rapid front demist / defrost active |
+| **2** | 7:0 | `0xFF` | `DISPLAY_TEMP_L` | Driver temperature setpoint: `0x00` = LO, `0x01..0x15` = 14.5–27.0 °C ($14.0 + \text{raw} \times 0.5$), `0x16` = HI |
+| **3** | 7:0 | `0xFF` | `DISPLAY_TEMP_R` | Passenger temperature setpoint (mirrors Driver in Mono mode) |
+| **4** | 7:4 | `0xF0` | `AIR_FLOW_L` | Driver air distribution pattern code (see Section 2.3) |
+| **5** | 7:4 | `0xF0` | `AIR_FLOW_R` | Passenger air distribution pattern code (see Section 2.3) |
+| **6** | 3:0 | `0x0F` | `DISPLAY_FAN_BARS`| Blower fan level bar graph ($0\dots 8$ segments, `0` = off) |
+
+**Standby Frame (Ignition ON, Climate Off):** `20 00 00 00 00 00 00` (or `1C 40 0B 0B 00 00 0F 00` with AC off)
+
+**Byte 0 Mode Bit Combinations (Bench-Verified):**
 
 | Byte 0 value | Meaning |
 |:---:|:---|

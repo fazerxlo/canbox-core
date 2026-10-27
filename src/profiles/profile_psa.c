@@ -218,8 +218,10 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
     }
 
     if (frame->dlc >= 5) {
-        uint8_t phase_vie = frame->data[4] & 0x07;
-        if (phase_vie == 0x00 || phase_vie == 0x02) {
+        uint8_t phase_vie = frame->data[4];
+        uint8_t p_mode = (phase_vie >> 4) & 0x0F;
+        uint8_t p_raw  = phase_vie & 0x0F;
+        if (phase_vie == 0x00 || (p_raw == 0x02 && p_mode == 0x00)) {
             /* 0x00: Deep sleep, 0x02: Shutdown countdown -> Ignition is definitively OFF */
             state->ignition_on = false;
             s_ignition_from_0f6 = false;
@@ -227,8 +229,10 @@ static void psa_decode_ignition_reverse_0x036(const can_frame_t *frame, vehicle_
             /* 0x0F6 Byte 0 Bit 3 is the authoritative vehicle ground truth for +APC */
             state->ignition_on = s_ignition_from_0f6;
         } else {
-            /* Fallback for standalone/synthetic test environments without 0x0F6 */
-            state->ignition_on = (phase_vie == 0x01 || phase_vie == 0x03);
+            /* Fallback for standalone/synthetic test environments without 0x0F6:
+             * RT4 POWER_MODE (bits 7:4): 0x20 = Ignition ON (+APC), 0x50 = Running
+             * BSI Phase de vie (raw byte or lower bits): 0x01 = Network active (+APC), 0x03 = +CAN */
+            state->ignition_on = (p_mode == 0x02 || p_mode == 0x05 || p_raw == 0x01 || p_raw == 0x03);
         }
     }
 
@@ -337,7 +341,7 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_CRUISE_CONTROL,     psa_decode_cruise_0x1a8_profile },
     { 0x0B6,                         psa_engine_decode_frame },
     { PSA_CAN_ID_CLIMATE_HVAC,       psa_hvac_decode_frame },
-    { 0x1E3,                         psa_hvac_decode_frame },
+    { PSA_CAN_ID_ETAT_CLIMAV_1E3,    psa_hvac_decode_frame },
     { PSA_CAN_ID_RD4_AUDIO_SETTINGS, psa_rd4_decode_frame },
     { PSA_CAN_ID_DOORS_BODY_220,     psa_doors_decode_frame },
     { PSA_CAN_ID_TRIP_INSTANT,       psa_trip_decode_frame },

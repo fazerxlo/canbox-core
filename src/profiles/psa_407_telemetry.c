@@ -8,6 +8,17 @@ static inline uint16_t read_be16(const uint8_t *d) {
 
 /* --------------------------------------------------------------------------
  * 1.4 Trip Computer & Engine Telemetry
+ *
+ * NOTE ON LEGACY FUNCTIONS (psa_decode_trip_0x165 / 0x1a5 / 0x2a5):
+ * These legacy functions are preserved for backwards compatibility with
+ * external test harnesses. In genuine PSA CAN2004 architecture:
+ *   - CAN 0x165 is MSG_ETAT_AUTORADIO (radio status)
+ *   - CAN 0x1A5 is MSG_VOLUME_RADIO_OR_CD_STATUS (RD4 volume or RT4 CD)
+ *   - CAN 0x2A5 is MSG_NOM_STATION (RDS station name)
+ * Real PSA trip computer telemetry is decoded below via:
+ *   - CAN 0x221 (MSG_INFO_GEN_ODB): psa_trip_process_can_0x221
+ *   - CAN 0x2A1 (MSG_INFOS_TRAJET1_ODB): psa_trip_process_can_0x2a1
+ *   - CAN 0x261 (MSG_INFOS_TRAJET2_ODB): psa_trip_process_can_0x261
  * -------------------------------------------------------------------------- */
 void psa_decode_trip_0x165(const uint8_t *data, uint8_t dlc,
                            uint16_t *instant_fuel, uint16_t *range_dte,
@@ -54,9 +65,14 @@ bool psa_trip_process_can_0x221(vehicle_trip_t *trip, const uint8_t *data, uint8
 
     /* Note: 0xFFFF sentinels in fuel/range represent valid PSA stationary/undefined
      * indicators ('--.-') and must NOT be suppressed so the HU displays '--.-'.
+     *
+     * In PSA CAN2004 (RT4 8.31 OEM ground truth get_trip_data_inst offset 0x012454):
+     * - Bytes 1-2: CRUISING_RANGE (km)
+     * - Bytes 3-4: INST_CONSUMPTION (0.1 L/100km)
+     * - Bytes 5-6: DIST_TO_DEST (km)
      */
-    trip->instant_fuel_deci = read_be16(&data[1]);
-    trip->range_km          = read_be16(&data[3]);
+    trip->range_km          = read_be16(&data[1]);
+    trip->instant_fuel_deci = read_be16(&data[3]);
     trip->dest_dist_km      = read_be16(&data[5]);
     trip->instant_valid     = true;
     return true;

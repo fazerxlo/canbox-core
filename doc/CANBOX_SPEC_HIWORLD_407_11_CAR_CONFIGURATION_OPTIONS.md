@@ -387,7 +387,18 @@ Byte 7: Profile options mask (0x10)
 - **Byte 2 Bit 7 (`0x80`):** `ECONOMY_MODE` (`1` = Active, `0` = Normal)
 - **Byte 3 Bit 5 (`0x20`):** `ILLUMINATION_NIGHT` (`1` = Night illumination active)
 - **Byte 3 Bits 3..0 (`0x0F`):** `RHEOSTAT_LEVEL` (`0..15` instrument cluster dimmer brightness level; e.g., `0x0F` = 15 $\implies$ `0x0F << 2 = 0x3C` in `Cmd 0x79` Byte 2)
-- **Byte 4 Bits 2..0 (`0x07`):** `PHASE_VIE` (`0x00` = Sleep, `0x01` = Normal/+APC, `0x02` = Shutdown)
+- **Byte 4 Bits 7..4 (`0xF0`):** `POWER_MODE` (Contact state):
+  - `0x00`: Contact OFF / Standby
+  - `0x10`: Accessory (ACC)
+  - `0x20`: Ignition ON (+APC)
+  - `0x50`: Engine Running
+- **Byte 4 Bits 2..0 (`0x07`):** `PHASE_VIE` (Comfort bus network lifecycle):
+  - `0x00`: Deep Sleep / Standby
+  - `0x01`: Normal / Bus Awake (+APC active)
+  - `0x02`: Shutdown countdown / Preparing sleep
+  - `0x03`: Wakeup transition
+> [!IMPORTANT]
+> **Power Mode Masking Rule:** Never apply an artificial 3-bit mask (`data[4] & 0x07`) to determine ignition. Doing so strips the upper nibble `POWER_MODE` (`0x20` or `0x50`), causing ignition state to read as OFF whenever `PHASE_VIE` transitions away from `0x01` during engine running (`0x50`). Byte 4 must be evaluated as `(data[4] >= 0x20) || (data[4] & 0x07) == 0x01`.
 
 ---
 

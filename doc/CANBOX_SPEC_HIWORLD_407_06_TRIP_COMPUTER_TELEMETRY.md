@@ -16,7 +16,7 @@ In Peugeot 407 (PSA CAN2004 architecture), engine telemetry, odometer readings, 
 - **`0x0F6` (BSI Slow Data, 500 ms):** Ignition contact state (+APC: Byte 0 Bit 3, `0x88`=ON, `0x80`=OFF), engine coolant temperature ($\text{Raw} - 40^\circ\text{C}$), external ambient air temperature ($\text{Raw} \times 0.5 - 40^\circ\text{C}$), reverse gear status (Byte 7 Bit 7), wipers, and turn signals (blinkers).
 - **`0x161` (BSI Gauges, 500 ms):** Oil temperature ($\text{Raw} - 40^\circ\text{C}$), fuel level percentage (Byte 3), and oil level (Byte 6).
 - **`0x036` (Network State & Illumination, 100 ms):** Comfort bus network lifecycle / Phase de vie (`Byte 4: 0x00=Sleep, 0x01=Awake, 0x02=Shutdown countdown, 0x03=Wakeup transition`), dashboard illumination enabled (Byte 3 Bit 5), and luminosity level.
-- **`0x221` (Instantaneous Trip, 1000 ms):** Instantaneous fuel consumption ($0.1\text{ L/100km}$), cruising range / autonomy (km), distance ($0.1\text{ km}$), and stalk com button flags.
+- **`0x221` (Instantaneous Trip, 1000 ms):** Cruising range / autonomy (km, Bytes 1..2), instantaneous fuel consumption ($0.1\text{ L/100km}$, Bytes 3..4), distance ($0.1\text{ km}$, Bytes 5..6), and stalk com button flags (Byte 0).
 - **`0x2A1` (Trip 1 Historical, 1000 ms):** Mean speed (uint8 / uint16 km/h), distance (km), and average consumption ($0.1\text{ L/100km}$).
 - **`0x261` (Trip 2 Historical, 1000 ms):** Same format as Trip 1.
 
@@ -47,9 +47,12 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 ### 2.3 Trip Computer Instantaneous Frame (`0x221`)
 - **CAN ID:** `0x221` (DLC: 7, Period: 1000 ms)
 - `Byte 0`: Bit 7 = Hide Fuel, Bit 6 = Hide Dist, Bit 3 = Com Stalk Right, Bit 0 = Com Stalk Left.
-- `Bytes 1..2`: Instantaneous Fuel Consumption ($0.1\text{ L/100km}$, Big-Endian uint16, `0xFFFF` = stationary / `--.-`).
-- `Bytes 3..4`: Cruising Range / Autonomy (km, Big-Endian uint16, `0xFFFF` = undefined / `--.-`).
+- `Bytes 1..2`: Cruising Range / Autonomy (km, Big-Endian uint16, `0xFFFF` = undefined / `--.-`). Verified against RT4 8.31 `get_trip_data_inst` (`Fp_Network_CAN.out`).
+- `Bytes 3..4`: Instantaneous Fuel Consumption ($0.1\text{ L/100km}$, Big-Endian uint16, `0xFFFF` = stationary / `--.-`).
 - `Bytes 5..6`: Instantaneous Distance ($0.1\text{ km}$, Big-Endian uint16, `0xFFFF` = undefined / `--.-`).
+> [!NOTE]
+> **Byte Swapping vs Hiworld Wire Protocol:**
+> Notice that PSA CAN `0x221` places **Range** in Bytes 1..2 and **Instant Fuel** in Bytes 3..4. However, the Hiworld serial uplink (`Cmd 0x13`, Section 3.1) and Android Head Unit (`PeugeotDataParser.smali`) expect **Instant Fuel** in UART payload Bytes 0..1 and **Range** in UART payload Bytes 2..3. The CAN box firmware must map CAN `data[3..4]` $\to$ UART `p[0..1]` and CAN `data[1..2]` $\to$ UART `p[2..3]`. Do not confuse CAN byte ordering with UART payload byte ordering!
 > [!NOTE]
 > When the vehicle is stationary (speed < 30 km/h or stopped), PSA CAN 0x221 broadcasts `0xFFFF` in fuel and/or range. This is a valid display state and MUST NOT be dropped; commercial canbox units forward `5A A5 0A 13 FF FF FF FF FF FF 00 00 00 00 16` so the Head Unit displays `--.-`.
 
@@ -270,8 +273,9 @@ static inline void psa_trip_process_can_0x0b6(psa_trip_ctx_t *ctx, const uint8_t
 static inline void psa_trip_process_can_0x221(psa_trip_ctx_t *ctx, const uint8_t *data, uint8_t dlc) {
     if (dlc < 7) return;
 
-    ctx->state.instant_fuel_deci = ((uint16_t)data[1] << 8) | data[2];
-    ctx->state.range_km          = ((uint16_t)data[3] << 8) | data[4];
+    /* CAN 0x221 B1..2 = Autonomy (km), B3..4 = Instant Fuel (0.1 L/100km) */
+    ctx->state.range_km          = ((uint16_t)data[1] << 8) | data[2];
+    ctx->state.instant_fuel_deci = ((uint16_t)data[3] << 8) | data[4];
     ctx->state.dest_dist_km      = ((uint16_t)data[5] << 8) | data[6];
 
     psa_trip_send_instant(ctx);
@@ -318,11 +322,11 @@ static inline void psa_trip_process_can_0x0f6(psa_trip_ctx_t *ctx, const uint8_t
 # 5. Verification Vectors & Simulation Harness
 
 ### Vector 1: Instant Fuel 6.8 L/100km (68 = 0x0044), Range 640 km (0x0280)
-- **CAN ID `0x221` Injection:**
+- **CAN ID `0x221` Injection (Bytes 1..2 = Range 0x0280, Bytes 3..4 = Fuel 0x0044):**
   ```bash
-  cansend vcan0 221#00004402800000
+  cansend vcan0 221#C0028000440000
   ```
-- **Expected UART Output (Hiworld `0x13`):**
+- **Expected UART Output (Hiworld `0x13`, Payload 0..1 = Fuel 0x0044, Payload 2..3 = Range 0x0280):**
   - Frame: `5A A5 0A 13 00 44 02 80 00 00 00 00 00 00 E2`
   - Checksum Calculation: `(0x0A + 0x13 + 0x00 + 0x44 + 0x02 + 0x80 - 1) & 0xFF = (0xE3 - 1) & 0xFF = 0xE2`
 
