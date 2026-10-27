@@ -22,6 +22,7 @@ extern "C" {
 #define PSA_CAN_ID_STALK_BUTTONS    0x0F6
 #define PSA_CAN_ID_ALERT_JOURNAL    0x120
 #define PSA_CAN_ID_STATION_LIST_125 0x125
+#define PSA_CAN_ID_COMBINE_128      0x128
 #define PSA_CAN_ID_EMF_FC_11F       0x11F  /* MDF ISO-TP Flow Control for Station List 0x125 */
 #define PSA_CAN_ID_ALERT_QUERY      0x39B
 #define PSA_CAN_ID_BSI_GAUGES       0x161
@@ -44,6 +45,7 @@ extern "C" {
 #define PSA_CAN_ID_DOORS_BODY       0x220
 #define PSA_CAN_ID_TRIP_INSTANT     0x221
 #define PSA_CAN_ID_ETAT_TUNER       0x225
+#define PSA_CAN_ID_CLOCK_228        0x228
 #define PSA_CAN_ID_BSI_PERSO_REQ_15B 0x15B
 #define PSA_CAN_ID_MDF_STATUS_0DF   0x0DF
 #define PSA_CAN_ID_MDF_CLIM_REQ_1ED 0x1ED
