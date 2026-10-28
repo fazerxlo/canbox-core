@@ -1,322 +1,180 @@
 ---
 name: debug-canbox-firmware-live
 description: >-
-  Debug, verify, and trace custom flashed OpenCanbox firmware on real vehicle/workbench hardware
-  with an active BSI on CAN bus (can0) and Android Head Unit over ADB. Provides step-by-step
-  workflows for passive CAN frame listening/extraction without bus collisions, ADB logcat tracing,
-  Hiworld command injection into HU, authentic downlink UART injection from HU to canbox via UI triggers,
-  and fast UI status verification.
+  Debug, flash, verify, and trace OpenCanbox firmware (NUC131/STM32 via ST-Link), PSA Comfort CAN bus
+  (can0 connected to Physical BSI or Simulator, including switching between them), and Android Head Unit
+  (com.qf.vehicle over ADB). Enforces non-destructive live diagnosis before any flash or restart.
 ---
 
-# Live Hardware CAN Box Debugging: Real BSI, SLCAN & ADB
+# Live Hardware Debugging: HU (ADB) $\leftrightarrow$ Canbox (ST-Link) $\leftrightarrow$ BSI / Simulator (`can0`)
 
-This skill provides an end-to-end diagnostic and troubleshooting workflow when testing custom-flashed OpenCanbox firmware (STM32/NUC131) connected simultaneously to:
-1. **Physical Vehicle CAN Bus (`can0`):** With a live, active BSI (125 kbps PSA Comfort CAN). **Do not inject unsolicited frames on active BSI IDs to avoid bus collisions.**
-2. **Android Head Unit (`com.qf.vehicle`):** Connected via physical UART serial (38400 8N1) and monitored/controlled over ADB (WiFi `192.168.1.33:9876` or USB).
-
----
-
-## 1. System Topology & Communication Flow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Dev as Developer / Agent
-    participant HU as Android Head Unit (com.qf.vehicle)
-    participant UART as UART Bus (38400 8N1)
-    participant CBox as Flashed CAN Box (MCU)
-    participant CAN as PSA Comfort CAN (can0 @ 125k)
-    participant BSI as Physical Vehicle BSI
-
-    Note over CAN,BSI: Live CAN bus (Real BSI active - Passive sniffing only)
-
-    rect rgb(240, 248, 255)
-    Note over Dev,CBox: Downlink Injection (HU UI -> CAN Box)
-    Dev->>HU: adb shell input tap (trigger setting change)
-    HU->>UART: Downlink Packet: 5A A5 02 7B [Setting] [Val] [Chk]
-    UART->>CBox: MCU receives UART RX interrupt
-    CBox->>CAN: Transmit config request CAN frame to BSI
-    CAN->>BSI: BSI receives request & updates EEPROM state
-    end
-
-    rect rgb(255, 250, 240)
-    Note over BSI,HU: Uplink Status Feedback (BSI -> CAN Box -> HU UI)
-    BSI->>CAN: Broadcast updated CAN state (e.g. 0x15B / 0x361)
-    CAN->>CBox: MCU CAN RX filter receives state frame
-    CBox->>UART: Uplink Packet: 5A A5 02 76 [Setting] [Val] [Chk]
-    UART->>HU: PeugeotDataController processes packet
-    HU->>HU: CentralSettingFragment updates UI switch / label
-    Dev->>HU: screencap to /sdcard/_cap.png & pull
-    end
-```
+End-to-end runbook for live debugging, multi-stream capture, firmware/APK deployment, and verification across:
+1. **CAN Bus (`can0` @ 125 kbps):** Connected to either a **Physical Peugeot 407 BSI** or the **CAN2004 Simulator** (`../simulator`), supporting live switching (`BSI <-> Simulator`) to isolate root causes and verify fixes.
+2. **Canbox MCU (NUC131 / STM32):** Connected via **ST-Link V2** (`openocd_nuc131.cfg` + `tools/nuc131_flasher.py`) and UART (38,400 8N1).
+3. **Android Head Unit (`com.qf.vehicle` in `../QF_Canbus_system`):** Monitored/controlled over wireless ADB (`192.168.1.33:9876`).
 
 ---
 
-## 2. Prerequisites & Interface Bring-Up
-
-### Step 1: Bind SLCAN (`can0`) at 125 kbps
-PSA Comfort CAN operates at **125 kbps** (`-s4` in `slcand`):
-
-```bash
-# Check if can0 is already UP
-ip link show can0
-
-# If down or missing, attach SLCAN adapter (adjust /dev/ttyUSB0 if needed):
-slcand -o -c -s4 /dev/ttyUSB0 can0
-ip link set up can0 txqueuelen 1000
-
-# Confirm traffic is flowing from physical BSI:
-candump -tz can0 -n 10
-```
-
-### Step 2: Establish ADB Connection to Head Unit
-```bash
-# Connect over WiFi (standard port 9876 or 5555):
-adb connect 192.168.1.33:9876
-
-# Verify connection:
-adb devices
-
-# Quick check that com.qf.vehicle is running:
-adb -s 192.168.1.33:9876 shell pidof com.qf.vehicle
-```
-
----
-
-## 3. Passive CAN Listening & Frame Extraction (`can0`)
+## 0. CRITICAL RULE: Non-Destructive Diagnosis First (NEVER Flash/Restart Without User Approval)
 
 > [!CAUTION]
-> **Collision Warning:** The CAN bus has a real, active BSI attached. **Never send unsolicited periodic CAN frames** on IDs already driven by the BSI (e.g. `0x15B`, `0x260`, `0x361`, `0x036`, `0x0E6`). Doing so causes CAN error frames, bus off states, or erratic vehicle ECU behavior. Use passive capture and diffing.
+> **Live State Preservation Gate:** Many vehicle/UI bugs only occur in a specific runtime state and **disappear if the Canbox MCU or Head Unit app restarts**.
+> Until you have captured the live bug state AND the user **explicitly agrees** to flash, deploy, or restart:
+> 1. **DO NOT start OpenOCD or run `nuc131_flasher.py`** (connecting OpenOCD with `reset-init` or flashing immediately halts/resets the NUC131 MCU and wipes RAM state).
+> 2. **DO NOT run `build_and_deploy.sh`, `adb_upload.sh`, `adb install`, or `am force-stop com.qf.vehicle`** (restarts the Android app and clears UI/service state; use `--no-deploy` if pre-building).
+> 3. **DO NOT inject CAN frames (`cansend`), wakeup pulses, or start/stop Simulator** while diagnosing a live bug unless asked.
+> 4. **Start with Passive Capture Only:** Use `candump`, `adb logcat -d`, `adb shell uiautomator dump`, `adb shell screencap`, or `tools/record_repro_session.py`.
 
-### 3.1 Targeted Candump with ID Masking
-Filter only the IDs relevant to vehicle settings and body electronics:
+---
 
-| CAN ID | Subsystem / Description | Rate / Trigger |
+## 1. Sibling Repositories & Fast Tooling Map
+
+Use relative paths from `canbox-core` workspace root:
+
+| Component | Relative Path | Key Tools & Mandatory Token-Saving Rules |
 | :--- | :--- | :--- |
-| `0x15B` | Vehicle Personalization / Settings Status (Follow-Me-Home, DRL, Auto-Lock) | Periodic / On change |
-| `0x260` | Lighting Status & Stalk Positions (Sidelights, Low Beam, High Beam) | ~100 ms |
-| `0x361` | Door, Boot, Bonnet Status & Remote Key Fob Lock/Unlock | Event / Periodic |
-| `0x21F` | Steering Wheel Stalk Commands (Vol, Source, Seek, Esc, Menu) | Event |
-| `0x165` | RD4 Radio Power, Volume, Tuner Band & Source | ~100 ms |
+| **Canbox Firmware** | `.` (`canbox-core`) | Build: `~/.platformio/penv/bin/pio run -s -e raise_nuc131`<br>Flash App (`0x2000`, **only after user approval**): `python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000` |
+| **HU Android APK** (`com.qf.vehicle`) | `../QF_Canbus_system` | **Read `../QF_Canbus_system/AGENTS.md` before modifying APK files.**<br>- Extract 1 Smali method: `python3 ../QF_Canbus_system/tools/extract_smali_method.py <file.smali> <method>` (never read whole Smali files)<br>- Lookup/add resource IDs: `python3 ../QF_Canbus_system/tools/add_res_id.py --lookup <name>` (never read `public.xml`/`ids.xml`)<br>- Update changelog: `python3 ../QF_Canbus_system/tools/add_changelog.py` (never read `CHANGELOG.md`)<br>- Build only (safe): `../QF_Canbus_system/tools/build_and_deploy.sh --no-deploy`<br>- Build + ADB Deploy (**only after user approval**): `../QF_Canbus_system/tools/build_and_deploy.sh` |
+| **CAN2004 Simulator** | `../simulator` | Virtualenv: `../simulator/.venv/bin/python`<br>- Canonical signal DB: `../simulator/signal-db/*.yaml` (never edit `generated/*.py` manually)<br>- Regenerate encoders: `../simulator/.venv/bin/python ../simulator/signal-db/codegen/gen_py_encoder.py` |
+| **PSA Lab Scripts** | `../psa-can-lab` | Signal audits & bench verification helpers (`../psa-can-lab/tools/`). |
+
+---
+
+## 2. Passive 1-Turn Pre-Flight & Bus Source Auto-Detection
+
+Run this **100% passive, non-destructive** check in a single turn to verify **ADB**, **`can0`**, and detect whether **`can0` is on Physical BSI or Simulator**:
 
 ```bash
-# Monitor only Settings (0x15B), Lights (0x260), and Doors (0x361):
-candump -tz can0,15B:7FF,260:7FF,361:7FF
+# 1. Check / auto-connect ADB (non-destructive, does not restart app)
+adb devices | grep -q "192.168.1.33:9876.*device" || adb connect 192.168.1.33:9876
+adb devices
+
+# 2. Check can0 interface state
+ip link show can0
+
+# 3. Passive auto-detect: SIMULATOR vs PHYSICAL BSI vs IDLE/SLEEP
+pgrep -fa "simulator.*(app|can_runner)\.py" && echo "MODE: SIMULATOR_PROCESS_ACTIVE" || echo "MODE: NO_LOCAL_SIMULATOR"
+timeout 1.5s candump -tz can0 -n 20
 ```
 
-### 3.2 Extracting CAN Frame Deltas (Baseline vs. Action)
-When you toggle a setting in the car or on the HU and need to see exactly which CAN byte changed:
+### Connection Failure Stop-and-Ask Rules
+1. **ADB Offline / Unreachable:** If `adb devices` does not list `192.168.1.33:9876	device` after one `adb connect 192.168.1.33:9876`, **STOP immediately and ask the user to connect/enable ADB on the Head Unit**. Never scan IPs or loop.
+2. **`can0` Down / Missing:** If `ip link show can0` is `DOWN` or missing, try `../simulator/slcan.sh` (or `slcand -o -c -s4 /dev/ttyUSB0 can0 && ip link set up can0 txqueuelen 1000`). If `/dev/ttyUSB*` is absent or requires root (`sudo`), **STOP and ask the user** to bring up `can0`.
+3. **ST-Link Disconnected:** When authorized to flash, if OpenOCD fails with `Error: open failed` / `libusb_open failed`, **STOP and ask the user to check the ST-Link USB/SWD connection**.
 
+---
+
+## 3. Detecting & Switching `Physical BSI <-> Simulator`
+
+| Pre-Flight Observation | Detected Mode | Rules & Collision Protection |
+| :--- | :--- | :--- |
+| `pgrep` shows `simulator` (`app.py` / `can_runner.py`) | **SIMULATOR MODE** | Safe to adjust simulator signals or inject `cansend can0 <ID>#<HEX>` (once live diagnosis is complete). |
+| No simulator process + `candump` shows periodic `0x036`, `0x0F6`, `0x128`, `0x260`, `0x361` | **PHYSICAL BSI MODE (Awake)** | **COLLISION HAZARD:** Never start Simulator or transmit periodic frames on BSI-owned IDs (`0x036`, `0x0F6`, `0x128`, `0x15B`, `0x260`, `0x361`, `0x165`). Use passive `candump`, HU UI taps, or one-shot `cansend` only on absent ECUs (when approved). |
+| No simulator process + `candump` returns 0 frames | **BSI ASLEEP (Economy) OR IDLE BUS** | Do **not** inject wakeup frames if diagnosing a sleep/standby bug. Otherwise (with user consent), send one wakeup pulse (`cansend can0 036#0E00000F010000A0 && cansend can0 0F6#8800000000500020`) and sniff 1s: if `0x260`/`0x361` appear $\rightarrow$ **PHYSICAL BSI**; if silent $\rightarrow$ **IDLE BUS**. |
+
+### Switching Workflow (`BSI -> Simulator -> BSI`)
+1. **Observe on Physical BSI:** Passively capture live CAN + ADB logcat + UI state (`uiautomator dump`) without resetting MCU or HU.
+2. **Switch to Simulator (Isolate Root Cause / Fuzz States):** Ask user to disconnect/switch off Physical BSI (or confirm `timeout 1.0s candump can0,036:7FF,260:7FF` is silent), then use Simulator or batched `cansend` vectors to reproduce and test fixes.
+3. **Switch Back to Physical BSI (Final Verification):** Stop simulator (`pkill -f "simulator.*(app|can_runner)\.py" 2>/dev/null || true`), ask user to reconnect/power on Physical BSI, verify clean BSI traffic (`candump -tz can0,036:7FF,260:7FF -n 6`), and confirm the fix on real hardware.
+
+### 3.1 Simulator Parity, Gating & Configuration Gotchas (Avoid False Firmware RCA)
+When a feature works on Physical BSI but fails in Simulator Mode (e.g., missing trip telemetry, HVAC status, or stalk keys):
+1. **Always verify `can0` first:** Run `timeout 1.5s candump can0,<CAN_ID>:7FF`. Never assume the Canbox firmware or Android Head Unit is broken until you prove the CAN frame is actually on the wire.
+2. **One-shot CAN injection verification (`cansend`):** Inject a synthetic frame (e.g. `cansend can0 221#000044028004B0`). If Canbox MCU immediately decodes it and sends the UART uplink (`Cmd 0x13`/`0x1A`), the Canbox firmware and HU app are functioning correctly; the bug is 100% inside the Simulator.
+3. **Common Simulator failure modes:**
+   - **Disabled module in `../simulator/config.yml`:** The module providing or gating the frame may be commented out (e.g. `#- swc`, `#- clim`).
+   - **Overly restrictive `required_modules` in `../simulator/signal-db/*.yaml`:** When messages span multiple ECUs/domains (e.g., `Msg221` carries both BSI trip calculations and SWC wiper tip buttons), ensure `required_modules` includes all transmitting modules (`bsi-trip`, `swc`).
+   - **Unregenerated encoders:** If `signal-db/*.yaml` is modified, run `../simulator/.venv/bin/python ../simulator/signal-db/codegen/gen_py_encoder.py` to update `generated/*_messages.py`.
+   - **UI tab state:** Some simulator messages require an explicit UI tab to be loaded or active before scheduling.
+
+---
+
+## 4. Non-Destructive Live Capture & UI Inspection
+
+### 4.1 Fast UI Inspection via `uiautomator dump` (Preferred Over OCR)
+Returns exact Android `resource-id` and `text` strings in 1 command without OCR errors:
 ```bash
-# 1. Capture 3 seconds of baseline traffic
-candump -t z can0,15B:7FF,361:7FF -T 3000 > /tmp/can_baseline.log
-
-# 2. Trigger the action (e.g. toggle setting via HU or car button)
-# 3. Capture 3 seconds of action traffic
-candump -t z can0,15B:7FF,361:7FF -T 3000 > /tmp/can_action.log
-
-# 4. Compare unique payloads:
-sort -u -k3 /tmp/can_baseline.log
-sort -u -k3 /tmp/can_action.log
+adb -s 192.168.1.33:9876 shell uiautomator dump /sdcard/window_dump.xml >/dev/null && \
+adb -s 192.168.1.33:9876 shell cat /sdcard/window_dump.xml | python3 -c "
+import sys, xml.etree.ElementTree as ET
+for n in ET.fromstring(sys.stdin.read()).iter('node'):
+    r, t = n.attrib.get('resource-id', ''), n.attrib.get('text', '')
+    if r or t: print(f'{r:45s} | {t}')
+"
 ```
 
-Or run the built-in diff tool:
+### 4.2 Fast Screenshot (< 3s Timed Popups)
+Direct `exec-out screencap` takes ~2.6s over WiFi and misses 2.5s popups. Always capture to `/sdcard/` first (~100 ms):
 ```bash
+adb -s 192.168.1.33:9876 shell screencap -p /sdcard/_cap.png && adb -s 192.168.1.33:9876 pull /sdcard/_cap.png /tmp/screen_verify.png
+```
+
+### 4.3 Non-Destructive Logcat & CAN Sniffing
+```bash
+# Dump recent UART uplink/downlink & parser logs without clearing buffer:
+adb -s 192.168.1.33:9876 logcat -d -t 200 | grep -E "CAN_DEBUG|CANBOX_UART_TX|HU_UART_TX|PeugeotData|handleVehicleData|writeData" | tail -n 40
+
+# Targeted CAN sniffing & baseline/action delta diffing:
+candump -tz can0,15B:7FF,260:7FF,361:7FF -n 15
 python3 tools/diff_canbox_frames.py --can-interface can0 --filter 15B,361
+
+# Correlated multi-stream recorder (microsecond CAN + UART + Android audio/UI events):
+./tools/record_repro_session.py --can can0 --adb 192.168.1.33:9876
 ```
 
----
-
-## 4. Log Head Unit Behavior via ADB Logcat
-
-Monitor the exact interaction between the Android CAN service and the vehicle UI.
-
-### 4.1 Focused Logcat Filter
-Run logcat scoped to the critical CAN bus and Settings tags:
-
-```bash
-adb -s 192.168.1.33:9876 logcat -v time -s \
-    PeugeotAlert:V \
-    CanbusWarning:V \
-    PeugeotDataController:V \
-    VehicleService:V \
-    UartDataTransmit:V \
-    CentralSettingFragment:V \
-    DataParserUtil:V
-```
-
-### 4.2 Real-Time UART Uplink & Downlink Sniffing
-To observe the raw `5A A5 ...` frames transmitted across the serial link between HU and CAN box:
-
-```bash
-adb -s 192.168.1.33:9876 logcat -v time | grep --line-buffered -E "CANBOX_UART_TX|HU_UART_TX|handleVehicleData|writeACK2CanBox|writeData"
-```
-
----
-
-## 5. Inject Hiworld Commands into HU via ADB
-
-When testing whether the **Android UI correctly responds to CAN box status packets**, inject raw Hiworld frames directly into `PeugeotDataController` via `CanbusAlertDebugReceiver`:
-
-```bash
-adb -s 192.168.1.33:9876 shell am broadcast \
-    -a com.canbus.action.INJECT_CAN_PACKET \
-    -p com.qf.vehicle \
-    --es data "<HEX_FRAME>"
-```
-
-### Reference Packet Cheat Sheet (Settings & Vehicle Status)
-
-#### 1. Vehicle Settings Confirmation (`0x76`)
-Frame format: `5A A5 [LEN] 76 [SETTING_ID] [VAL] [CHECKSUM]`
-
-* **Follow-Me-Home Delay (Setting `0x06`):**
-  - Disable (0s): `5AA5027606007E`
-  - 15 seconds: `5AA5027606017F`
-  - 30 seconds: `5AA50276060280`
-  - 60 seconds: `5AA50276060381`
-
-* **Daytime Running Lights / DRL (Setting `0x05`):**
-  - OFF: `5AA5027605007D`
-  - ON: `5AA5027605017E`
-
-* **Door Auto-Lock When Driving (Setting `0x0C`):**
-  - OFF: `5AA502760C0084`
-  - ON: `5AA502760C0185`
-
-* **Rear Wiper in Reverse (Setting `0x04`):**
-  - OFF: `5AA5027604007C`
-  - ON: `5AA5027604017D`
-
-#### 2. Other Key Subsystem Frames
-* **Warning / Alert Journal (`0x42`):**
-  - Engine Oil Temp High: `5AA5054201000100018F`
-  - Clear / Empty Alert List: `5AA50242000043`
-* **Radio Tuner Status (`0x84`):**
-  - FM1 98.50 MHz, Preset 1: `5AA50E8401000000010003DE00000000006F`
-* **CD Deck Status (`0x97`):**
-  - Track 1, Playing: `5AA50B970100000300000100010000A7`
-
----
-
-## 6. Inject Downlink Data to CAN Box (via HU Remote Control)
-
-Because the CAN bus has a real BSI attached, the safest way to stimulate the custom CAN box firmware is to **trigger authentic downlink UART requests from the Android Head Unit**.
-
-When a user taps an option in `com.qf.vehicle`, the app generates and writes the standard Hiworld downlink frame (`5A A5 02 7B ...`) to the CAN box UART RX pin.
-
-### 6.1 Open Vehicle Settings UI
-Launch `CentralSettingFragment`:
-```bash
-adb -s 192.168.1.33:9876 shell am start \
-    -n com.qf.vehicle/.fragments.FragmentContainerActivity \
-    --es fragmentclass com.qf.vehicle.fragments.CentralSettingFragment
-```
-
-### 6.2 Screen Tap Recipes (1280x720 Display)
-
-#### Scenario A: Change Follow-Me-Home Headlight Delay
-```bash
-# 1. Switch to "Lighting / Vehicle" Tab (Left side menu)
-adb -s 192.168.1.33:9876 shell input tap 150 282
-
-# 2. Tap "With me goHome time" row (Opens popup dialog)
-adb -s 192.168.1.33:9876 shell input tap 400 187
-
-# 3. Select delay option inside popup:
-# - Tap 30 seconds:
-adb -s 192.168.1.33:9876 shell input tap 1080 282
-# - OR Tap 60 seconds (Dispatches 5A A5 02 7B 06 02 84 down to CAN box):
-adb -s 192.168.1.33:9876 shell input tap 1080 377
-# - OR Tap 120 seconds:
-adb -s 192.168.1.33:9876 shell input tap 1080 472
-```
-
-#### Scenario B: Toggle Daytime Running Lights (DRL)
-```bash
-# 1. Switch to "Lighting" Tab
-adb -s 192.168.1.33:9876 shell input tap 150 282
-
-# 2. Toggle "Day Time Light" switch on right edge:
-adb -s 192.168.1.33:9876 shell input tap 1215 282
-# (Dispatches 5A A5 02 7B 05 01 82 for ON, or 5A A5 02 7B 05 00 81 for OFF)
-```
-
-#### Scenario C: Toggle Door Auto-Lock When Driving
-```bash
-# 1. Switch to "Door / Window" Tab
-adb -s 192.168.1.33:9876 shell input tap 150 377
-
-# 2. Toggle "Door lock automatically" switch:
-adb -s 192.168.1.33:9876 shell input tap 1215 285
-# (Dispatches 5A A5 02 7B 0C 01 89 for ON, or 5A A5 02 7B 0C 00 88 for OFF)
-```
-
-### 6.3 Media & Audio App Launching
-```bash
-# Launch Factory RD4 Tuner UI:
-adb -s 192.168.1.33:9876 shell am start -n com.qf.vehicle/com.qf.vehicle.activities.OriginalTuner
-
-# Launch Factory CD Player UI:
-adb -s 192.168.1.33:9876 shell am start -n com.qf.vehicle/com.qf.vehicle.activities.OriginalCD
-
-# Send Media Keys:
-adb -s 192.168.1.33:9876 shell input keyevent 85   # Play / Pause
-adb -s 192.168.1.33:9876 shell input keyevent 87   # Next Track
-adb -s 192.168.1.33:9876 shell input keyevent 88   # Prev Track
-```
-
----
-
-## 7. Verify UI Status & Data
-
-### 7.1 Fast Screenshot Rule (< 3s Popups)
+### 4.4 Fast-Path Root Cause Tracing: Local 4-Layer Hierarchy (Avoid Smali Traps)
+When an unexpected popup, UI glitch, or periodic state update appears on the HU:
+1. **Extract wire frame from logcat:** Identify the Hiworld command (`0x5A 0xA5 <len> <cmd> <payload...>`).
+2. **Consult local specs first:** Match `<cmd>` in the Subsystem Lookup Table (`AGENTS.md`) and read `doc/CANBOX_SPEC_*.md`.
+3. **Trace wire builder:** Search `src/protocols/hiworld_psa_builders.c` to see which field in `vehicle_state_t` drives the frame or popup bit.
+4. **Trace router & periodic dispatch:** Check `src/core/can_router.c` (`dirty.*` or periodic sync / heartbeat) to see why the packet is emitted periodically.
+5. **Trace decoder:** Check `src/profiles/psa_407_*.c` to see how the incoming CAN frame sets the state field.
 > [!IMPORTANT]
-> Over WiFi ADB, direct streaming (`adb exec-out screencap -p`) takes ~2.6 seconds. Transient popups (such as the 2.5s volume or alert HUD cards) will dismiss before the capture completes.
-> **Always screencap locally to `/sdcard/` first (~100 ms) and then pull:**
+> **Do NOT search or decompile Android Smali (`../QF_Canbus_system`)** when the UART command ID and byte meanings are already defined in `canbox-core` specs and builders. Reserve smali audits strictly for completely unhandled or unknown vendor commands.
 
+---
+
+## 5. Flashing Canbox MCU & Deploying HU APK (ONLY After User Approval)
+
+### 5.1 NUC131 Build & Flash via ST-Link (`openocd_nuc131.cfg`)
+* **Never** use stock `interface/stlink.cfg` or OpenOCD `flash write_image` (NUC131 chip ID `0x11413102` requires `openocd_nuc131.cfg` + `tools/nuc131_flasher.py`, which automatically clears the boot token and runs `reset run`).
+* **One-Shot Build, Flash Application (`0x2000`) & Stop OpenOCD:**
+  ```bash
+  ~/.platformio/penv/bin/pio run -s -e raise_nuc131 && (pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 >/tmp/openocd.log 2>&1 & sleep 0.5)) && python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000 && pkill -x openocd
+  ```
+* **Flash Bootloader (`0x0000`, only if requested):**
+  ```bash
+  ~/.platformio/penv/bin/pio run -s -e nuc131_bootloader && (pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 >/tmp/openocd.log 2>&1 & sleep 0.5)) && python3 tools/nuc131_flasher.py .pio/build/nuc131_bootloader/program.bin 0x0000 && pkill -x openocd
+  ```
+
+### 5.2 HU APK Build, Sign & Deploy (`../QF_Canbus_system`)
 ```bash
-adb -s 192.168.1.33:9876 shell screencap -p /sdcard/_cap.png && \
-adb -s 192.168.1.33:9876 pull /sdcard/_cap.png /tmp/screen_verify.png
-```
-
-### 7.2 Inspect Top Resumed Activity
-```bash
-adb -s 192.168.1.33:9876 shell dumpsys activity top | grep -E "ACTIVITY|ResumedActivity"
-```
-
-### 7.3 Cache Invalidation for Settings UI
-`CentralSettingFragment` reads setting visibility from `/data/data/com.qf.vehicle/shared_prefs/centralstate_enable_db.xml`. If firmware changes or vehicle model profile changes are not reflected in the UI list:
-
-```bash
-adb -s 192.168.1.33:9876 shell "am force-stop com.qf.vehicle && rm -f /data/data/com.qf.vehicle/shared_prefs/centralstate_enable_db.xml"
+# Pre-verify Smali (<1s) + Build + Sign + ADB Install (restarts com.qf.vehicle):
+../QF_Canbus_system/tools/build_and_deploy.sh
 ```
 
 ---
 
-## 8. Complete End-to-End Troubleshooting Walkthrough
+## 6. Interactive Stimulation Recipes (When Approved)
 
-Use this standard checklist when investigating why a vehicle setting (e.g. Follow-Me-Home delay) is not applying:
+* **Inject Synthetic Hiworld Frame into HU (`CanbusAlertDebugReceiver`):**
+  ```bash
+  adb -s 192.168.1.33:9876 shell am broadcast -a com.canbus.action.INJECT_CAN_PACKET -p com.qf.vehicle --es data "5AA50276060280"
+  ```
+* **Open HU Fragments / Activities:**
+  - Settings: `adb -s 192.168.1.33:9876 shell am start -n com.qf.vehicle/.fragments.FragmentContainerActivity --es fragmentclass com.qf.vehicle.fragments.CentralSettingFragment`
+  - TPMS (index `2`): `adb -s 192.168.1.33:9876 shell am start -n com.qf.vehicle/.fragments.FragmentContainerActivity --ei fragment_index 2`
+  - Radio / CD: `adb -s 192.168.1.33:9876 shell am start -n com.qf.vehicle/com.qf.vehicle.activities.OriginalTuner` (or `OriginalCD`)
+  - Clear Settings Visibility Cache: `adb -s 192.168.1.33:9876 shell "am force-stop com.qf.vehicle && rm -f /data/data/com.qf.vehicle/shared_prefs/centralstate_enable_db.xml"`
 
-1. **Step 1: Verify CAN Bus Baseline**
-   ```bash
-   candump -tz can0,15B:7FF -n 3
-   ```
-2. **Step 2: Trigger UI Tap via ADB**
-   ```bash
-   adb -s 192.168.1.33:9876 shell input tap 1080 377
-   ```
-3. **Step 3: Check Downlink UART in Logcat**
-   Verify `[HU_UART_TX]` or `writeData` emitted `5A A5 02 7B 06 02 84`.
-   * *If missing:* Android model binding mismatch (check `PeugeotConstant.smali` / `PeugeotDataParser.smali`).
-4. **Step 4: Check CAN Box MCU Reaction**
-   Check if the flashed CAN box converts `0x7B 06 02` into a physical CAN message.
-5. **Step 5: Check BSI Feedback on CAN**
-   Monitor `candump -tz can0,15B:7FF` to observe if the physical BSI updates byte 1/2 of its status frame.
-6. **Step 6: Check Uplink UART to HU**
-   Verify `[CANBOX_UART_TX]` transmits `5A A5 02 76 06 02 80`.
-7. **Step 7: Capture Screenshot & Verify UI State**
-   ```bash
-   adb -s 192.168.1.33:9876 shell screencap -p /sdcard/_cap.png && adb pull /sdcard/_cap.png /tmp/result.png
-   ```
+---
 
+## 7. Hardware Troubleshooting Quick Table
+
+| Symptom | Cause | Fast Fix |
+| :--- | :--- | :--- |
+| `auto_probe failed` / `Device ID: 0x11413102` | Stock OpenOCD flash driver used | Always use `openocd -f openocd_nuc131.cfg` + `python3 tools/nuc131_flasher.py`. |
+| `libusb_open failed` / Target not halting | Hung OpenOCD or ST-Link USB state | `pkill -9 openocd`; if still failing, ask user to replug ST-Link USB. |
+| `can0: No such device` | SLCAN unplugged or `slcand` exited | Run `../simulator/slcan.sh` or ask user to reconnect CAN adapter. |
+| `RD4 resets on CD spinup (5E0#20 1E)` | Bench 12V transient current drop | Expected bench power behavior; `canbox-core` absorbs `00 00 00 00` reboot frames. |
+| Telemetry missing in Simulator mode | Module disabled in `config.yml` or gated in `signal-db` | Check `candump can0,<id>:7FF`; verify `config.yml` and `required_modules` in `signal-db/*.yaml`. |
