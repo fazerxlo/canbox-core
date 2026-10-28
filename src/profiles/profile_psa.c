@@ -283,23 +283,13 @@ static void psa_decode_mdf_presence_profile(const can_frame_t *frame, vehicle_st
 
 static void psa_decode_bsi_profiles_0x260_profile(const can_frame_t *frame, vehicle_state_t *state) {
     if (!frame || !state || frame->dlc < 8) return;
+    if (frame->data[0] != 0x01) return;
 
-    if (psa_car_config_is_mdf_present()) {
-        /* Physical MDF present on bus: MDF has authority, update cache from BSI */
-        psa_car_config_update_from_bsi(frame->data, frame->dlc);
-        psa_car_config_get_cached(&state->config);
+    psa_car_config_update_from_bsi(frame->data, frame->dlc);
+    vehicle_config_t prev_cfg = state->config;
+    psa_car_config_get_cached(&state->config);
+    if (memcmp(&prev_cfg, &state->config, sizeof(vehicle_config_t)) != 0) {
         state->dirty.config = true;
-    } else {
-        /* Standalone mode (No physical MDF):
-         * Android Head Unit is authoritative.
-         * Seed cache from BSI 0x260 once on initial boot.
-         * Afterwards, ignore static BSI 0x260 so user settings are never reverted.
-         */
-        if (!psa_car_config_is_cached_valid()) {
-            psa_car_config_update_from_bsi(frame->data, frame->dlc);
-            psa_car_config_get_cached(&state->config);
-            state->dirty.config = true;
-        }
     }
 }
 

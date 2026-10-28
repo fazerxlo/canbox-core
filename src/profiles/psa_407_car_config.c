@@ -7,9 +7,13 @@
 static uint8_t  s_cached_0x361_raw[6] = { 0x01, 0x01, 0x91, 0x40, 0x30, 0x10 };
 static bool     s_cached_0x361_valid  = false;
 
-/* Live cache of active Profile 1 status frame (0x260 / 0x15B) */
-static uint8_t  s_cached_profile1_raw[8] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
-static bool     s_cached_profile1_valid  = false;
+/* BSI actual confirmed Profile 1 status */
+static uint8_t  s_bsi_profile1_raw[8]    = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+static bool     s_bsi_profile1_valid     = false;
+
+/* Active 0x15B demand state (virtual MDF) */
+static uint8_t  s_desired_15b_raw[8]     = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+static uint8_t  s_downlink_pending_ticks = 0; /* 100ms ticks: 30 ticks = 3.0s (2x 1.5s Profile 1 cycle) */
 static uint32_t s_last_mdf_seen_ms       = 0;
 
 static uint8_t s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_IDLE; /* Default: Idle / Closed (0x08) */
@@ -51,15 +55,18 @@ void psa_car_config_init(void) {
     s_cached_0x361_raw[5] = 0x10;
     s_cached_0x361_valid  = false;
 
-    s_cached_profile1_raw[0] = 0x01;
-    s_cached_profile1_raw[1] = 0x03;
-    s_cached_profile1_raw[2] = 0xB1;
-    s_cached_profile1_raw[3] = 0x40;
-    s_cached_profile1_raw[4] = 0x00;
-    s_cached_profile1_raw[5] = 0xD0;
-    s_cached_profile1_raw[6] = 0x00;
-    s_cached_profile1_raw[7] = 0x10;
-    s_cached_profile1_valid  = false;
+    s_bsi_profile1_raw[0] = 0x01;
+    s_bsi_profile1_raw[1] = 0x03;
+    s_bsi_profile1_raw[2] = 0xB1;
+    s_bsi_profile1_raw[3] = 0x40;
+    s_bsi_profile1_raw[4] = 0x00;
+    s_bsi_profile1_raw[5] = 0xD0;
+    s_bsi_profile1_raw[6] = 0x00;
+    s_bsi_profile1_raw[7] = 0x10;
+    s_bsi_profile1_valid  = false;
+
+    memcpy(s_desired_15b_raw, s_bsi_profile1_raw, 8);
+    s_downlink_pending_ticks = 0;
 
     s_last_mdf_seen_ms = 0;
 
@@ -118,15 +125,29 @@ bool psa_car_config_is_mdf_present(void) {
 }
 
 bool psa_car_config_is_cached_valid(void) {
-    return s_cached_profile1_valid;
+    return s_bsi_profile1_valid || (s_downlink_pending_ticks > 0);
 }
 
 void psa_car_config_update_from_bsi(const uint8_t *data, uint8_t dlc) {
     if (!data || dlc < 8) return;
     if (data[0] != 0x01) return;
 
-    memcpy(s_cached_profile1_raw, data, 8);
-    s_cached_profile1_valid = true;
+    memcpy(s_bsi_profile1_raw, data, 8);
+    s_bsi_profile1_valid = true;
+
+    if (psa_car_config_is_mdf_present()) {
+        /* Physical MDF has authority; clear any pending virtual MDF downlink */
+        s_downlink_pending_ticks = 0;
+        memcpy(s_desired_15b_raw, data, 8);
+    } else if (s_downlink_pending_ticks > 0) {
+        /* Check if BSI has acknowledged and committed the requested setting */
+        if (memcmp(s_bsi_profile1_raw, s_desired_15b_raw, 8) == 0) {
+            s_downlink_pending_ticks = 0; /* Latch confirmed by BSI */
+        }
+    } else {
+        /* Idle tracking: keep desired 15B aligned with ground truth BSI */
+        memcpy(s_desired_15b_raw, data, 8);
+    }
 }
 
 void psa_decode_config_0x361(const uint8_t *data, uint8_t dlc) {
@@ -212,7 +233,7 @@ hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, u
     if (cmd_id == 0x7B) {
         frame.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B; /* 0x15B */
         frame.dlc = 8;
-        memcpy(frame.data, s_cached_profile1_raw, 8);
+        memcpy(frame.data, (s_downlink_pending_ticks > 0) ? s_desired_15b_raw : (s_bsi_profile1_valid ? s_bsi_profile1_raw : s_desired_15b_raw), 8);
         frame.data[0] = 0x01; /* Profile 1, Bit 2 cleared = pending configuration write request */
 
         switch (setting_id) {
@@ -259,32 +280,32 @@ hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, u
                 return HAL_STATUS_ERROR;
         }
 
-        /* Update local cache optimistically and inject to BSI */
-        memcpy(s_cached_profile1_raw, frame.data, 8);
-        s_cached_profile1_valid = true;
+        /* Update local demand buffer, start pending timeout, and inject to BSI */
+        memcpy(s_desired_15b_raw, frame.data, 8);
+        s_downlink_pending_ticks = 30; /* 3.0s (covers two 1.5s Profile 1 0x260 cycles) */
         return hal_can_send(&frame);
     }
     else if (cmd_id == 0x7D) {
         if (setting_id == 0x01) { /* Remote Boot Mode */
             frame.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B;
             frame.dlc = 8;
-            memcpy(frame.data, s_cached_profile1_raw, 8);
+            memcpy(frame.data, (s_downlink_pending_ticks > 0) ? s_desired_15b_raw : (s_bsi_profile1_valid ? s_bsi_profile1_raw : s_desired_15b_raw), 8);
             frame.data[0] = 0x01;
             if (val) frame.data[5] |= 0x80;
             else     frame.data[5] &= ~0x80;
-            memcpy(s_cached_profile1_raw, frame.data, 8);
-            s_cached_profile1_valid = true;
+            memcpy(s_desired_15b_raw, frame.data, 8);
+            s_downlink_pending_ticks = 30;
             return hal_can_send(&frame);
         }
         else if (setting_id == 0x02) { /* Directional Headlights */
             frame.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B;
             frame.dlc = 8;
-            memcpy(frame.data, s_cached_profile1_raw, 8);
+            memcpy(frame.data, (s_downlink_pending_ticks > 0) ? s_desired_15b_raw : (s_bsi_profile1_valid ? s_bsi_profile1_raw : s_desired_15b_raw), 8);
             frame.data[0] = 0x01;
             if (val) frame.data[2] |= 0x80;
             else     frame.data[2] &= ~0x80;
-            memcpy(s_cached_profile1_raw, frame.data, 8);
-            s_cached_profile1_valid = true;
+            memcpy(s_desired_15b_raw, frame.data, 8);
+            s_downlink_pending_ticks = 30;
             return hal_can_send(&frame);
         }
         else if (setting_id == 0x03) { /* TPMS Calibration Pulse */
@@ -296,10 +317,10 @@ hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, u
         else if (setting_id == 0x0B) { /* Driver Profile Select */
             frame.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B;
             frame.dlc = 8;
-            memcpy(frame.data, s_cached_profile1_raw, 8);
+            memcpy(frame.data, (s_downlink_pending_ticks > 0) ? s_desired_15b_raw : (s_bsi_profile1_valid ? s_bsi_profile1_raw : s_desired_15b_raw), 8);
             frame.data[0] = (uint8_t)((val & 0x03) + 1); /* Profile ID with bit 2 cleared */
-            memcpy(s_cached_profile1_raw, frame.data, 8);
-            s_cached_profile1_valid = true;
+            memcpy(s_desired_15b_raw, frame.data, 8);
+            s_downlink_pending_ticks = 30;
             return hal_can_send(&frame);
         }
         else if (setting_id == 0x24) { /* Zone Temp Sync (Mono/Dual) */
@@ -362,8 +383,13 @@ hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, u
 }
 
 void psa_car_config_get_cached(vehicle_config_t *cfg) {
-    if (cfg && s_cached_profile1_valid) {
-        psa_decode_config_0x260(cfg, s_cached_profile1_raw, 8);
+    if (!cfg) return;
+    if (s_downlink_pending_ticks > 0) {
+        psa_decode_config_0x260(cfg, s_desired_15b_raw, 8);
+    } else if (s_bsi_profile1_valid) {
+        psa_decode_config_0x260(cfg, s_bsi_profile1_raw, 8);
+    } else {
+        psa_decode_config_0x260(cfg, s_desired_15b_raw, 8);
     }
 }
 
@@ -436,18 +462,31 @@ void psa_car_config_periodic_100ms(void) {
         if (s_mdf_reset_ticks == 0) {
             s_mdf_trip_reset_mask = 0x00;
         }
-        psa_car_config_send_0x167();
+    }
+
+    if (s_downlink_pending_ticks > 0) {
+        s_downlink_pending_ticks--;
+        if (s_downlink_pending_ticks == 0) {
+            /* Timeout: BSI rejected requested setting or write failed.
+             * Revert desired 15B back to confirmed BSI state. */
+            memcpy(s_desired_15b_raw, s_bsi_profile1_raw, 8);
+
+            vehicle_state_t *st_rw = (vehicle_state_t *)can_router_get_state();
+            if (st_rw) {
+                psa_decode_config_0x260(&st_rw->config, s_bsi_profile1_raw, 8);
+                st_rw->dirty.config = true;
+            }
+        }
     }
 
     if (s_mdf_trip_inactivity_ticks > 0) {
         s_mdf_trip_inactivity_ticks--;
         if (s_mdf_trip_inactivity_ticks == 0) {
             s_mdf_trip_page_mask = PSA_MDF_TRIP_PAGE_IDLE; /* Revert to 0x08 (Zone 3 closed / Audio screen) */
-            psa_car_config_send_0x167();
         }
     }
 
-    /* 500 ms periodic cadence: 0x0DF (display heartbeat) and 0x1ED (climate demand) */
+    /* 500 ms periodic cadence: 0x0DF (display heartbeat), 0x1ED (climate demand), 0x15B (BSI config) */
     if (++s_periodic_500ms_ticks >= 5) {
         s_periodic_500ms_ticks = 0;
 
@@ -463,9 +502,17 @@ void psa_car_config_periodic_100ms(void) {
 
         /* 0x1ED (DLC 1): [s_mdf_1ed_state] */
         psa_clim_send_1ed();
+
+        /* 0x15B (DLC 8): Virtual MDF Profile 1 personalization demand / keep-alive */
+        can_frame_t frame_15b;
+        memset(&frame_15b, 0, sizeof(frame_15b));
+        frame_15b.id  = PSA_CAN_ID_BSI_PERSO_REQ_15B;
+        frame_15b.dlc = 8;
+        memcpy(frame_15b.data, s_desired_15b_raw, 8);
+        hal_can_send(&frame_15b);
     }
 
-    /* 1000 ms periodic cadence: 0x525 (diag), 0x3F6 (clock/trip), 0x167 (page state) */
+    /* 1000 ms periodic cadence: 0x525 (diag), 0x3F6 (clock/trip) */
     if (++s_periodic_1000ms_ticks >= 10) {
         s_periodic_1000ms_ticks = 0;
 
@@ -488,8 +535,10 @@ void psa_car_config_periodic_100ms(void) {
         frame_3f6.data[5] = 0xC0;
         frame_3f6.data[6] = 0x01;
         hal_can_send(&frame_3f6);
-
-        /* 0x167 (DLC 8): Virtual MDF trip page supervisory frame */
-        psa_car_config_send_0x167();
     }
+
+    /* 100 ms periodic cadence: 0x167 (DLC 8) Virtual MDF supervisory & trip page frame.
+     * Required by the BSI at 10 Hz (100 ms) to keep the MFD presence watchdog alive
+     * and accept 0x15B EEPROM personalization writes. */
+    psa_car_config_send_0x167();
 }

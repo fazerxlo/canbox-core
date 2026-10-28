@@ -581,8 +581,10 @@ void can_router_trigger_full_state_push(void) {
     s_current_state.dirty.config = false;
 
     if (s_current_state.audio.valid) {
-        hu_protocol_send_audio_settings(&s_current_state.audio);
-        s_last_sent_state.audio = s_current_state.audio;
+        vehicle_audio_settings_t sync_audio = s_current_state.audio;
+        sync_audio.active_mode = 0;
+        hu_protocol_send_audio_settings(&sync_audio);
+        s_last_sent_state.audio = sync_audio;
         s_current_state.dirty.audio = false;
     }
 
@@ -601,7 +603,9 @@ void can_router_push_climate_doors_dsp(void) {
     hu_protocol_send_climate(&s_current_state.climate);
     hu_protocol_send_doors(&s_current_state.doors);
     if (s_current_state.audio.valid) {
-        hu_protocol_send_audio_settings(&s_current_state.audio);
+        vehicle_audio_settings_t sync_audio = s_current_state.audio;
+        sync_audio.active_mode = 0;
+        hu_protocol_send_audio_settings(&sync_audio);
     }
 }
 

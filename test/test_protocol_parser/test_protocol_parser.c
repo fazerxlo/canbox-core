@@ -153,6 +153,7 @@ void test_peugeot_407_car_config_extended_settings_downlink(void);
 void test_peugeot_407_car_config_central_state2_builder(void);
 void test_peugeot_407_car_config_boundary_and_guards(void);
 void test_peugeot_407_car_config_disconnected_mdf_authority(void);
+void test_peugeot_407_car_config_bsi_rejection_timeout(void);
 void test_peugeot_407_virtual_mdf_periodic_broadcast(void);
 void test_peugeot_407_virtual_mdf_suppression_when_ign_off(void);
 void test_peugeot_407_mdf_coexistence_suppression(void);
@@ -340,6 +341,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_car_config_central_state2_builder);
     RUN_TEST(test_peugeot_407_car_config_boundary_and_guards);
     RUN_TEST(test_peugeot_407_car_config_disconnected_mdf_authority);
+    RUN_TEST(test_peugeot_407_car_config_bsi_rejection_timeout);
     RUN_TEST(test_peugeot_407_virtual_mdf_periodic_broadcast);
     RUN_TEST(test_peugeot_407_virtual_mdf_suppression_when_ign_off);
     RUN_TEST(test_peugeot_407_mdf_coexistence_suppression);

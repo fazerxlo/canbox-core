@@ -145,7 +145,7 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 - **Wire Frame:** `5A A5 0C 1A [12 Bytes] Checksum`
 
 ### 3.6 Virtual EMF & Instrument Cluster Matrix Emulation (`0x167` RT4 Alignment)
-In vehicles with the factory Multifunction Display removed, OpenCanbox emulates the OEM RT4 / EMF display master behavior on CAN ID **`0x167`** (DLC 8):
+In vehicles with the factory Multifunction Display removed, OpenCanbox emulates the OEM RT4 / EMF display master behavior on CAN ID **`0x167`** (DLC 8, broadcast every **100 ms / 10 Hz**, which also satisfies the BSI's ~500 ms MFD supervision watchdog required for `0x15B` personalization writes):
 - **Idle / Closed State (`0x08`):** `167#0806FFFF00000000` (Main / Audio / Navigation screen, trip overlay closed). This allows the instrument cluster central matrix LCD to close the trip banner.
 - **Carousel Sequence:** `Instant (0x09)` $\longrightarrow$ `Trip 1 (0x0A)` $\longrightarrow$ `Trip 2 (0x0C)` $\longrightarrow$ `Instant (0x09)`.
 - **First Press after Cold Boot:** Stalk button press opens Zone 3 and displays **Instantaneous (`0x09`)**.

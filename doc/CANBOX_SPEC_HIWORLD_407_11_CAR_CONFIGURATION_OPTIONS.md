@@ -123,20 +123,28 @@ v                                                     |
 
 ---
 
-### 1.3 BSI State Caching, Event-Driven `0x15B` & MDF Coexistence
+### 1.3 BSI State Caching, Periodic `0x15B` & Ground Truth Synchronization
 
-Hardware bench captures (`only_mdf_can_log_min2.csv`) prove a critical behavioral distinction between the factory PSA Multifunction Display (MDF / EMF-C) and aftermarket Chinese CAN boxes:
-- **OEM EMF-C MDF Behavior:** The physical MDF **does NOT broadcast `0x15B` periodically**. It remains completely silent on `0x15B` while idle or browsing menus, and transmits a **single event-driven `0x15B` frame** (~1.5 to 10 ms after the user presses `OK` on the RD4 fascia `0x3E5 = 00 00 40 00 00 00`). The BSI latches this single frame into EEPROM and echoes the new state on the very next `0x260` Profile 1 broadcast.
-- **OEM Hiworld PA12.20 (`H1H2PA123A-240717`) Quirk:** The commercial Hiworld PA12.20 box continuously broadcasts `0x15B` every ~520 ms (alongside `0x525`, `0x3F6`, and `0x0DF`). If a physical MDF is connected on the same CAN bus (e.g., on a test workbench), the PA12.20's periodic `0x15B` transmissions collide with and overwrite settings changed on the MDF. *(When using a PA12.20 on a workbench with an MDF for passive UART comparison, its CAN_TX line must be disconnected).*
-- **OpenCanbox Coexistence & Virtual MDF Architecture:**
-  - When no physical MDF is present on the bus (3000 ms timeout on `0x525`), OpenCanbox enters **Virtual MDF mode** and broadcasts the 4 required display supervision frames at 1000 ms intervals:
-    - `0x525` (`DLC 8`: `05 00 01 00 00 00 00 00` - presence / diagnostic heartbeat)
-    - `0x3F6` (`DLC 7`: `00 00 <cnt> 00 00 C0 01` - cluster trip supervision)
-    - `0x0DF` (`DLC 3`: `10 00 50` - display status)
-    - `0x167` (`DLC 8`: `(s_mdf_trip_page_mask | s_mdf_trip_reset_mask) 06 FF FF 00 00 00 00` - active trip page supervisory frame)
-  - When a physical MDF is connected and broadcasts `0x525`, OpenCanbox suppresses all Virtual MDF frames (`0x525`, `0x3F6`, `0x0DF`, `0x167`) and ISO-TP Flow Control (`0x11F` / `0x09F`) within 100 ms.
-  - `canbox-core` **never** transmits `0x15B` periodically. It passively updates `s_cached_profile1_raw[8]` from incoming `0x260` Profile 1 and **only** transmits `0x15B` as an event-driven write frame when `psa_car_config_apply_downlink()` is invoked by the Android Head Unit (`Cmd 0x7B` / `0x7D`).
-  - Consequently, `canbox-core` works identically in a target vehicle **without an MDF** and on a development workbench **with a physical MDF connected**, allowing settings to be modified and persisted from either the RD4/MDF or the Android Head Unit without bus conflicts.
+Hardware bench captures (`mdf_trace.log`, `dump_mdf_stalk_trip.log`) and live BSI ablation testing on `can0` prove the exact operational model between the factory PSA Multifunction Display (MDF / EMF-C), BSI, and aftermarket CAN box:
+- **OEM EMF-C MDF Behavior & `0x167` 10 Hz Presence Gate:**
+  - The physical EMF-C display broadcasts **`0x167` (`TRAME_GENERALE_EMF`, DLC 8, nominal `08 06 FF FF 00 00 00 00`) continuously at 100 ms (10 Hz)** and **`0x15B` (`MSG_BSI_PERSO_REQ`, DLC 8) continuously at 500 ms (2.0 Hz)**.
+  - **Critical BSI Gate:** The Peugeot 407 BSI monitors `0x167` with a ~500 ms supervision timeout. If `0x167` is absent or transmitted only at 1000 ms (1 Hz), the BSI marks the Multifunction Display as offline and **silently ignores all `0x15B` configuration write requests**. Streaming `0x167` at **100 ms (10 Hz)** alongside `0x15B` (`Byte 0 = 0x01`) at **500 ms (2 Hz)** is necessary and sufficient for the BSI to commit changes to EEPROM.
+  - **`0x15B` Byte 0 Bit 2 (`0x04` $\to$ `0x05`) is an Init/Invalidation Flag, NOT a Write Strobe:** At cold power-on before receiving `0x260`, EMF-C emits `0x15B#0500000000000000` (`Byte 0 = 0x05`) to tell the BSI not to overwrite EEPROM with uninitialized RAM. Once synchronized, valid personalization writes always use `Byte 0 = 0x01` (Profile 1, Bit 2 cleared); sending `Byte 0 = 0x05` is ignored by the BSI.
+  - **`0x260` 3-Profile Multiplexing (1.5 s Cycle):** The BSI broadcasts `0x260` every 500 ms, cycling round-robin through Profile 1 (`01 03 ...`), Profile 2 (`02 03 ...`), and Profile 3 (`03 03 ...`). Thus, Profile 1 (`data[0] == 0x01`) updates once every **1500 ms (1.5 s)**.
+- **OpenCanbox Virtual MDF & Coexistence Architecture:**
+  - When no physical MDF is present on the bus (3000 ms timeout on `0x525`), OpenCanbox enters **Virtual MDF mode** and broadcasts the required display supervision frames:
+    - `0x167` (`DLC 8`: `08 06 FF FF 00 00 00 00` at **100 ms / 10 Hz** - MFD presence watchdog & active trip page supervisory frame)
+    - `0x15B` (`DLC 8`: `01 03 ...` at 500 ms - Profile 1 personalization supervisory demand)
+    - `0x0DF` (`DLC 3`: `10 00 50` at 500 ms - display status)
+    - `0x1ED` (`DLC 1`: climate sync at 500 ms)
+    - `0x525` (`DLC 8`: `05 00 01 00 00 00 00 00` at 1000 ms - presence / diagnostic heartbeat)
+    - `0x3F6` (`DLC 7`: `00 00 <cnt> 00 00 C0 01` at 1000 ms - cluster trip supervision)
+  - When a physical MDF is connected and broadcasts `0x525`, OpenCanbox suppresses all Virtual MDF frames (`0x15B`, `0x0DF`, `0x1ED`, `0x525`, `0x3F6`, `0x167`) and ISO-TP Flow Control within 100 ms.
+- **Ground Truth & Rejection Handling:**
+  - BSI `0x260` Profile 1 is the vehicle ground truth.
+  - When Android HU sends a downlink (`Cmd 0x7B` / `0x7D`), OpenCanbox immediately transmits `0x15B` and sustains it every 500 ms (with `0x167` at 100 ms) for up to 3.0s (`s_downlink_pending_ticks = 30`, covering two full 1.5s Profile 1 `0x260` cycles).
+  - If BSI accepts: BSI updates `0x260` Profile 1 within the next 1.5s cycle (~500–1500 ms), latching is confirmed, and HU receives confirmed settings via `Cmd 0x76` & `0x79`.
+  - If BSI rejects: after 3.0s without BSI confirmation, the pending write times out. OpenCanbox reverts its desired state back to the confirmed BSI `0x260` state and pushes the real BSI state to Android HU via `Cmd 0x76` & `0x79`, guaranteeing that the HU UI never remains stuck showing invalid/uncommitted settings.
 
 ---
 

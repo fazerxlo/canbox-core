@@ -386,6 +386,41 @@ void test_peugeot_407_car_config_disconnected_mdf_authority(void) {
     TEST_ASSERT_EQUAL_UINT8(15, cfg.follow_me_home_sec);
 }
 
+void test_peugeot_407_car_config_bsi_rejection_timeout(void) {
+    setUp_peugeot_407_car_config();
+    can_router_init();
+
+    /* 1. Initial boot: receive 0x260 from BSI with Follow-Me-Home 15s (0xB1) */
+    can_frame_t frame_bsi = { .id = 0x260, .dlc = 8, .data = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 } };
+    can_router_process_can(&frame_bsi);
+
+    vehicle_config_t cfg;
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_EQUAL_UINT8(15, cfg.follow_me_home_sec);
+
+    /* 2. HU Downlink: User selects 60s (val 3) */
+    TEST_ASSERT_TRUE(can_router_set_car_config(0x7B, 0x06, 0x03));
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_EQUAL_UINT8(60, cfg.follow_me_home_sec);
+
+    /* Turn ignition ON so periodic timer runs */
+    can_frame_t f_ign = { .id = PSA_CAN_ID_REVERSE_IGNITION, .dlc = 8, .data = { 0, 0, 0, 0, 0x01 } };
+    can_router_process_can(&f_ign);
+
+    /* 3. Run periodic timer for 29 ticks (2.9s): still pending optimistic 60s */
+    for (int i = 0; i < 29; i++) {
+        psa_car_config_periodic_100ms();
+    }
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_EQUAL_UINT8(60, cfg.follow_me_home_sec);
+
+    /* 4. 30th tick (3.0s timeout reached): BSI never confirmed (still sending 15s).
+     * Firmware reverts back to real BSI state (15s). */
+    psa_car_config_periodic_100ms();
+    psa_car_config_get_cached(&cfg);
+    TEST_ASSERT_EQUAL_UINT8(15, cfg.follow_me_home_sec);
+}
+
 void test_peugeot_407_virtual_mdf_periodic_broadcast(void) {
     setUp_peugeot_407_car_config();
 
@@ -400,20 +435,24 @@ void test_peugeot_407_virtual_mdf_periodic_broadcast(void) {
     can_router_process_can(&f_ign);
     hal_can_native_clear_sent_frame();
 
-    /* Call periodic 100ms 4 times: no broadcast yet */
+    /* Call periodic 100ms 4 times: 0x167 is broadcast on every 100ms tick (10 Hz) */
     for (int i = 0; i < 4; i++) {
         psa_car_config_periodic_100ms();
     }
-    can_frame_t sent;
-    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
+    can_frame_t history[8];
+    size_t count = hal_can_native_get_sent_history(history, 8);
+    TEST_ASSERT_EQUAL_UINT32(4, count);
+    for (size_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0x167, history[i].id);
+        TEST_ASSERT_EQUAL_UINT8(8, history[i].dlc);
+    }
 
-    /* 5th tick (500 ms): 0x0DF and 0x1ED emitted */
+    /* 5th tick (500 ms): 0x0DF, 0x1ED, 0x15B, and 100ms 0x167 emitted */
     hal_can_native_clear_sent_frame();
     psa_car_config_periodic_100ms();
 
-    can_frame_t history[8];
-    size_t count = hal_can_native_get_sent_history(history, 8);
-    TEST_ASSERT_EQUAL_UINT32(2, count);
+    count = hal_can_native_get_sent_history(history, 8);
+    TEST_ASSERT_EQUAL_UINT32(4, count);
 
     /* Frame 1: 0x0DF (DLC 3): 10 00 50 */
     TEST_ASSERT_EQUAL_HEX32(0x0DF, history[0].id);
@@ -426,25 +465,40 @@ void test_peugeot_407_virtual_mdf_periodic_broadcast(void) {
     TEST_ASSERT_EQUAL_UINT8(1, history[1].dlc);
     TEST_ASSERT_EQUAL_HEX8(0x10, history[1].data[0]);
 
-    /* Call periodic ticks 6 to 9 (4 ticks): no broadcast */
+    /* Frame 3: 0x15B (DLC 8): Virtual MDF Profile 1 personalization */
+    TEST_ASSERT_EQUAL_HEX32(0x15B, history[2].id);
+    TEST_ASSERT_EQUAL_UINT8(8, history[2].dlc);
+    const uint8_t exp_15b[] = { 0x01, 0x03, 0xB1, 0x40, 0x00, 0xD0, 0x00, 0x10 };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_15b, history[2].data, 8);
+
+    /* Frame 4: 0x167 (DLC 8): Virtual MDF 100ms supervisory frame */
+    TEST_ASSERT_EQUAL_HEX32(0x167, history[3].id);
+    TEST_ASSERT_EQUAL_UINT8(8, history[3].dlc);
+
+    /* Call periodic ticks 6 to 9 (4 ticks): 0x167 emitted on each 100ms tick */
     hal_can_native_clear_sent_frame();
     for (int i = 0; i < 4; i++) {
         psa_car_config_periodic_100ms();
     }
-    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
+    count = hal_can_native_get_sent_history(history, 8);
+    TEST_ASSERT_EQUAL_UINT32(4, count);
+    for (size_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0x167, history[i].id);
+    }
 
-    /* 10th tick (1000 ms): 500ms cadence (0x0DF, 0x1ED) + 1000ms cadence (0x525, 0x3F6, 0x167) */
+    /* 10th tick (1000 ms): 500ms cadence (0x0DF, 0x1ED, 0x15B) + 1000ms cadence (0x525, 0x3F6) + 100ms (0x167) */
     hal_can_native_clear_sent_frame();
     psa_car_config_periodic_100ms();
 
     count = hal_can_native_get_sent_history(history, 8);
-    TEST_ASSERT_EQUAL_UINT32(5, count);
+    TEST_ASSERT_EQUAL_UINT32(6, count);
 
     TEST_ASSERT_EQUAL_HEX32(0x0DF, history[0].id);
     TEST_ASSERT_EQUAL_HEX32(0x1ED, history[1].id);
-    TEST_ASSERT_EQUAL_HEX32(0x525, history[2].id);
-    TEST_ASSERT_EQUAL_HEX32(0x3F6, history[3].id);
-    TEST_ASSERT_EQUAL_HEX32(0x167, history[4].id);
+    TEST_ASSERT_EQUAL_HEX32(0x15B, history[2].id);
+    TEST_ASSERT_EQUAL_HEX32(0x525, history[3].id);
+    TEST_ASSERT_EQUAL_HEX32(0x3F6, history[4].id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, history[5].id);
 }
 
 void test_peugeot_407_virtual_mdf_suppression_when_ign_off(void) {
@@ -577,18 +631,18 @@ void test_peugeot_407_matrix_cluster_inactivity_timeout(void) {
     psa_car_config_periodic_100ms();
     TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_IDLE, psa_car_config_get_trip_page_mask());
 
-    can_frame_t history[4];
-    size_t count = hal_can_native_get_sent_history(history, 4);
-    TEST_ASSERT_TRUE(count >= 1);
-    TEST_ASSERT_EQUAL_HEX32(0x167, history[0].id);
+    can_frame_t sent_idle;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_idle));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_idle.id);
     const uint8_t exp_idle[] = { 0x08, 0x06, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_idle, history[0].data, 8);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(exp_idle, sent_idle.data, 8);
 
     /* Press again after timeout: remembers last viewed (Trip 1) and advances to Trip 2 (0x0C) */
     hal_can_native_clear_sent_frame();
     psa_car_config_cycle_trip_page();
     TEST_ASSERT_EQUAL_UINT8(PSA_MDF_TRIP_PAGE_TRIP2, psa_car_config_get_trip_page_mask());
-    count = hal_can_native_get_sent_history(history, 4);
+    can_frame_t history[4];
+    size_t count = hal_can_native_get_sent_history(history, 4);
     TEST_ASSERT_TRUE(count >= 1);
     TEST_ASSERT_EQUAL_HEX32(0x167, history[0].id);
     const uint8_t exp_p2[] = { 0x0C, 0x06, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
@@ -685,15 +739,20 @@ void test_peugeot_407_clim_1ed_ac_on_to_off(void) {
     can_router_process_can(&f_ign);
     hal_can_native_clear_sent_frame();
 
-    /* 5 ticks (500 ms) */
-    for (int i = 0; i < 5; i++) {
+    /* 5 ticks (500 ms): ticks 1..4 send 0x167; tick 5 sends 0x0DF, 0x1ED, 0x15B, 0x167 */
+    for (int i = 0; i < 4; i++) {
         psa_car_config_periodic_100ms();
     }
+    hal_can_native_clear_sent_frame();
+    psa_car_config_periodic_100ms();
+
     can_frame_t history[4];
     size_t count = hal_can_native_get_sent_history(history, 4);
-    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_UINT32(4, count);
     TEST_ASSERT_EQUAL_HEX32(0x0DF, history[0].id);
     TEST_ASSERT_EQUAL_HEX32(0x1ED, history[1].id);
+    TEST_ASSERT_EQUAL_HEX32(0x15B, history[2].id);
+    TEST_ASSERT_EQUAL_HEX32(0x167, history[3].id);
     TEST_ASSERT_EQUAL_HEX8(0x08, history[1].data[0]); /* Maintained in periodic loop */
 }
 
