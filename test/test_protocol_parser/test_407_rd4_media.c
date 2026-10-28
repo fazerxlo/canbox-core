@@ -942,6 +942,44 @@ void test_peugeot_407_rd4_source_transition_mute(void) {
     psa_rd4_process_can_0x165(&media.radio, can_tuner_active, sizeof(can_tuner_active));
     TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status);
     TEST_ASSERT_EQUAL_HEX8(media.radio.band, media.radio.source_mode);
+
+    /* 9. Cold wake with radio OFF (48 C0 00 00):
+     * When ignition is turned ON and RD4 is powered OFF, 0x165 sends 48 C0 00 00.
+     * Because radio was not previously active, this must decode as power_status = 0 and source_mode = 0xFF. */
+    psa_rd4_media_init(&media, &isotp);
+    const uint8_t can_cold_off[] = { 0x48, 0xC0, 0x00, 0x00 };
+    psa_rd4_process_can_0x165(&media.radio, can_cold_off, sizeof(can_cold_off));
+    TEST_ASSERT_TRUE(media.radio.present);
+    TEST_ASSERT_EQUAL_UINT8(0, media.radio.power_status);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, media.radio.source_mode);
+    TEST_ASSERT_FALSE(psa_rd4_is_powered(&media.radio));
+
+    /* 10. Followed by CAN 0x1A5 with volume 0 (1A5 [1] 00) when radio is OFF:
+     * Must be ignored by decoder, dirty.audio must be false, active_mode must remain 0. */
+    vehicle_state_t state;
+    memset(&state, 0, sizeof(state));
+    state.media.radio = media.radio;
+    can_frame_t frame_vol0;
+    frame_vol0.id = 0x1A5;
+    frame_vol0.dlc = 1;
+    frame_vol0.data[0] = 0x00;
+    psa_rd4_decode_frame(&frame_vol0, &state);
+    TEST_ASSERT_FALSE(state.dirty.audio);
+    TEST_ASSERT_EQUAL_UINT8(0, state.audio.active_mode);
+
+    /* 11. Source transition timeout:
+     * When switching sources, 48 C0 00 00 is absorbed for up to 9 frames (power_status = 3).
+     * On frame 10 (1000ms elapsed without new source), it times out to radio OFF (power_status = 0, source_mode = 0xFF). */
+    psa_rd4_process_can_0x165(&media.radio, can_cd_active, sizeof(can_cd_active));
+    TEST_ASSERT_EQUAL_UINT8(1, media.radio.power_status);
+    for (int i = 0; i < 9; i++) {
+        psa_rd4_process_can_0x165(&media.radio, can_cold_off, sizeof(can_cold_off));
+        TEST_ASSERT_EQUAL_UINT8(3, media.radio.power_status);
+        TEST_ASSERT_EQUAL_HEX8(0x20, media.radio.source_mode);
+    }
+    psa_rd4_process_can_0x165(&media.radio, can_cold_off, sizeof(can_cold_off));
+    TEST_ASSERT_EQUAL_UINT8(0, media.radio.power_status);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, media.radio.source_mode);
 }
 
 

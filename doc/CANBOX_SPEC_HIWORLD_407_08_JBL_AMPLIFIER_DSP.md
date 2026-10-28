@@ -31,7 +31,19 @@ High-trim Peugeot 407 vehicles feature a digital JBL 10-speaker sound system pow
 - **Length ($L$):** `0x08` (8 payload bytes)
 - **Command ID:** `0x56`
 - **Payload Layout (8 Bytes):**
-  - `Byte 0`: `0x00` (Status)
+  - `Byte 0`: Status bitfield:
+    - **Bit 7 (`0x80`):** Mute active (`1` = Muted, `0` = Unmuted)
+    - **Bits 3:0 (`0x0F`):** Active adjustment mode / OSD popup trigger:
+      - `0x00`: Idle / Dismiss OSD / Background telemetry sync (never triggers popup)
+      - `0x01`: Master Volume HUD popup
+      - `0x02`: Bass OSD popup
+      - `0x03`: Treble OSD popup
+      - `0x04`: Balance OSD popup
+      - `0x05`: Fader OSD popup
+      - `0x06`: Loudness OSD popup
+      - `0x07`: Speed-dependent volume OSD popup
+      - `0x08`: Equalizer preset OSD popup
+    *(Note: During periodic background resync and `Cmd 0x24` step 2 ping responses, Bits 3:0 must strictly be set to `0x00` to prevent triggering unsolicited Volume HUD popups on the Android Head Unit).*
   - `Byte 1`: Bass ($0 \dots 14$, $7 = \text{Center}$)
   - `Byte 2`: Treble ($0 \dots 14$)
   - `Byte 3`: Balance ($0 \dots 14$)

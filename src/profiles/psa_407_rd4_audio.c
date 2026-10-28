@@ -71,6 +71,11 @@ bool psa_decode_rd4_volume_0x1a5(const uint8_t *data, uint8_t dlc, vehicle_audio
     bool is_turning = (status_flags == 0x00);
     bool is_muted   = (status_flags == 0x80);
 
+    /* data[0] == 0x00 is stationary/idle when volume is already 0 or at cold boot */
+    if (data[0] == 0x00 && (!audio->valid || audio->master_volume == 0)) {
+        is_turning = false;
+    }
+
     uint8_t prev_mode = audio->active_mode;
     uint8_t new_mode;
     if (is_turning || is_muted) {
@@ -186,10 +191,12 @@ static psa_isotp_rx_ctx_t s_rd4_isotp_ctx;
 static psa_isotp_rx_ctx_t s_rd4_list_isotp_ctx;
 static bool s_have_0x265 = false;
 static bool s_cd_disc_present = true;
+static uint8_t s_transition_mute_counter = 0;
 
 void psa_rd4_media_init(vehicle_media_t *media, psa_isotp_rx_ctx_t *isotp) {
     s_have_0x265 = false;
     s_cd_disc_present = true;
+    s_transition_mute_counter = 0;
     if (media) {
         memset(media, 0, sizeof(*media));
         media->radio.source_mode = 0xFF; /* Standby / Off */
@@ -219,8 +226,11 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
     /* Check for source transition mute:
      * When RD4 is switching sources (e.g. Tuner -> CD -> AUX), it temporarily mutes audio
      * by clearing bit 7 (data[0] == 0x48) while byte 1 indicates transition status (0xC0 or 0xD0).
-     * During this transient mute, RD4 is NOT turned off. */
-    bool is_source_transition_mute = ((data[0] & 0xC0) == 0x40) && (dlc >= 2) &&
+     * During this transient mute, RD4 is NOT turned off.
+     * Note: A source transition can only occur if the radio was already powered and active.
+     * If the radio is off (power_status == 0 or source_mode == 0xFF), 0x48 indicates radio is off/standby. */
+    bool is_source_transition_mute = (radio->power_status != 0 && radio->source_mode < 0xFF) &&
+                                     ((data[0] & 0xC0) == 0x40) && (dlc >= 2) &&
                                      (data[1] == 0xC0 || data[1] == 0xD0);
 
     /* Bit 7 of byte 0: radio audio power on/off (or source transition mute) */
@@ -228,6 +238,7 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
     if (!radio_powered) {
         radio->source_mode = 0xFF;
         radio->power_status = 0x00;
+        s_transition_mute_counter = 0;
         psa_source_arbiter_process_can_0x165(radio->source_mode, radio->power_status);
         return;
     }
@@ -243,6 +254,7 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
     uint8_t rd4_src_nibble = (data[2] >> 4) & 0x0F;
     switch (rd4_src_nibble) {
         case 0x1: /* Tuner */
+            s_transition_mute_counter = 0;
             radio->source_mode = radio->band;
             if (power != 3 && radio->power_status == 0x02) {
                 /* Preserve seeking status */
@@ -251,33 +263,46 @@ void psa_rd4_process_can_0x165(vehicle_radio_t *radio, const uint8_t *data, uint
             }
             break;
         case 0x2: /* Internal CD */
+            s_transition_mute_counter = 0;
             radio->source_mode = 0x20;
             radio->power_status = power;
             break;
         case 0x3: /* CDC */
+            s_transition_mute_counter = 0;
             radio->source_mode = 0x31;
             radio->power_status = power;
             break;
         case 0x4: /* AUX 1 (Input 1) */
+            s_transition_mute_counter = 0;
             radio->source_mode = 0x40;
             radio->power_status = power;
             break;
         case 0x5: /* AUX 2 (Input 2) */
+            s_transition_mute_counter = 0;
             radio->source_mode = 0x41;
             radio->power_status = power;
             break;
         case 0x0: /* Transitioning / Unassigned */
             if (is_source_transition_mute) {
-                /* Retain current source_mode during source transition mute */
-                radio->power_status = 3;
+                if (++s_transition_mute_counter >= 10) {
+                    /* Source transition timed out (>1000ms): radio was turned off */
+                    radio->source_mode = 0xFF;
+                    radio->power_status = 0x00;
+                    s_transition_mute_counter = 0;
+                } else {
+                    /* Retain current source_mode during source transition mute */
+                    radio->power_status = 3;
+                }
             } else {
                 if (radio->source_mode < 0x20) {
                     radio->source_mode = 0xFF;
                 }
                 radio->power_status = power;
+                s_transition_mute_counter = 0;
             }
             break;
         default:
+            s_transition_mute_counter = 0;
             radio->source_mode = 0xFF;
             radio->power_status = power;
             break;
@@ -745,7 +770,7 @@ void psa_rd4_decode_frame(const can_frame_t *frame, vehicle_state_t *state) {
             /* Ignore uninitialized 1A5#00 reset frame broadcast while RD4 is powered off/rebooting */
             if (state->media.radio.present &&
                 (state->media.radio.power_status == 0 || state->media.radio.sleep) &&
-                frame->dlc >= 1 && (frame->data[0] & 0xE0) == 0x00) {
+                frame->dlc >= 1 && frame->data[0] == 0x00) {
                 break;
             }
             if (psa_decode_rd4_volume_0x1a5(frame->data, frame->dlc, &state->audio)) {
