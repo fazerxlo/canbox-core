@@ -40,6 +40,12 @@ Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools re
    - **Fascia Panel Button Request (`0x1D0`):** **Byte 0 Bit 6** (`0x40`): `0x29` (OFF) $\longleftrightarrow$ `0x69` (ON).
    - **Climate ECU Status Indicator (`0x1E3`):** **Byte 1 Bit 3** (`0x08`): `0x00` (OFF) $\longleftrightarrow$ `0x08` (ON).
    - Serialized in Hiworld `0x31` `payload[2]` bit 5 (`0x20`) and Raise `0x21` `payload[0]` bit 0 (`0x01`).
+5. **BSI Personalization EEPROM Write Gate (`0x167` @ 100 ms + `0x15B` @ 500 ms):**
+   - When the physical EMF-C Multifunction Display is disconnected, the BSI monitors `0x167` (`TRAME_GENERALE_EMF`, `08 06 FF FF 00 00 00 00`) with a ~500 ms supervision timeout.
+   - If `0x167` is absent or sent at 1000 ms (1 Hz), the BSI marks the MFD offline and **ignores all `0x15B` writes**.
+   - **Mandatory sequence:** Stream `0x167` at **100 ms (10 Hz)** + `0x15B` (`Byte 0 = 0x01`, Bit 2 cleared; `Byte 0 = 0x05` is cold-boot invalidation and is ignored) at **500 ms (2 Hz)**. The BSI cycles `0x260` through Profiles 1..3 every 500 ms (1.5 s per profile) and commits on the next Profile 1 slot.
+6. **Single-Invocation Hardware Ablation Rule (Zero Interactive Trial-and-Error):**
+   - Never run sequential one-off `python3 -c` CAN injection tests across 10–20 turns. Extract all candidate CAN IDs/periods from the reference trace in Turn 1, then run a single automated Python ablation script (with `can_filters=[...]`) in Turn 2 that tests all combinations in one process.
 
 ---
 
@@ -49,6 +55,7 @@ Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools re
 | :--- | :--- | :--- |
 | **`tools/probe_canbox_uart.py`** | Instant baud rate & protocol detection without port conflicts | `python3 tools/probe_canbox_uart.py --port /dev/ttyUSB0` |
 | **`tools/workbench_live_sniffer.py`** | Real-time dual CAN delta + UART stream sniffer with delta-filtering | `python3 tools/workbench_live_sniffer.py` |
+| **`tools/test_bsi_settings.py`** | BSI `0x260` / `0x15B` + `0x167` (100 ms) EEPROM personalization verifier | `python3 tools/test_bsi_settings.py --test E --verify` |
 | **`tools/test_clima_canbox.py`** | Validates climate telemetry reporting across temperature sweeps | `python3 tools/test_clima_canbox.py` |
 | **`tools/workbench_defrost_live_test.py`** | Live test with 900 RPM engine simulation for high-power button presses | `python3 tools/workbench_defrost_live_test.py` |
 | **`tools/workbench_defrost_verifier.py`** | Automated 3-cycle state toggle auto-verifier & fuzzer | `python3 tools/workbench_defrost_verifier.py --port /dev/ttyUSB0 -v` |
