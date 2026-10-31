@@ -140,20 +140,12 @@ This directory contains standalone CLI scripts, diagnostic tools, automated test
 
 ---
 
-### `workbench_defrost_verifier.py`
-**Peugeot 407 Rear Defrost CAN Discovery & Verification Harness**
-- **Purpose:** Discovers and validates which PSA CAN2004 frames control rear defrost on OEM Raise and Hiworld canboxes connected alongside an RD4 radio. Emulates background ignition/wake-up frames, sweeps candidate CAN IDs/bits, and performs a 3-cycle auto-verification upon detecting state change.
-- **Safety:** Hardcoded whitelist of broadcast comfort IDs. Strictly blocks diagnostic ranges (`0x5E0..0x5EF`, `0x600..0x7FF`) and RD4 write frames to completely protect attached RD4 hardware.
+### `workbench_defrost_live_test.py`
+**Peugeot 407 Rear Defrost Live Workbench Confirmation Tool**
+- **Purpose:** Broadcasts only the running-engine interlock frames (`0x0B6` 900 RPM + `0x12D` Compressor/Alternator OK) on `can0` without colliding with physical BSI frames (`0x036`, `0x0F6`, `0x128`), and confirms exact CAN ID, DLC, Byte index, Bit position, and hex mask when pressing the physical Rear Defrost button.
 - **Usage:**
   ```bash
-  # Run auto-detect discovery across high-probability candidates:
-  ./tools/workbench_defrost_verifier.py --can can0 --port /dev/ttyUSB1
-
-  # Force Raise protocol on custom port:
-  ./tools/workbench_defrost_verifier.py --proto raise --port /dev/ttyUSB0
-
-  # Target a specific CAN ID directly:
-  ./tools/workbench_defrost_verifier.py --custom-id 0x1D0
+  ./tools/workbench_defrost_live_test.py
   ```
 
 ---

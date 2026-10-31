@@ -278,8 +278,8 @@ def main():
         print(f"  • Port:     {best_match['port']}")
         print(f"  • Baudrate: {best_match['baud']} bps")
         print(f"  • Protocol: {best_match['proto'].upper()}")
-        print(f"\nTo run the defrost verifier with these verified settings:")
-        print(f"  ./tools/workbench_defrost_verifier.py --port {best_match['port']} --baud {best_match['baud']} --proto {best_match['proto']}")
+        print(f"\nTo run the live defrost test with these verified settings:")
+        print(f"  ./tools/workbench_defrost_live_test.py --port {best_match['port']}")
     else:
         print("[FAIL] No valid Hiworld or Raise frames could be decoded.")
         print("Suggestions:")

@@ -14,7 +14,7 @@
 
 The Peugeot 407 automatic climate control system drives three CAN frames on the PSA Comfort CAN bus:
 - **`0x1E3` (Climate EMF / Display Status, 100 ms):** Broadcast by the Climate ECU (`MSG_ETAT_CLIMAV_EMF`). In accordance with the RT4 Demand-vs-Status rule (`Fp_Network_CAN.out` / `mmi_airc.out`), **`0x1E3` is the sole authoritative source** for all HVAC UI presentation (power, A/C compressor state, dual/mono mode, blower fan speed bars, zone temperature setpoints, airflow distribution, recirculation/AQS intake, and front max defrost).
-- **`0x1D0` (Climate Panel Demand, 100 ms):** Sent by the physical fascia panel (`MSG_CDE_CLIMAV`) when a user adjusts controls, or injected by the CAN adapter on downlink (`Cmd 0x3B` / `0x7D`). Because panel demands can be refused or clamped by the Climate ECU (e.g. in Battery Economy mode or when refrigerant pressure is missing on a bench), `0x1D0` is **never** used to overwrite HVAC display state; only **Rear Window Defrost** (Byte 4 Bit 6, `0x40`) is extracted from `0x1D0` as it is not carried in `0x1E3`.
+- **`0x1D0` (Climate Panel Demand, 100 ms):** Sent by the physical fascia panel (`MSG_CDE_CLIMAV`, DLC 7) when a user adjusts controls, or injected by the CAN adapter on downlink (`Cmd 0x3B` / `0x7D`). Because panel demands can be refused or clamped by the Climate ECU (e.g. in Battery Economy mode or when refrigerant pressure is missing on a bench), `0x1D0` is **never** used to overwrite HVAC display state; only **Rear Window Defrost** (Byte 0 Bit 6, `0x40`) is extracted from `0x1D0`.
 - **`0x12D` (Climate Compressor State, 100 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
 
 The CAN adapter decodes `0x1E3` (plus `rear_defrost` from `0x1D0` and `outdoor_temp_raw` from `0x0F6`) into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x7D`) to inject corresponding `0x1D0` demand frames back to the vehicle.
@@ -275,9 +275,11 @@ static inline void psa_hvac_send_hiworld(psa_hvac_ctx_t *ctx) {
 
 ## Rear Defrost Detection (`vehicle_climate_t.rear_defrost`)
 
-Rear defrost is decoded only from `0x1D0`: Byte 4 Bit 6 (`(data[4] >> 6) & 1`), dlc >= 5. `0x128` and `0x0F6` are intentionally not used.
+Rear defrost is decoded from bench-verified PSA Comfort CAN signals:
+1. **Fascia Panel Button Request (`0x1D0`, DLC 7):** Byte 0 Bit 6 (`(data[0] & 0x40) != 0`), `dlc >= 1`. Active state `0x69` vs idle `0x29` (Byte 4 carries air distribution vent mode `0x20` and is unaffected by rear defrost).
+2. **Climate ECU Status Indicator (`0x1E3`, DLC 7):** Byte 1 Bit 3 (`(data[1] & 0x08) != 0`), `dlc >= 2`.
 
-A cleared bit clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`). Implemented in `psa_hvac_process_can_0x1d0()`; test `test_peugeot_407_rear_defrost_detection`.
+A cleared bit in `0x1D0` and `0x1E3` clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`) and Raise `0x21` payload[0] bit 0 (`0x01`). Implemented in `psa_hvac_process_can_0x1d0()` and `psa_hvac_process_can_0x1e3()`; test `test_peugeot_407_rear_defrost_detection`.
 
 ## Downlink Climate Commands (`0x1ED` / `0x0DF`)
 

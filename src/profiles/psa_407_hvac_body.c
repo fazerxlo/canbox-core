@@ -262,7 +262,7 @@ void psa_decode_console_0x3e5(const uint8_t *data, uint8_t dlc, psa_panel_key_ca
  * for legacy test harnesses. In PSA CAN2004 (RT4 ground truth), 0x1E3
  * (MSG_ETAT_CLIMAV_EMF) is the sole authoritative status frame for HVAC UI
  * presentation, while 0x1D0 (MSG_CDE_CLIMAV) is the fascia demand frame and is
- * only used by psa_hvac_process_can_0x1d0() to extract rear_defrost (Byte 4 Bit 6).
+ * only used by psa_hvac_process_can_0x1d0() to extract rear_defrost (Byte 0 Bit 6).
  * -------------------------------------------------------------------------- */
 void psa_decode_hvac_0x1d0(const uint8_t *data, uint8_t dlc, hvac_state_t *st) {
     if (!data || !st || dlc < 4) {
@@ -316,19 +316,17 @@ static const uint8_t psa_wind_to_hiworld[16] = {
 };
 
 void psa_hvac_process_can_0x1d0(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
-    if (!climate || !data) return;
+    if (!climate || !data || dlc < 1) return;
 
     /* RT4 Demand vs. Status Rule:
-     * 0x1D0 (MSG_CDE_CLIMAV) is the physical fascia panel demand frame.
+     * 0x1D0 (MSG_CDE_CLIMAV, DLC 7) is the physical fascia panel demand frame.
      * All HVAC operational states (fan speed, setpoints, A/C compressor, dual/mono,
      * airflow distribution, recirculation/AQS, front defrost, power) are driven
      * exclusively by the Climate ECU status frame 0x1E3 (MSG_ETAT_CLIMAV_EMF) so
      * refused or clamped demands never cause display oscillation.
-     * Only rear window defrost (Byte 4 Bit 6, 0x40) is extracted here as it is not
-     * carried in 0x1E3. */
-    if (dlc >= 5) {
-        climate->rear_defrost = ((data[4] >> 6) & 0x01) != 0;
-    }
+     * Rear window defrost demand is extracted from Byte 0 Bit 6 (0x40), verified on
+     * physical Peugeot 407 OEM panel (0x29 idle -> 0x69 active). */
+    climate->rear_defrost = (data[0] & 0x40) != 0;
 }
 
 void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data, uint8_t dlc) {
@@ -346,6 +344,7 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
      * Byte 1:
      *   Bit 7: Front max defrost / demist (0x80)
      *   Bits 6:4: Temperature calibration offset (factory default 0x3 = +3.0 C)
+     *   Bit 3: Rear window defrost indicator (0x08)
      * Byte 2: Left display setpoint temperature (raw code: 0..22)
      * Byte 3: Right display setpoint temperature (raw code: 0..22)
      * Byte 4: Airflow distribution pattern left (bits 7:4)
@@ -358,6 +357,9 @@ void psa_hvac_process_can_0x1e3(vehicle_climate_t *climate, const uint8_t *data,
     climate->auto_mode = ((data[0] & 0x0C) == 0x0C);
     climate->dual_mode = (data[0] & 0x01) != 0;
     climate->front_max_defrost = (data[1] & 0x80) != 0;
+    if ((data[1] & 0x08) != 0) {
+        climate->rear_defrost = true;
+    }
 
     if (climate->front_max_defrost) {
         climate->recirculate = false;

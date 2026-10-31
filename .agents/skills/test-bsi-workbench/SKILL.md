@@ -37,8 +37,8 @@ Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools re
    - The BSI **completely blocks** Rear Defrost and Heated Mirrors if engine is stopped (`0x0B6` = `FF FF FF FF`).
    - **Must inject running engine:** `0x0B6#1C200000000000D0` (900 RPM) and `0x12D#8032320064000080` (Compressor authorized) for BSI to accept Rear Defrost button presses.
 4. **Verified Rear Defrost CAN Ground Truth:**
-   - **Fascia Panel Button Request (`0x1D0`):** **Byte 0 Bit 6** (`0x40`): `0x29` (OFF) $\longleftrightarrow$ `0x69` (ON).
-   - **Climate ECU Status Indicator (`0x1E3`):** **Byte 1 Bit 3** (`0x08`): `0x00` (OFF) $\longleftrightarrow$ `0x08` (ON).
+   - **Climate Panel Demand (`0x1D0`, DLC 7):** **Byte 0 Bit 6** (`0x40`): `0x29` (OFF) $\longleftrightarrow$ `0x69` (ON). `0x1E3` is the sole authority for all other HVAC fields; `0x1D0` only supplies rear defrost (Byte 4 carries vent distribution mode `0x20`, not rear defrost).
+   - **Climate ECU Status Indicator (`0x1E3`, DLC 7):** **Byte 1 Bit 3** (`0x08`): `0x00` (OFF) $\longleftrightarrow$ `0x08` (ON).
    - Serialized in Hiworld `0x31` `payload[2]` bit 5 (`0x20`) and Raise `0x21` `payload[0]` bit 0 (`0x01`).
 5. **BSI Personalization EEPROM Write Gate (`0x167` @ 100 ms + `0x15B` @ 500 ms):**
    - When the physical EMF-C Multifunction Display is disconnected, the BSI monitors `0x167` (`TRAME_GENERALE_EMF`, `08 06 FF FF 00 00 00 00`) with a ~500 ms supervision timeout.
@@ -58,7 +58,6 @@ Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools re
 | **`tools/test_bsi_settings.py`** | BSI `0x260` / `0x15B` + `0x167` (100 ms) EEPROM personalization verifier | `python3 tools/test_bsi_settings.py --test E --verify` |
 | **`tools/test_clima_canbox.py`** | Validates climate telemetry reporting across temperature sweeps | `python3 tools/test_clima_canbox.py` |
 | **`tools/workbench_defrost_live_test.py`** | Live test with 900 RPM engine simulation for high-power button presses | `python3 tools/workbench_defrost_live_test.py` |
-| **`tools/workbench_defrost_verifier.py`** | Automated 3-cycle state toggle auto-verifier & fuzzer | `python3 tools/workbench_defrost_verifier.py --port /dev/ttyUSB0 -v` |
 | **`tools/update_canbox_usb.py`** | Flashes `can_app.iap` to connected USB drive with auto-sync and unmount | `python3 tools/update_canbox_usb.py` |
 
 ---
@@ -78,7 +77,7 @@ Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools re
 |       | SocketCAN (can0)                                                |
 |       +--------------------------------+                                |
 |                                        |                                |
-|                                   [slcand -s6]                          |
+|                                   [slcand -s4]                          |
 |                                        |                                |
 |                                   /dev/ttyUSB4                          |
 |                                (CH340 USB-Serial)                       |
@@ -97,7 +96,7 @@ Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools re
 
 ## 2. Prerequisite: SLCAN (`can0`) Bringup & Recovery
 
-PSA CAN2004 Comfort bus operates at **125 kbps** (SLCAN speed `-s6` in standard LAWICEL adapters with 16 MHz clock, or `-s4` on standard SLCAN).
+PSA CAN2004 Comfort bus operates at **125 kbps** (ALWAYS SLCAN speed `-s4` = 125 kbps, NEVER `-s6` 500 kbps).
 
 ### Step 1: Clean Stale Daemons & Setup Interface
 If multiple `slcand` daemons exist or `can0` is down, reset and bind:
@@ -106,10 +105,9 @@ If multiple `slcand` daemons exist or `can0` is down, reset and bind:
 # 1. Clean any duplicate or hung slcand processes
 sudo killall slcand 2>/dev/null
 
-# 2. Attach serial device to network interface (e.g. /dev/ttyUSB4)
-sudo slcan_attach -f -s6 -o /dev/ttyUSB4
-sudo slcand -S 1000000 /dev/ttyUSB4 can0
-sudo ip link set dev can0 up
+# 2. Attach serial device to network interface (e.g. /dev/ttyUSB4 or /dev/ttyCANShield @ 125 kbps)
+sudo slcand -o -c -s4 -S 1000000 /dev/ttyUSB4 can0
+sudo ip link set dev can0 txqueuelen 1000 up
 
 # 3. Confirm can0 is UP
 ip link show can0
@@ -249,8 +247,8 @@ Run the standalone scenario directly from the CLI:
 ## 5. Subsystem Reference Catalog
 
 ### 5.1 Dual-Zone Climate Control (HVAC)
-* **CAN Status:** `0x1E3` (DLC 7, 100 ms) — EMF Climate State (Byte 0 Bit 0: Dual Mode, Byte 0 Bit 6: AC Off, Bytes 2/3: Temps).
-* **CAN Demand:** `0x1D0` (DLC 7/8, 100 ms) — Climate Panel Request (Byte 0 Bit 0: `DUAL_REQ`, Byte 4: Defrost/Recirc).
+* **CAN Status:** `0x1E3` (DLC 7, 100 ms) — EMF Climate State (Byte 0 Bit 0: Dual Mode, Byte 0 Bit 6: AC Off, Byte 1 Bit 3: Rear Defrost Indicator, Bytes 2/3: Temps).
+* **CAN Demand:** `0x1D0` (DLC 7, 100 ms) — Climate Panel Request (Byte 0 Bit 6: Rear Defrost `0x40`, Byte 0 Bit 0: `DUAL_REQ`, Byte 4: Vent Mode).
 * **HU Telemetry:** `Cmd 0x31` (12 payload bytes) — Byte 0 Bit 2: Dual Mode active, Byte 0 Bit 0: AC on.
 * **HU Downlink:** `Cmd 0x3B` Setting `0x0F` — Toggle Dual/Mono temperature sync.
 * **Command:** `./tools/test_bsi_workbench.py --scenario climate`

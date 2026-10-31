@@ -510,9 +510,9 @@ void test_peugeot_407_hvac_hiworld(void) {
     TEST_ASSERT_EQUAL_UINT8(0, climate.driver_wind_mode);
     TEST_ASSERT_EQUAL_UINT8(0, climate.pass_wind_mode);
 
-    // Feeding conflicting 0x1D0 demand frame (e.g. standby 0xA8, different fan/temps/winds)
-    // MUST NOT overwrite any 0x1E3 status field; 0x1D0 only updates rear_defrost (Byte 4 Bit 6).
-    const uint8_t can_1d0_conflict[] = { 0xA8, 0x00, 0x07, 0x42, 0x40, 0x01, 0x15, 0x00 };
+    // Feeding conflicting 0x1D0 demand frame (e.g. standby 0xE8 with Byte 0 Bit 6 set, different fan/temps/winds)
+    // MUST NOT overwrite any 0x1E3 status field; 0x1D0 only updates rear_defrost (Byte 0 Bit 6 = 0x40).
+    const uint8_t can_1d0_conflict[] = { 0xE8, 0x00, 0x07, 0x42, 0x20, 0x01, 0x15, 0x00 };
     psa_hvac_process_can_0x1d0(&climate, can_1d0_conflict, 8);
     TEST_ASSERT_TRUE(climate.rear_defrost);
     TEST_ASSERT_TRUE(climate.power_on);
