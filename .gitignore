@@ -12,3 +12,5 @@ openocd_nuc131_bin
 *.bin.dump
 *.iap
 *.dump
+runs/*
+scratch

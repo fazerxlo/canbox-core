@@ -11,6 +11,8 @@ build/
 *.iap
 openocd_nuc131_bin
 openocd_nuc131_bin/
+runs/*
+scratch
 
 # Auto-generated / large MCU SDK configs & linker scripts
 sdkconfig.*
