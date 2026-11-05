@@ -154,7 +154,7 @@ Verified against (a) a capture of the original OEM Hiworld Canbox while each RD4
 | **DARK** | `0x07` | `5A A5 02 21 07 01 2A` | `5A A5 02 21 00 00 22` |
 | **OK** | `0x24` | `5A A5 02 21 24 01 47` | `5A A5 02 21 00 00 22` |
 | **ESC** | `0x25` | `5A A5 02 21 25 01 48` | `5A A5 02 21 00 00 22` |
-| **TEL / PHONE** | `0x05` (HU key table `PHONE`; not seen in the OEM Canbox log) | `5A A5 02 21 05 01 28` | `5A A5 02 21 00 00 22` |
+| **TEL / PHONE** | `0x2B` (verified on physical OEM Hiworld box in SVT) | `5A A5 02 21 2B 01 4E` | `5A A5 02 21 00 00 22` |
 | **MENU** | `0x2E` | `5A A5 02 21 2E 01 51` | `5A A5 02 21 00 00 22` |
 | **UP** | `0x17` | `5A A5 02 21 17 01 3A` | `5A A5 02 21 00 00 22` |
 | **DOWN** | `0x18` | `5A A5 02 21 18 01 3B` | `5A A5 02 21 00 00 22` |
@@ -199,7 +199,7 @@ Evidence from `can_log_buttons.log` (button press order: AUDIO, TRIP, CLIM, DARK
 
 Each press is a single `0x3E5` frame with the button field set, followed ~350-450 ms later by the idle frame `000000000000` (release). MENU, OK and ESC are verified in `can_log_buttons1.log`, and UP in `can_log_buttons2.log`. DOWN, LEFT and RIGHT bit positions come only from the simulator CAN2004 radio documentation (their Hiworld KeyIDs are verified by the OEM Canbox log).
 
-- **TEL:** `0x3E5` Byte 0 bits 5:4 (simulator doc; not yet captured on this car). Hiworld code `0x05` (`PHONE`) from the HU key table. Decoded, but unverified on vehicle.
+- **TEL:** `0x3E5` Byte 0 bits 5:4 (simulator doc; verified on bench SVT run 20261102_160812). Hiworld code `0x2B` (wire frame `5A A5 02 21 2B 01 4E`). Decoded and verified on physical OEM Canbox.
 - **MODE:** Byte 1 bits 5:4 from the simulator doc, no Hiworld code known; **pending**, not decoded.
 - **BAND & SOURCE:** handled internally by the RD4/RD5 radio; no frames on the Comfort CAN bus.
 - **`0x0DF` / `0x167`:** not key frames. `0x0DF` is a display/lighting state frame (it toggles `0x10`/`0x90` on the first byte every ~500 ms regardless of key presses, as seen in all button logs) and `0x167` is the EMF display page frame. Neither is decoded as a button.

@@ -316,7 +316,7 @@ void test_peugeot_407_console_0x3e5_buttons(void) {
     check_3e5_key(0x00, 0x00, 0x00, 0x10, PSA_PANEL_KEY_DOWN);
     check_3e5_key(0x00, 0x00, 0x00, 0x04, PSA_PANEL_KEY_RIGHT);
     check_3e5_key(0x00, 0x00, 0x00, 0x01, PSA_PANEL_KEY_LEFT);
-    /* TEL: B0[5:4] per simulator doc; Hiworld code 0x05 PHONE */
+    /* TEL: B0[5:4] per simulator doc; Hiworld code 0x2B (verified on physical OEM box) */
     check_3e5_key(0x10, 0x00, 0x00, 0x00, PSA_PANEL_KEY_TEL);
 }
 

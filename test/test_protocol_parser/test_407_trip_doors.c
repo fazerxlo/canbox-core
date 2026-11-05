@@ -623,10 +623,13 @@ void test_peugeot_407_steering_wheel_angle(void) {
  * 1.7 Powertrain & Fluid Telemetry (Cmd 0x1A) Tests
  * -------------------------------------------------------------------------- */
 void test_peugeot_407_telemetry_1a_vector1(void) {
-    /* Vector 1 from Spec:
-     * Speed 50 km/h, RPM 850, Coolant 90 C, Oil 95 C, Fuel 45 L, Fuel 68%, Instant 6.8 L/100km
-     * Gear = 3 (D), Ignition = ON -> Flags = 0x03
-     * Expected Wire: 5AA50C1A0303003203525A5F2D44004420
+    /* Vector 1:
+     * Speed 50 km/h (500 = 0x01F4 in 0.1 km/h), RPM 850 (0x0352), Steering -90 deg CAN (+90 = 0x005A Hiworld),
+     * Coolant 90 C, Oil 95 C, Fuel 45 L, Fuel 68%, Instant 6.8 L/100km, Gear = 3 (D), Ignition = ON
+     * 1) Standard Hiworld OEM / WcComDataParser Cmd 0x1A:
+     *    5A A5 0C 1A  35 01 03 01 F4 05 00 5A 00 03 52 00  07
+     * 2) Extended PSA Telemetry Cmd 0xEB:
+     *    5A A5 0C EB  03 03 00 32 03 52 5A 5F 2D 44 00 44  F1
      */
     vehicle_state_t state;
     memset(&state, 0, sizeof(state));
@@ -635,6 +638,7 @@ void test_peugeot_407_telemetry_1a_vector1(void) {
     state.rpm = 850;
     state.speed_kmh = 50;
     state.gear = 3; /* D */
+    state.steering_angle_deg = -90;
     state.coolant_temp_c = 90;
     state.oil_temp_c = 95;
     state.fuel_liters = 45;
@@ -645,19 +649,33 @@ void test_peugeot_407_telemetry_1a_vector1(void) {
     size_t len = build_hiworld_telemetry_1a(&state, out, sizeof(out));
     TEST_ASSERT_EQUAL_size_t(17, len);
 
-    const uint8_t expected_wire[17] = {
+    const uint8_t expected_1a[17] = {
         0x5A, 0xA5, 0x0C, 0x1A,
-        0x03, 0x03, 0x00, 0x32, 0x03, 0x52, 0x5A, 0x5F, 0x2D, 0x44, 0x00, 0x44,
-        0x20
+        0x35, 0x01, 0x03, 0x01, 0xF4, 0x05, 0x00, 0x5A, 0x00, 0x03, 0x52, 0x00,
+        0x07
     };
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_wire, out, 17);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_1a, out, 17);
+
+    uint8_t out_eb[32];
+    size_t len_eb = build_hiworld_telemetry_eb(&state, out_eb, sizeof(out_eb));
+    TEST_ASSERT_EQUAL_size_t(17, len_eb);
+
+    const uint8_t expected_eb[17] = {
+        0x5A, 0xA5, 0x0C, 0xEB,
+        0x03, 0x03, 0x00, 0x32, 0x03, 0x52, 0x5A, 0x5F, 0x2D, 0x44, 0x00, 0x44,
+        0xF1
+    };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_eb, out_eb, 17);
 }
 
 void test_peugeot_407_telemetry_1a_vector2(void) {
-    /* Vector 2 from Spec:
-     * Stationary Idle: Speed 0 km/h, RPM 750, Coolant 85 C, Oil 88 C, Fuel 45 L, Fuel 68%,
-     * Instant Stationary --.- (0xFFFF). Gear = 0 (P), Ignition = ON -> Flags = 0x03
-     * Expected Wire: 5AA50C1A0300000002EE55582D44FFFF1F
+    /* Vector 2:
+     * Stationary Idle: Speed 0 km/h, RPM 750 (0x02EE), Coolant 85 C, Oil 88 C, Fuel 45 L, Fuel 68%,
+     * Instant Stationary --.- (0xFFFF). Gear = 0 (P), Ignition = ON
+     * 1) Standard Hiworld OEM / WcComDataParser Cmd 0x1A:
+     *    5A A5 0C 1A  35 01 00 00 00 05 00 00 00 02 EE 00  50
+     * 2) Extended PSA Telemetry Cmd 0xEB:
+     *    5A A5 0C EB  03 00 00 00 02 EE 55 58 2D 44 FF FF  05
      */
     vehicle_state_t state;
     memset(&state, 0, sizeof(state));
@@ -676,12 +694,23 @@ void test_peugeot_407_telemetry_1a_vector2(void) {
     size_t len = build_hiworld_telemetry_1a(&state, out, sizeof(out));
     TEST_ASSERT_EQUAL_size_t(17, len);
 
-    const uint8_t expected_wire[17] = {
+    const uint8_t expected_1a[17] = {
         0x5A, 0xA5, 0x0C, 0x1A,
-        0x03, 0x00, 0x00, 0x00, 0x02, 0xEE, 0x55, 0x58, 0x2D, 0x44, 0xFF, 0xFF,
-        0x34
+        0x35, 0x01, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x02, 0xEE, 0x00,
+        0x50
     };
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_wire, out, 17);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_1a, out, 17);
+
+    uint8_t out_eb[32];
+    size_t len_eb = build_hiworld_telemetry_eb(&state, out_eb, sizeof(out_eb));
+    TEST_ASSERT_EQUAL_size_t(17, len_eb);
+
+    const uint8_t expected_eb[17] = {
+        0x5A, 0xA5, 0x0C, 0xEB,
+        0x03, 0x00, 0x00, 0x00, 0x02, 0xEE, 0x55, 0x58, 0x2D, 0x44, 0xFF, 0xFF,
+        0x05
+    };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_eb, out_eb, 17);
 }
 
 void test_peugeot_407_telemetry_1a_can_decoding_and_guards(void) {

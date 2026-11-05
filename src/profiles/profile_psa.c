@@ -327,6 +327,9 @@ static const profile_can_rule_t s_psa_rules[] = {
     { PSA_CAN_ID_CD_DISC_INFO_365,   psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_PLAY_3A5,        psa_rd4_decode_frame },
     { PSA_CAN_ID_CD_CHANGER,         psa_rd4_decode_frame },
+    { PSA_CAN_ID_MDF_STATUS_0DF,     psa_decode_mdf_presence_profile },
+    { PSA_CAN_ID_BSI_PERSO_REQ_15B,  psa_decode_mdf_presence_profile },
+    { PSA_CAN_ID_MDF_TRIP_3F6,       psa_decode_mdf_presence_profile },
     { PSA_CAN_ID_MDF_DIAG_525,       psa_decode_mdf_presence_profile },
 };
 

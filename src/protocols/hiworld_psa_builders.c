@@ -47,13 +47,72 @@ size_t build_hiworld_telemetry_1a(const vehicle_state_t *state, uint8_t *out, si
     out[2] = 0x0C;                       /* Length: 12 payload bytes */
     out[3] = HIWORLD_CMD_POWERTRAIN_TELEMETRY; /* Opcode: 0x1A */
 
+    /* Standard Hiworld WcComDataParser / Commercial OEM (H1H2PA123A-240717) Layout:
+     * Byte 0: Validity Bitmask (0x35 when active: Basic 0x01 | Speed 0x04 | SAS 0x10 | RPM 0x20; 0x21 when idle)
+     */
+    out[4] = (state->ignition_on || state->rpm > 0 || state->speed_kmh > 0) ? 0x35U : 0x21U;
+
+    /* Byte 1: Power / Direction / Status Flags */
+    uint8_t d1 = 0;
+    if (state->ignition_on)      d1 |= 0x01U;
+    if (state->reverse_gear)     d1 |= 0x02U;
+    if (state->handbrake)        d1 |= 0x08U;
+    if (state->fuel_low_warning) d1 |= 0x10U;
+    out[5] = d1;
+
+    /* Byte 2: Gear Position (0=P, 1=R, 2=N, 3=D, 4=M1, etc.) */
+    out[6] = state->gear;
+
+    /* Byte 3..4: Vehicle Speed in 0.1 km/h Big-Endian (mInstantanSpeed) */
+    uint16_t speed_0p1 = (state->speed_kmh == 0xFFFFU) ? 0xFFFFU : (uint16_t)(state->speed_kmh * 10U);
+    out[7] = (uint8_t)(speed_0p1 >> 8);
+    out[8] = (uint8_t)(speed_0p1 & 0xFF);
+
+    /* Byte 5: Display Mode Latch (0x05 in OEM H1H2PA123A-240717) */
+    out[9] = 0x05U;
+
+    /* Byte 6..7: Steering Wheel Angle in degrees Big-Endian (notifySteeringWheelAngle, inverted for Hiworld) */
+    uint16_t u_angle = (uint16_t)(int16_t)(-state->steering_angle_deg);
+    out[10] = (uint8_t)(u_angle >> 8);
+    out[11] = (uint8_t)(u_angle & 0xFF);
+
+    /* Byte 8: Reverse camera trigger */
+    out[12] = state->reverse_gear ? 0x01U : 0x00U;
+
+    /* Byte 9..10: Engine RPM Big-Endian (mEngineSpeed) */
+    out[13] = (uint8_t)(state->rpm >> 8);
+    out[14] = (uint8_t)(state->rpm & 0xFF);
+
+    /* Byte 11: Reserved */
+    out[15] = 0x00U;
+
+    /* Checksum: (Length + Opcode + sum(payload) - 1) & 0xFF */
+    uint8_t sum = 0;
+    for (size_t i = 2; i <= 15; i++) {
+        sum = (uint8_t)(sum + out[i]);
+    }
+    out[16] = (uint8_t)((sum - 1) & 0xFF);
+
+    return 17;
+}
+
+size_t build_hiworld_telemetry_eb(const vehicle_state_t *state, uint8_t *out, size_t max_len) {
+    if (!state || !out || max_len < 17) {
+        return 0;
+    }
+
+    out[0] = HIWORLD_SYNC_1;
+    out[1] = HIWORLD_SYNC_2;
+    out[2] = 0x0C;                       /* Length: 12 payload bytes */
+    out[3] = HIWORLD_CMD_EXTENDED_TELEMETRY; /* Opcode: 0xEB */
+
     /* Byte 0: Status Flags */
     uint8_t flags = 0;
     if (state->ignition_on)      flags |= 0x01;
-    if (state->rpm > 400)         flags |= 0x02;
-    if (state->reverse_gear)      flags |= 0x04;
-    if (state->handbrake)         flags |= 0x08;
-    if (state->fuel_low_warning)  flags |= 0x10;
+    if (state->rpm > 400)        flags |= 0x02;
+    if (state->reverse_gear)     flags |= 0x04;
+    if (state->handbrake)        flags |= 0x08;
+    if (state->fuel_low_warning) flags |= 0x10;
     out[4] = flags;
 
     /* Byte 1: Gear Position (0=P, 1=R, 2=N, 3=D, 4=M1, etc.) */

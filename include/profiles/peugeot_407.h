@@ -121,7 +121,7 @@ void psa_decode_stalk_tip_0x221(const uint8_t *data, uint8_t dlc, psa_stalk_key_
  * -------------------------------------------------------------------------- */
 typedef enum {
     PSA_PANEL_KEY_NONE     = 0x00,
-    PSA_PANEL_KEY_TEL      = 0x05,  /* TEL / PHONE (HU table: 0x05 PHONE); CAN bit from simulator doc, not yet captured */
+    PSA_PANEL_KEY_TEL      = 0x2B,  /* TEL / PHONE (OEM Hiworld Cmd 0x21: 0x2B); verified in SVT on physical box */
     PSA_PANEL_KEY_DARK     = 0x07,  /* DARK  (screen off / dim)  CMD 0x21 key 0x07 */
     PSA_PANEL_KEY_UP       = 0x17,
     PSA_PANEL_KEY_DOWN     = 0x18,

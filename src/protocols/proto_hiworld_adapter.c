@@ -169,28 +169,33 @@ static void hiworld_feed_byte(uint8_t byte) {
     proto_hiworld_feed_byte(byte);
 }
 
-static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
-    uint8_t hw_key_code = 0x00;
-
-    switch (wheel->active_key) {
-        case WHEEL_KEY_VOL_UP:       hw_key_code = 0x01; break;
-        case WHEEL_KEY_VOL_DOWN:     hw_key_code = 0x02; break;
-        case WHEEL_KEY_MUTE:         hw_key_code = 0x03; break;
-        case WHEEL_KEY_NEXT:         hw_key_code = 0x08; break;
-        case WHEEL_KEY_PREV:         hw_key_code = 0x09; break;
-        case WHEEL_KEY_SRC:          hw_key_code = 0x0B; break;
-        case WHEEL_KEY_SCROLL_UP:    hw_key_code = 0x12; break;
-        case WHEEL_KEY_SCROLL_DOWN:  hw_key_code = 0x11; break;
-        case WHEEL_KEY_PHONE_ACCEPT: hw_key_code = 0x09; break;
-        case WHEEL_KEY_PHONE_REJECT: hw_key_code = 0x0A; break;
-        case WHEEL_KEY_VOICE:        hw_key_code = 0x05; break;
-        case WHEEL_KEY_TRIP:         hw_key_code = 0x14; break;
-        case WHEEL_KEY_STALK_LEFT:   hw_key_code = 0x40; break;
-        default:                     hw_key_code = 0x00; break;
+static uint8_t map_wheel_key_to_hiworld(wheel_key_t key) {
+    switch (key) {
+        case WHEEL_KEY_VOL_UP:       return 0x01;
+        case WHEEL_KEY_VOL_DOWN:     return 0x02;
+        case WHEEL_KEY_MUTE:         return 0x03;
+        case WHEEL_KEY_NEXT:         return 0x08;
+        case WHEEL_KEY_PREV:         return 0x09;
+        case WHEEL_KEY_SRC:          return 0x0B;
+        case WHEEL_KEY_SCROLL_UP:    return 0x12;
+        case WHEEL_KEY_SCROLL_DOWN:  return 0x11;
+        case WHEEL_KEY_PHONE_ACCEPT: return 0x09;
+        case WHEEL_KEY_PHONE_REJECT: return 0x0A;
+        case WHEEL_KEY_VOICE:        return 0x05;
+        case WHEEL_KEY_TRIP:         return 0x14;
+        case WHEEL_KEY_STALK_LEFT:   return 0x40;
+        default:                     return 0x00;
     }
+}
+
+static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
+    uint8_t hw_key_code = map_wheel_key_to_hiworld(wheel->active_key);
+    const vehicle_state_t *st = can_router_get_state();
+    int16_t angle_deg = st ? st->steering_angle_deg : 0;
+    uint16_t u_angle = (uint16_t)(int16_t)(-angle_deg);
 
     /* Hiworld Key Payload (Cmd 0x11, 10 bytes as captured from real PSA Hiworld Canbox):
-     * [0x23, 0x00, KeyCode, PressState, 0x00, 0x0A, 0x00, 0x00, 0x5E, 0x22]
+     * [0x23, 0x00, KeyCode, PressState, 0x00, 0x0A, AngleHi, AngleLo, 0x5E, 0x22]
      * When released: KeyCode = 0x00, PressState = 0x00
      */
     uint8_t payload[10] = {
@@ -200,8 +205,8 @@ static void hiworld_send_wheel_key(const vehicle_wheel_t *wheel) {
         (wheel->press_state != 0) ? 0x01 : 0x00,
         0x00,
         0x0A,
-        0x00,
-        0x00,
+        (uint8_t)(u_angle >> 8),
+        (uint8_t)(u_angle & 0xFF),
         0x5E,
         0x22
     };
@@ -272,14 +277,28 @@ static void hiworld_send_telemetry_state(const vehicle_state_t *state) {
     if (len > 0) {
         hal_uart_write(tx_buf, len);
     }
+
+    size_t len_eb = build_hiworld_telemetry_eb(state, tx_buf, sizeof(tx_buf));
+    if (len_eb > 0) {
+        hal_uart_write(tx_buf, len_eb);
+    }
 }
 
 static void hiworld_send_steering_angle(int16_t angle_deg) {
     /* Hiworld Base Info (Cmd 0x11) steering angle: whole degrees, polarity inverted
-     * relative to PSA CAN (PSA +Left -> Hiworld negative), Big-Endian at Bytes 6..7. */
+     * relative to PSA CAN (PSA +Left -> Hiworld negative), Big-Endian at Bytes 6..7.
+     * Preserve any concurrently held wheel key in Bytes 2..3. */
+    const vehicle_state_t *st = can_router_get_state();
+    uint8_t key_code = 0x00;
+    uint8_t press_state = 0x00;
+    if (st && st->wheel.press_state != 0) {
+        key_code = map_wheel_key_to_hiworld(st->wheel.active_key);
+        press_state = 0x01;
+    }
+
     uint16_t u_angle = (uint16_t)(int16_t)(-angle_deg);
     uint8_t payload[10] = {
-        0x27, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x27, 0x00, key_code, press_state, 0x00, 0x00,
         (uint8_t)(u_angle >> 8),
         (uint8_t)(u_angle & 0xFF),
         0x5E, 0x22

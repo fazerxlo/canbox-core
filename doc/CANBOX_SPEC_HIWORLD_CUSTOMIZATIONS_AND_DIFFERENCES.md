@@ -14,7 +14,7 @@
 3. [Subsystem Customizations & Differences](#3-subsystem-customizations--differences)
    - 3.1 [Vehicle Health Alerts & Diagnostic Journal (`0x42` / `0x2F`)](#31-vehicle-health-alerts--diagnostic-journal-0x42--0x2f)
    - 3.2 [Dual-Zone Climate Control & Air Quality (`0x31`)](#32-dual-zone-climate-control--air-quality-0x31)
-   - 3.3 [Trip Computer & Telemetry Paging (`0x13`, `0x14`, `0x15`)](#33-trip-computer--telemetry-paging-0x13-0x14-0x15)
+   - 3.3 [Trip Computer & Powertrain Telemetry (`0x13`, `0x14`, `0x15`, `0x1A`)](#33-trip-computer--powertrain-telemetry-0x13-0x14-0x15-0x1a)
    - 3.4 [Doors, Body & Safety Status (`0x12`)](#34-doors-body--safety-status-0x12)
    - 3.5 [Parking Radar & Distance Zone Mapping (`0x41`)](#35-parking-radar--distance-zone-mapping-0x41)
    - 3.6 [Steering Stalk & Remote Keys (`0x11`)](#36-steering-stalk--remote-keys-0x11)
@@ -111,15 +111,28 @@ This document formally records all customizations, bug fixes, architectural enha
 
 ---
 
-### 3.3 Trip Computer & Telemetry Paging (`0x13`, `0x14`, `0x15`)
+### 3.3 Trip Computer & Powertrain Telemetry (`0x13`, `0x14`, `0x15`, `0x1A`)
 
+> [!NOTE]
+> Detailed field-by-field wire layouts, bitfield breakdowns, and timing benchmarks comparing OEM firmware to OpenCanbox are documented in [CANBOX_SPEC_HIWORLD_OEM_DIFFERENCES_TELEMETRY.md](CANBOX_SPEC_HIWORLD_OEM_DIFFERENCES_TELEMETRY.md).
+
+#### A. Trip Computer Uplink (`0x13`, `0x14`, `0x15`)
 - **Original Adapter:**
   Transmits 0x13 (Instant), 0x14 (Trip 1), and 0x15 (Trip 2) back-to-back at high rates whenever any CAN frame triggers, consuming up to 60% of UART bandwidth.
 - **OpenCanbox Core:**
   - **Delta Detection:** Only broadcasts trip packets when telemetry values change.
   - **Rate Limiting:** Enforces maximum update rates (1-2 Hz for slow metrics).
-  - **Downlink Trip Reset:** Translates Android HU reset buttons into PSA Comfort CAN reset frames on `0x221`.
-  - **Sensor Sentinel Filtering:** Filters raw values `0xFF`, `0xFFFF`, or `0xFFFFFF` indicating uninitialized/disconnected sensors, preventing erratic UI flashes.
+  - **Downlink Trip Reset:** Translates Android HU reset buttons into PSA Comfort CAN reset frames on `0x221` (or synthesizes Virtual MDF reset frames on CAN `0x167`).
+  - **Sensor Sentinel Forwarding:** Preserves and standardizes raw sentinels (`0xFFFF` uncalculated / stationary) to prevent UI glitches and ensure Android displays `--.-`.
+
+#### B. Powertrain Telemetry Alignment (`Cmd 0x1A`)
+- **Original Commercial Firmware (`ref_0x22_uplink.c` / `payload.asm`):**
+  - **Speed Resolution:** Encodes vehicle speed in **0.1 km/h resolution** at Bytes 3..4 (Big-Endian `0x0B6` raw speed divided by 10).
+  - **Engine RPM:** Placed at Bytes 9..10 (`0x0B6` raw RPM shifted right by 3).
+  - **Status & Validity Flags:** Byte 0 carries `0x21` / `0x35` validity bitmask; Byte 1 carries reverse and ignition flags; Byte 2 carries BSI gear latches; Byte 5 carries CAN `0x126` display mode; Bytes 6..7 carry CAN `0x10B` odometer.
+- **OpenCanbox Implementation:**
+  - Encodes vehicle speed in integer km/h at Bytes 2..3 and RPM at Bytes 4..5, followed by coolant and oil temperatures (Bytes 6..7), fuel level/percentage (Bytes 8..9), and instantaneous fuel (Bytes 10..11).
+  - Test suites (`svt/lib/protocols/hiworld.py`) automatically detect both layouts using header signature and RPM position.
 
 ---
 

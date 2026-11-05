@@ -543,6 +543,16 @@ void test_peugeot_407_mdf_coexistence_suppression(void) {
     }
     can_frame_t sent;
     TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
+
+    /* Also verify 0x3F6, 0x0DF, and 0x15B independently trigger MFD presence */
+    const uint16_t mdf_ids[3] = { PSA_CAN_ID_MDF_TRIP_3F6, PSA_CAN_ID_MDF_STATUS_0DF, PSA_CAN_ID_BSI_PERSO_REQ_15B };
+    for (size_t i = 0; i < 3; i++) {
+        setUp_peugeot_407_car_config();
+        TEST_ASSERT_FALSE(psa_car_config_is_mdf_present());
+        can_frame_t f_mdf = { .id = mdf_ids[i], .dlc = 8, .data = { 0x01 } };
+        can_router_process_can(&f_mdf);
+        TEST_ASSERT_TRUE(psa_car_config_is_mdf_present());
+    }
 }
 
 void test_peugeot_407_matrix_cluster_page_cycling(void) {
