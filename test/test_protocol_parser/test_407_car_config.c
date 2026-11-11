@@ -688,19 +688,16 @@ void test_peugeot_407_trip_reset_0x167(void) {
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent.data[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, sent.data[3]);
 
-    /* Verify sustained 300ms pulse (ticks 1 & 2 keep 0x8A, tick 3 clears reset bit to 0x0A) */
-    hal_can_native_clear_sent_frame();
-    psa_car_config_periodic_100ms();
-    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
-    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
-    TEST_ASSERT_EQUAL_HEX8(0x8A, sent.data[0]);
+    /* Verify sustained 20-frame (2000 ms) burst: ticks 1..19 keep 0x8A, tick 20 clears reset bit to 0x0A */
+    for (int t = 1; t <= 19; t++) {
+        hal_can_native_clear_sent_frame();
+        psa_car_config_periodic_100ms();
+        TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+        TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
+        TEST_ASSERT_EQUAL_HEX8(0x8A, sent.data[0]);
+    }
 
-    hal_can_native_clear_sent_frame();
-    psa_car_config_periodic_100ms();
-    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
-    TEST_ASSERT_EQUAL_HEX32(0x167, sent.id);
-    TEST_ASSERT_EQUAL_HEX8(0x8A, sent.data[0]);
-
+    /* 20th tick clears reset bit (0x80) back to 0x0A (Trip 1 page) */
     hal_can_native_clear_sent_frame();
     psa_car_config_periodic_100ms();
     TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));

@@ -41,6 +41,7 @@ typedef struct {
 void psa_source_arbiter_init(void);
 void psa_source_arbiter_handle_hu_cmd(uint8_t subcmd, uint8_t param);
 void psa_source_arbiter_handle_f1_cmd(uint8_t type, uint8_t param);
+void psa_source_arbiter_handle_downlink_key(uint8_t key_code, uint8_t press_state);
 void psa_source_arbiter_switch_source(uint8_t target_source);
 void psa_source_arbiter_trigger_station_list(void);
 void psa_source_arbiter_update_stalk_rotary(uint8_t rotary_cnt);

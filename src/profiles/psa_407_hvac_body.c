@@ -434,9 +434,12 @@ void psa_decode_aas_front_0x270(const uint8_t *data, uint8_t dlc, uint8_t *fl, u
     if (fr) *fr = data[2];
 }
 
+static const uint8_t s_rom_radar_curves[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+
 uint8_t psa_radar_map_zone(uint8_t raw3bit) {
-    if (raw3bit >= 7) return PSA_RADAR_DIST_INACTIVE;
-    return raw3bit;
+    uint8_t val = s_rom_radar_curves[raw3bit & 0x07];
+    if (val >= 7) return PSA_RADAR_DIST_INACTIVE;
+    return val;
 }
 
 void psa_radar_process_can_0x0e1(vehicle_radar_t *radar, const uint8_t *data, uint8_t dlc) {
@@ -446,7 +449,9 @@ void psa_radar_process_can_0x0e1(vehicle_radar_t *radar, const uint8_t *data, ui
     radar->front_active   = (data[1] >> 4) & 1;
     radar->display_active = (data[5] & 0x02) ? true : false;
 
-    if (!radar->display_active && !radar->rear_active && !radar->front_active) {
+    bool is_inactive_sentinel = (data[3] == 0xFC && data[4] == 0xFC && data[5] == 0xFE);
+
+    if (is_inactive_sentinel || (!radar->display_active && !radar->rear_active && !radar->front_active)) {
         radar->rear_left_outer    = PSA_RADAR_DIST_INACTIVE;
         radar->rear_left_center   = PSA_RADAR_DIST_INACTIVE;
         radar->rear_right_center  = PSA_RADAR_DIST_INACTIVE;
@@ -455,6 +460,11 @@ void psa_radar_process_can_0x0e1(vehicle_radar_t *radar, const uint8_t *data, ui
         radar->front_left_center  = PSA_RADAR_DIST_INACTIVE;
         radar->front_right_center = PSA_RADAR_DIST_INACTIVE;
         radar->front_right_outer  = PSA_RADAR_DIST_INACTIVE;
+        if (is_inactive_sentinel) {
+            radar->rear_active    = false;
+            radar->front_active   = false;
+            radar->display_active = false;
+        }
     } else {
         uint8_t rl = (data[3] >> 5) & 0x07;
         uint8_t rc = (data[3] >> 2) & 0x07;

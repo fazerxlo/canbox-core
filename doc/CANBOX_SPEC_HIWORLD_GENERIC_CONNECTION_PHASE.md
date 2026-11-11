@@ -364,9 +364,10 @@ Decompiled from `PeugeotDataDefine.adaptCurrentCarCommand`:
 |:---:|:---:|:---|:---|
 | **`0x24`** | `36` | `Command.ForwardCarType` | Vehicle Model Code Configuration (e.g. `34` = Peugeot 407) |
 | **`0x1B`** | `27` | `Command.ForwardEcuSetting` | Trip Computer Reset Page Selection (Trip 1 / Trip 2) |
+| **`0x6A`** | `106` | `Command.ForwardQueryCmd` | Telemetry Query (`0x00` = Query All / Full Resync, `cmd_id` = Specific Packet) |
 | **`0x3B`** | `59` | `Command.ForwardAcSetting` | Touchscreen Climate Control Overrides (Temp, Fan, Airflow) |
 | **`0x7B`** | `123` | `Command.ForwardCentralState1` | BSI Personalization Option Overrides (DRL, Auto-Lock, Wipers) |
-| **`0x7D`** | `125` | `Command.ForwardCentralState2` | Extended ADAS, Mirror Fold & Lighting Overrides |
+| **`0x7D`** | `125` | `Command.ForwardCentralState2` | Extended ADAS, Mirror Fold & Lighting Overrides (`{0x25, 0x01}` unlocks injection gate) |
 | **`0x8B`** | `-117` (`139`)| `Command.ForwardCruiseSpeedCmd` | Memorized Cruise Speed Limits Configuration ($M_1 \dots M_5$) |
 | **`0x8A`** | `-118` (`138`)| `Command.ForwardSpeedValueCmd` | Speed Limiter Threshold Adjustments |
 | **`0x9A`** | `-102` (`154`)| `Command.ForwardLanguageSetting` | Vehicle System Language Configuration |

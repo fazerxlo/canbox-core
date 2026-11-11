@@ -30,7 +30,7 @@ The CAN box translates these raw distance zones into serialized headunit radar p
 - **CAN ID:** `0x0E1` (Standard 11-bit Identifier)
 - **DLC:** 7 bytes
 - **Transmission Cycle:** Periodic 100 ms while active
-- **Inactive / Quiescent Frame:** `24 00 3F FC FC FC 00` (or zeroed sensors)
+- **Inactive / Quiescent Frame:** `24 00 3F FC FC FC 00` (or commercial Hiworld sentinel: `d[3] == 0xFC && d[4] == 0xFC && d[5] == 0xFE`, which clears all 8 sensor zones to `0xFF` inactive)
 
 ### 2.2 Alternate / AEE2010 Parking Radar Frames (`0x260` / `0x270`) — CAN2010 Only
 *(Note: Not applicable to Peugeot 407 CAN2004. On CAN2004, `0x260` is `MSG_BSI_INF_PROFILS` broadcast by the BSI at 250 ms. These frames are only used on CAN2010 / AEE2010 platforms.)*

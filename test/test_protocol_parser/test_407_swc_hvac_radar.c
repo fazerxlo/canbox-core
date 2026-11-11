@@ -602,3 +602,28 @@ void test_peugeot_407_radar_zone_mapping_and_boundaries(void) {
     TEST_ASSERT_EQUAL_UINT32(0, build_hiworld_radar(&radar, out, 16)); // too small
 }
 
+void test_peugeot_407_radar_inactive_sentinel_clearing(void) {
+    vehicle_radar_t radar;
+    memset(&radar, 0, sizeof(radar));
+    radar.rear_active = true;
+    radar.display_active = true;
+    radar.rear_left_outer = 1;
+    radar.rear_left_center = 2;
+
+    // Sentinel: d[3]=0xFC, d[4]=0xFC, d[5]=0xFE
+    const uint8_t can_sentinel[] = { 0x24, 0x40, 0x3F, 0xFC, 0xFC, 0xFE, 0x00 };
+    psa_radar_process_can_0x0e1(&radar, can_sentinel, sizeof(can_sentinel));
+
+    TEST_ASSERT_FALSE(radar.rear_active);
+    TEST_ASSERT_FALSE(radar.front_active);
+    TEST_ASSERT_FALSE(radar.display_active);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.rear_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.rear_left_center);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.rear_right_center);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.rear_right_outer);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.front_left_outer);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.front_left_center);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.front_right_center);
+    TEST_ASSERT_EQUAL_HEX8(PSA_RADAR_DIST_INACTIVE, radar.front_right_outer);
+}
+

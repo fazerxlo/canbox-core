@@ -413,6 +413,25 @@ void psa_source_arbiter_handle_f1_cmd(uint8_t type, uint8_t param) {
     }
 }
 
+void psa_source_arbiter_handle_downlink_key(uint8_t key_code, uint8_t press_state) {
+    if (press_state == 0) return;
+    switch (key_code) {
+        case 0x01: psa_source_arbiter_pulse_key(0x08); break; /* Vol+ */
+        case 0x02: psa_source_arbiter_pulse_key(0x04); break; /* Vol- */
+        case 0x03: psa_source_arbiter_pulse_key(0x0C); break; /* Mute */
+        case 0x08: psa_source_arbiter_pulse_key(0x80); break; /* Seek+ / Next */
+        case 0x09: psa_source_arbiter_pulse_key(0x40); break; /* Seek- / Prev */
+        case 0x0B: psa_source_arbiter_pulse_source(); break;  /* Source */
+        case 0x11: psa_source_arbiter_send_rotary_step(-1); break; /* Scroll Down */
+        case 0x12: psa_source_arbiter_send_rotary_step(+1); break; /* Scroll Up */
+        case 0x19: psa_source_arbiter_pulse_key(0x40); break; /* Left / Seek- */
+        case 0x1A: psa_source_arbiter_pulse_key(0x80); break; /* Right / Seek+ */
+        case 0x24: psa_source_arbiter_pulse_key(0x10); break; /* OK */
+        case 0x25: psa_source_arbiter_pulse_key(0x20); break; /* ESC */
+        default: break;
+    }
+}
+
 void psa_source_arbiter_tick_100ms(void) {
     uint32_t now = hal_get_tick_ms();
     if (s_arbiter.sync_state == SRC_SYNC_PHYSICAL_DEBOUNCE) {

@@ -53,6 +53,7 @@ void test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center(void);
 void test_peugeot_407_radar_hiworld_vector_2_quiescent_all_clear(void);
 void test_peugeot_407_radar_aee2010_0x260_and_0x270(void);
 void test_peugeot_407_radar_zone_mapping_and_boundaries(void);
+void test_peugeot_407_radar_inactive_sentinel_clearing(void);
 void test_peugeot_407_trip_computer_0x165_and_0x1a5(void);
 void test_peugeot_407_reverse_state(void);
 void test_peugeot_407_trip_hiworld_vector_1_instant_fuel(void);
@@ -180,6 +181,8 @@ void test_hiworld_car_mapping_lookup(void);
 void test_canbox_embedded_firmware_version(void);
 void test_hiworld_parse_downlink_cmd_f1(void);
 void test_hiworld_cmd_0x24_two_mode_handling(void);
+void test_hiworld_query_cmd_0x6a_parsing(void);
+void test_hiworld_downlink_gate_unlock_cmd_0x7d_25_01_parsing(void);
 
 // Driver manager tests
 void test_hu_protocol_driver_switching(void) {
@@ -241,6 +244,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_radar_hiworld_vector_2_quiescent_all_clear);
     RUN_TEST(test_peugeot_407_radar_aee2010_0x260_and_0x270);
     RUN_TEST(test_peugeot_407_radar_zone_mapping_and_boundaries);
+    RUN_TEST(test_peugeot_407_radar_inactive_sentinel_clearing);
     RUN_TEST(test_peugeot_407_trip_computer_0x165_and_0x1a5);
     RUN_TEST(test_peugeot_407_reverse_state);
     RUN_TEST(test_peugeot_407_trip_hiworld_vector_1_instant_fuel);
@@ -368,6 +372,8 @@ int main(void) {
     RUN_TEST(test_canbox_embedded_firmware_version);
     RUN_TEST(test_hiworld_parse_downlink_cmd_f1);
     RUN_TEST(test_hiworld_cmd_0x24_two_mode_handling);
+    RUN_TEST(test_hiworld_query_cmd_0x6a_parsing);
+    RUN_TEST(test_hiworld_downlink_gate_unlock_cmd_0x7d_25_01_parsing);
 
     return UNITY_END();
 }

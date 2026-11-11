@@ -60,6 +60,7 @@ extern "C" {
 #define HIWORLD_CMD_CAR_AC_STATE          0x31 /* 49 */
 #define HIWORLD_CMD_CAR_RADAR_STATE       0x41 /* 65 */
 #define HIWORLD_CMD_WARNING_INFO          0x42 /* 66 */
+#define HIWORLD_CMD_QUERY                 0x6A /* 106 */
 #define HIWORLD_CMD_FEATURE_ENABLE1       0x71 /* 113 */
 #define HIWORLD_CMD_FEATURE_ENABLE2       0x72 /* 114 */
 #define HIWORLD_CMD_CENTRAL_STATE1        0x76 /* 118 */
@@ -151,6 +152,9 @@ size_t hiworld_conn_build_frame(uint8_t cmd_id, const uint8_t *payload, uint8_t 
 uint8_t hiworld_conn_get_024_rr_step(const hiworld_connection_ctx_t *ctx);
 void hiworld_conn_reset_024_state(hiworld_connection_ctx_t *ctx);
 hiworld_connection_ctx_t *proto_hiworld_get_connection_ctx(void);
+bool proto_hiworld_is_injection_unlocked(void);
+void proto_hiworld_set_injection_unlocked(bool unlocked);
+void proto_hiworld_set_handshake_ms(uint32_t ms);
 
 #ifdef __cplusplus
 }

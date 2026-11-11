@@ -118,8 +118,8 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
   - View Instant: `5A A5 04 1B 01 00 01 FF 1F` (No CAN action)
   - View Trip 1: `5A A5 04 1B 02 00 01 FF 20` (No CAN action)
   - View Trip 2: `5A A5 04 1B 03 00 01 FF 21` (No CAN action)
-  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0A 06 FF FF 00 00 00 00`)
-  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (300 ms sustained pulse, then clears reset bit to `0C 06 FF FF 00 00 00 00`)
+  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (20 consecutive frames at 100 ms intervals / 2000 ms burst, then clears reset bit to `0A 06 FF FF 00 00 00 00`)
+  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (20 consecutive frames at 100 ms intervals / 2000 ms burst, then clears reset bit to `0C 06 FF FF 00 00 00 00`)
 
 ### 3.5 Hiworld Powertrain & Fluid Telemetry (`Cmd 0x1A` / `com.qf.vehicle`)
 - **Sync Header:** `0x5A 0xA5`
@@ -151,7 +151,7 @@ In vehicles with the factory Multifunction Display removed, OpenCanbox emulates 
 - **First Press after Cold Boot:** Stalk button press opens Zone 3 and displays **Instantaneous (`0x09`)**.
 - **7-Second Watchdog Inactivity Timeout:** Matches RT4 `DisplayScreenZ3` (`li r0, 7`). **All** trip pages (including Instantaneous) automatically revert to Idle (`0x08`) after 7 seconds without user interaction.
 - **Carousel Memory across Timeouts:** When the stalk button is pressed after a timeout (from `0x08`), OpenCanbox remembers the last viewed page and advances to the next page in order (e.g. `0x09` $\rightarrow$ timeout to `0x08` $\rightarrow$ next press shows `0x0A` Trip 1).
-- **Long Press Reset ($\ge 2\text{ s}$):** Sustained stalk hold on Trip 1 or Trip 2 pulses `0x8A` or `0x4C` for 300 ms to clear BSI trip counters, then holds the reset confirmation on screen for 7 seconds before closing to `0x08`.
+- **Long Press Reset ($\ge 2\text{ s}$):** Sustained stalk hold on Trip 1 or Trip 2 pulses `0x8A` or `0x4C` for 20 frames (2000 ms burst at 100 ms) to clear BSI trip counters, then holds the reset confirmation on screen for 7 seconds before closing to `0x08`.
 
 ---
 

@@ -589,6 +589,12 @@ void can_router_trigger_full_state_push(void) {
     }
 
     hu_protocol_send_telemetry_state(&s_current_state);
+    hu_protocol_send_trip_instant(&s_current_state.trip);
+    hu_protocol_send_trip1(&s_current_state.trip);
+    hu_protocol_send_trip2(&s_current_state.trip);
+    hu_protocol_send_radar(&s_current_state.radar);
+    hu_protocol_send_tpms(&s_current_state.tpms);
+    hu_protocol_send_alerts_summary(s_current_state.alerts.active_items, s_current_state.alerts.active_count);
 
     s_bulk_resync_timer = 0;
     s_media_resync_timer = 0;

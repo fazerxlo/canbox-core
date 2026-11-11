@@ -414,13 +414,13 @@ void psa_car_config_set_trip_reset(uint8_t trip_index) {
         s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_TRIP1;
         s_last_viewed_trip          = PSA_MDF_TRIP_PAGE_TRIP1;
         s_mdf_trip_reset_mask       = 0x80;
-        s_mdf_reset_ticks           = 3; /* 300 ms pulse */
+        s_mdf_reset_ticks           = 20; /* 20 frames @ 100ms = 2000 ms burst duration */
         s_mdf_trip_inactivity_ticks = 70; /* Keep on screen for 7s before reverting to idle 0x08 */
     } else if (trip_index == 2) {
         s_mdf_trip_page_mask        = PSA_MDF_TRIP_PAGE_TRIP2;
         s_last_viewed_trip          = PSA_MDF_TRIP_PAGE_TRIP2;
         s_mdf_trip_reset_mask       = 0x40;
-        s_mdf_reset_ticks           = 3; /* 300 ms pulse */
+        s_mdf_reset_ticks           = 20; /* 20 frames @ 100ms = 2000 ms burst duration */
         s_mdf_trip_inactivity_ticks = 70; /* Keep on screen for 7s before reverting to idle 0x08 */
     }
 }

@@ -405,3 +405,40 @@ void test_hiworld_cmd_0x24_two_mode_handling(void) {
     }
     TEST_ASSERT_TRUE(found_version);
 }
+
+void test_hiworld_query_cmd_0x6a_parsing(void) {
+    setUp_hiworld();
+    /* Query All: 5A A5 01 6A 00 6A */
+    const uint8_t q_all[] = { 0x5A, 0xA5, 0x01, 0x6A, 0x00, 0x6A };
+    for (size_t i = 0; i < sizeof(q_all); i++) {
+        proto_hiworld_feed_byte(q_all[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(0x6A, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_packet.payload_len);
+    TEST_ASSERT_EQUAL_HEX8(0x00, s_last_packet.payload[0]);
+
+    /* Query Doors (0x12): 5A A5 01 6A 12 7C */
+    const uint8_t q_doors[] = { 0x5A, 0xA5, 0x01, 0x6A, 0x12, 0x7C };
+    for (size_t i = 0; i < sizeof(q_doors); i++) {
+        proto_hiworld_feed_byte(q_doors[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(2, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(0x6A, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_UINT8(1, s_last_packet.payload_len);
+    TEST_ASSERT_EQUAL_HEX8(0x12, s_last_packet.payload[0]);
+}
+
+void test_hiworld_downlink_gate_unlock_cmd_0x7d_25_01_parsing(void) {
+    setUp_hiworld();
+    /* 5A A5 02 7D 25 01 A4: CS = (2 + 0x7D + 0x25 + 0x01 - 1) & 0xFF = 0xA4 */
+    const uint8_t unlock[] = { 0x5A, 0xA5, 0x02, 0x7D, 0x25, 0x01, 0xA4 };
+    for (size_t i = 0; i < sizeof(unlock); i++) {
+        proto_hiworld_feed_byte(unlock[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(1, s_rx_call_count);
+    TEST_ASSERT_EQUAL_HEX8(0x7D, s_last_packet.cmd);
+    TEST_ASSERT_EQUAL_UINT8(2, s_last_packet.payload_len);
+    TEST_ASSERT_EQUAL_HEX8(0x25, s_last_packet.payload[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, s_last_packet.payload[1]);
+}

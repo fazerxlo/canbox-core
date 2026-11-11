@@ -978,3 +978,186 @@ void test_integration_hiworld_stalk_tip_0x221_trip_pipeline(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_stalk_trip_release, rx_buf, sizeof(expected_stalk_trip_release));
 }
 
+void test_integration_hiworld_cmd_0x6a_query_handler(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    uint8_t rx_buf[256];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // A. Query All: 5A A5 01 6A 00 6A
+    const uint8_t q_all[] = { 0x5A, 0xA5, 0x01, 0x6A, 0x00, 0x6A };
+    for (size_t i = 0; i < sizeof(q_all); i++) {
+        can_router_process_uart_byte(q_all[i]);
+    }
+    size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    TEST_ASSERT_TRUE(rx_len > 20);
+    bool found_ack = false;
+    for (size_t i = 0; i + 4 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0xFF && rx_buf[i+4] == 0x6A) {
+            found_ack = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_ack);
+
+    // B. Query specific command: Cmd 0x12 (Doors): 5A A5 01 6A 12 7C
+    const uint8_t q_doors[] = { 0x5A, 0xA5, 0x01, 0x6A, 0x12, 0x7C };
+    for (size_t i = 0; i < sizeof(q_doors); i++) {
+        can_router_process_uart_byte(q_doors[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_0x12 = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x12) {
+            found_0x12 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x12);
+
+    // C. Query specific command: Cmd 0x31 (Climate): 5A A5 01 6A 31 9B
+    const uint8_t q_clim[] = { 0x5A, 0xA5, 0x01, 0x6A, 0x31, 0x9B };
+    for (size_t i = 0; i < sizeof(q_clim); i++) {
+        can_router_process_uart_byte(q_clim[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_0x31 = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x31) {
+            found_0x31 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x31);
+
+    // D. Query specific command: Cmd 0x41 (Radar): 5A A5 01 6A 41 AB
+    const uint8_t q_radar[] = { 0x5A, 0xA5, 0x01, 0x6A, 0x41, 0xAB };
+    for (size_t i = 0; i < sizeof(q_radar); i++) {
+        can_router_process_uart_byte(q_radar[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_0x41 = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x41) {
+            found_0x41 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x41);
+
+    // E. Query specific command: Cmd 0x82 (Sound Effect): 5A A5 01 6A 82 EC
+    const uint8_t q_sound[] = { 0x5A, 0xA5, 0x01, 0x6A, 0x82, 0xEC };
+    for (size_t i = 0; i < sizeof(q_sound); i++) {
+        can_router_process_uart_byte(q_sound[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_0x82 = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0x82) {
+            found_0x82 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0x82);
+
+    // F. Query specific command: Cmd 0xF0 (Version): 5A A5 01 6A F0 5A
+    const uint8_t q_ver[] = { 0x5A, 0xA5, 0x01, 0x6A, 0xF0, 0x5A };
+    for (size_t i = 0; i < sizeof(q_ver); i++) {
+        can_router_process_uart_byte(q_ver[i]);
+    }
+    rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
+    bool found_0xf0 = false;
+    for (size_t i = 0; i + 3 < rx_len; i++) {
+        if (rx_buf[i] == 0x5A && rx_buf[i+1] == 0xA5 && rx_buf[i+3] == 0xF0) {
+            found_0xf0 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_0xf0);
+}
+
+void test_integration_hiworld_injection_gate(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    uint8_t rx_buf[128];
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // Send Handshake: Cmd 0x24 (car model 0x22 / 407) -> 5A A5 02 24 22 00 47
+    const uint8_t hs_cmd[] = { 0x5A, 0xA5, 0x02, 0x24, 0x22, 0x00, 0x47 };
+    for (size_t i = 0; i < sizeof(hs_cmd); i++) {
+        can_router_process_uart_byte(hs_cmd[i]);
+    }
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 1. Immediately post-handshake, gate must be LOCKED.
+    // Try sending Downlink Key: Cmd 0x21 Vol+ press (0x01, 0x01) -> 5A A5 02 21 01 01 24
+    hal_can_native_clear_sent_frame();
+    const uint8_t key_cmd[] = { 0x5A, 0xA5, 0x02, 0x21, 0x01, 0x01, 0x24 };
+    for (size_t i = 0; i < sizeof(key_cmd); i++) {
+        can_router_process_uart_byte(key_cmd[i]);
+    }
+    can_frame_t sent_frame;
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent_frame)); // Must be gated!
+
+    // 2. Unlock gate via Cmd 0x7D 25 01 -> 5A A5 02 7D 25 01 A4
+    const uint8_t unlock_cmd[] = { 0x5A, 0xA5, 0x02, 0x7D, 0x25, 0x01, 0xA4 };
+    for (size_t i = 0; i < sizeof(unlock_cmd); i++) {
+        can_router_process_uart_byte(unlock_cmd[i]);
+    }
+    read_uart_output(rx_buf, sizeof(rx_buf));
+
+    // 3. Now send Downlink Key again: must succeed and inject CAN 0x21F!
+    hal_can_native_clear_sent_frame();
+    for (size_t i = 0; i < sizeof(key_cmd); i++) {
+        can_router_process_uart_byte(key_cmd[i]);
+    }
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, sent_frame.id);
+
+    // 4. Test 5000 ms post-handshake auto-unlock fallback
+    proto_hiworld_set_handshake_ms(hal_get_tick_ms());
+    TEST_ASSERT_FALSE(proto_hiworld_is_injection_unlocked());
+
+    proto_hiworld_set_handshake_ms(hal_get_tick_ms() - 5001);
+    TEST_ASSERT_TRUE(proto_hiworld_is_injection_unlocked());
+    hal_can_native_clear_sent_frame();
+    for (size_t i = 0; i < sizeof(key_cmd); i++) {
+        can_router_process_uart_byte(key_cmd[i]);
+    }
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x21F, sent_frame.id);
+}
+
+void test_integration_hiworld_downlink_trip_reset_20_frame_burst(void) {
+    hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
+    can_frame_t f_ign = { .id = 0x0F6, .dlc = 8, .data = { 0x08, 0, 0, 0, 0, 0, 0, 0 } };
+    can_router_process_can(&f_ign);
+
+    hal_can_native_clear_sent_frame();
+    // Send Trip 1 Reset via 0x1B: 5A A5 02 1B 01 01 1E
+    const uint8_t rst_cmd[] = { 0x5A, 0xA5, 0x02, 0x1B, 0x01, 0x01, 0x1E };
+    for (size_t i = 0; i < sizeof(rst_cmd); i++) {
+        can_router_process_uart_byte(rst_cmd[i]);
+    }
+
+    can_frame_t sent_frame;
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX8(0x8A, sent_frame.data[0]); /* 0x80 | 0x0A */
+    TEST_ASSERT_EQUAL_HEX8(0x06, sent_frame.data[1]);
+
+    // Verify 20 consecutive frames at 100ms intervals
+    for (int t = 1; t <= 19; t++) {
+        hal_can_native_clear_sent_frame();
+        can_router_periodic_100ms();
+        TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+        TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
+        TEST_ASSERT_EQUAL_HEX8(0x8A, sent_frame.data[0]);
+    }
+
+    // 20th tick clears reset mask back to 0x0A
+    hal_can_native_clear_sent_frame();
+    can_router_periodic_100ms();
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent_frame));
+    TEST_ASSERT_EQUAL_HEX32(0x167, sent_frame.id);
+    TEST_ASSERT_EQUAL_HEX8(0x0A, sent_frame.data[0]);
+}
+
