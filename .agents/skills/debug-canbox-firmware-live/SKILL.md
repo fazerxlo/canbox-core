@@ -136,15 +136,25 @@ When an unexpected popup, UI glitch, or periodic state update appears on the HU:
 
 ## 5. Flashing Canbox MCU & Deploying HU APK (ONLY After User Approval)
 
-### 5.1 NUC131 Build & Flash via ST-Link (`openocd_nuc131.cfg`)
-* **Never** use stock `interface/stlink.cfg` or OpenOCD `flash write_image` (NUC131 chip ID `0x11413102` requires `openocd_nuc131.cfg` + `tools/nuc131_flasher.py`, which automatically clears the boot token and runs `reset run`).
-* **One-Shot Build, Flash Application (`0x2000`) & Stop OpenOCD:**
+### 5.1 NUC131 Build, Fast Differential Flash & Live Diagnostics (`openocd_nuc131.cfg`)
+* **Never** use stock `interface/stlink.cfg` or OpenOCD `flash write_image` (NUC131 chip ID `0x11413102` requires `openocd_nuc131.cfg` + `tools/nuc131_flasher.py`, which automatically skips unchanged 512-byte flash pages, clears the boot token, and runs `reset run`).
+* **Keep `openocd` Persistent During a Debug Session:** Starting a new `openocd -f openocd_nuc131.cfg` process re-initializes the SWD DAP and resets the MCU's 3.0s sleep inactivity timer (`s_can_inactivity_ticks`). Start `openocd` once and only run `pkill -x openocd` at the end of the session (or pass `--stop-openocd` to `tools/nuc131_diag.py`).
+* **One-Shot Build & Fast Differential Flash Application (`0x2000`):**
   ```bash
-  ~/.platformio/penv/bin/pio run -s -e raise_nuc131 && (pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 >/tmp/openocd.log 2>&1 & sleep 0.5)) && python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000 && pkill -x openocd
+  ~/.platformio/penv/bin/pio run -s -e raise_nuc131 && (pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 >/tmp/openocd.log 2>&1 & sleep 0.5)) && python3 tools/nuc131_flasher.py .pio/build/raise_nuc131/program.bin 0x2000
   ```
+* **1-Call Live Register & Sleep/Glitch Verification (`tools/nuc131_diag.py`):**
+  - **Never** write ad-hoc inline `python3 -c` OpenOCD socket scripts or dump > 40 lines of `objdump -d` in context. Use `tools/nuc131_diag.py`:
+  ```bash
+  # Print live sleep/inact/ticks/GPIO/CAN status in 1 call:
+  python3 tools/nuc131_diag.py
+  # Verify deep-sleep entry + 10x transient wake glitch rejection (requires silent CAN bus):
+  python3 tools/nuc131_diag.py --test-sleep-glitch
+  ```
+* **Physical BSI Pre-Sleep Gotcha (`PHASE_VIE = 0x02`):** Even when workbench Ignition is OFF, if the Physical BSI still has `+12V` battery power, injecting **any** CAN frame (`cansend`) on `can0` wakes the BSI into a ~45-second `0x036` (`0E 00 00 0F 02 00 00 A0`) pre-sleep broadcast. Always run `python3 tools/nuc131_diag.py --test-sleep-glitch` **before** injecting CAN wake frames on `can0`.
 * **Flash Bootloader (`0x0000`, only if requested):**
   ```bash
-  ~/.platformio/penv/bin/pio run -s -e nuc131_bootloader && (pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 >/tmp/openocd.log 2>&1 & sleep 0.5)) && python3 tools/nuc131_flasher.py .pio/build/nuc131_bootloader/program.bin 0x0000 && pkill -x openocd
+  ~/.platformio/penv/bin/pio run -s -e nuc131_bootloader && (pgrep -x openocd >/dev/null || (openocd -f openocd_nuc131.cfg -d0 >/tmp/openocd.log 2>&1 & sleep 0.5)) && python3 tools/nuc131_flasher.py .pio/build/nuc131_bootloader/program.bin 0x0000
   ```
 
 ### 5.2 HU APK Build, Sign & Deploy (`../QF_Canbus_system`)
