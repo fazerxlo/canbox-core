@@ -125,7 +125,7 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
 - **Sync Header:** `0x5A 0xA5`
 - **Length ($L$):** `0x0C` (12 payload bytes)
 - **Command ID:** `0x1A` (26 decimal)
-- **Transmission:** Autonomous 5 Hz (every 200 ms) while ignition is ON (+APC / `0x0F6` Byte 0 Bit 3 set), or immediately on significant change ($\Delta\text{speed} \ge 2\text{ km/h}$, $\Delta\text{rpm} \ge 50$).
+- **Transmission:** 1 Hz keepalive (every 1000 ms) while ignition is ON (+APC / `0x0F6` Byte 0 Bit 3 set), and immediately on significant change ($\Delta\text{speed} \ge 2\text{ km/h}$, $\Delta\text{rpm} \ge 50$). Suppressed during active CAN sniffer mode.
 - **Payload Layout (12 Bytes - Big Endian):**
   - `Byte 0`: Status flags bitmask:
     - Bit 0: ACC/Ignition ON (`1=ON`)

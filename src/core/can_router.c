@@ -287,7 +287,7 @@ void can_router_process_can(const can_frame_t *frame) {
     // Immediately push powertrain & fluid telemetry on significant change (>= 2 km/h or >= 50 RPM)
     if (s_current_state.dirty.telemetry) {
         s_current_state.dirty.telemetry = false;
-        if (s_current_state.ignition_on) {
+        if (!can_sniffer_is_active() && s_current_state.ignition_on) {
             int32_t d_spd = (int32_t)s_current_state.speed_kmh - (int32_t)s_last_sent_state.speed_kmh;
             int32_t d_rpm = (int32_t)s_current_state.rpm - (int32_t)s_last_sent_state.rpm;
             if (d_spd < 0) d_spd = -d_spd;
@@ -612,6 +612,17 @@ void can_router_trigger_full_state_push(void) {
     }
 
     hu_protocol_send_telemetry_state(&s_current_state);
+    s_last_sent_state.speed_kmh = s_current_state.speed_kmh;
+    s_last_sent_state.rpm = s_current_state.rpm;
+    s_last_sent_state.coolant_temp_c = s_current_state.coolant_temp_c;
+    s_last_sent_state.oil_temp_c = s_current_state.oil_temp_c;
+    s_last_sent_state.fuel_liters = s_current_state.fuel_liters;
+    s_last_sent_state.fuel_percentage = s_current_state.fuel_percentage;
+    s_last_sent_state.fuel_low_warning = s_current_state.fuel_low_warning;
+    s_last_sent_state.gear = s_current_state.gear;
+    s_last_sent_state.trip.instant_fuel_deci = s_current_state.trip.instant_fuel_deci;
+    s_telemetry_periodic_timer = 0;
+
     hu_protocol_send_trip_instant(&s_current_state.trip);
     hu_protocol_send_trip1(&s_current_state.trip);
     hu_protocol_send_trip2(&s_current_state.trip);
@@ -696,9 +707,9 @@ void can_router_periodic_100ms(void) {
     // Periodic PSA car config / virtual MDF tick (100ms)
     psa_car_config_periodic_100ms();
 
-    // Broadcast periodic powertrain & fluid telemetry (Cmd 0x1A) at 5 Hz (200ms) while ignition is ON
-    if (s_current_state.ignition_on) {
-        if (++s_telemetry_periodic_timer >= 2) {
+    // Broadcast periodic powertrain & fluid telemetry (Cmd 0x1A/0xEB) at 1 Hz (1000ms) keepalive while ignition is ON
+    if (!can_sniffer_is_active() && s_current_state.ignition_on) {
+        if (++s_telemetry_periodic_timer >= 10) {
             s_telemetry_periodic_timer = 0;
             hu_protocol_send_telemetry_state(&s_current_state);
             s_last_sent_state.speed_kmh = s_current_state.speed_kmh;
@@ -716,8 +727,9 @@ void can_router_periodic_100ms(void) {
     }
 
     // Broadcast periodic states (Vehicle speed, RPM)
-    if (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||
-        s_current_state.rpm != s_last_sent_state.rpm) {
+    if (!can_sniffer_is_active() &&
+        (s_current_state.speed_kmh != s_last_sent_state.speed_kmh ||
+         s_current_state.rpm != s_last_sent_state.rpm)) {
 
         hu_protocol_send_telemetry(s_current_state.speed_kmh,
                                    s_current_state.rpm,
