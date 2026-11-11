@@ -314,7 +314,14 @@ class Nuc131HilTester:
 
         sub3a_pass = (can_transmitted == 0) and can_stb_remains_high and acc_remains_low
 
-        # Subtest 3B: True CAN Dominant Edge Wake
+        # Subtest 3A-2: Transient CAN_RX Glitch Rejection (< 5 us dominant pulse qualification)
+        # Verify PC.3 (CAN_STB) remains HIGH and CLK->PWRCON re-enters Power-Down (0x80)
+        clk_pwr_sub3a = self.openocd.read_word(0x50000200)
+        reentered_sleep = (clk_pwr_sub3a & 0x80) != 0
+        print(f"Subtest 3A-2 (Pulse Qualifier Re-Sleep Check): CLK_PWR=0x{clk_pwr_sub3a:08X} (PWR_DOWN_EN={reentered_sleep})")
+        sub3a_pass = sub3a_pass and reentered_sleep
+
+        # Subtest 3B: True CAN Dominant Edge Wake (8.0 us bit @ 125 kbps)
         print("Subtest 3B: Injecting 0x036 CAN Wake Frame...")
         frame_ign = pack_can_frame(0x036, bytes.fromhex("0E00000F010000A0"))
         # Send wake pulse

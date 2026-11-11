@@ -6,6 +6,14 @@
 
 #define HW_POLL_TIMEOUT 200000UL
 
+/* 22.1184 MHz HIRC: ~22.12 ticks per 1 us (TIMER1 with prescale = 0) */
+#define NUC_HIRC_TICKS_PER_US          22UL
+#define CAN_WAKE_INITIAL_WINDOW_TICKS  (8UL * NUC_HIRC_TICKS_PER_US)
+#define CAN_WAKE_MIN_INITIAL_LOW_TICKS (5UL * NUC_HIRC_TICKS_PER_US)
+#define CAN_WAKE_HEADER_WINDOW_TICKS   (80UL * NUC_HIRC_TICKS_PER_US)
+#define CAN_WAKE_MIN_BIT_LOW_TICKS     (6UL * NUC_HIRC_TICKS_PER_US)
+#define CAN_WAKE_MAX_BIT_LOW_TICKS     (48UL * NUC_HIRC_TICKS_PER_US)
+
 static volatile uint32_t s_ticks_ms = 0;
 
 /* Shared with hal_can_nuc131.c and latched by ISRs if an interrupt fires during the post-wake listen window */
@@ -84,6 +92,10 @@ hal_status_t hal_system_init(void) {
     CLK_SetModuleClock(WDT_MODULE, CLK_CLKSEL1_WDT_S_LIRC, 0);
     WDT_Open(WDT_TIMEOUT_2POW14, WDT_RESET_DELAY_130CLK, TRUE, FALSE);
 
+    // Enable TIMER1 clocked directly from 22.1184 MHz HIRC for sub-microsecond CAN wake qualification
+    CLK_EnableModuleClock(TMR1_MODULE);
+    CLK_SetModuleClock(TMR1_MODULE, CLK_CLKSEL1_TMR1_S_HIRC, 0);
+
     // Relock registers
     SYS_LockReg();
 
@@ -138,6 +150,92 @@ void hal_system_reboot(void) {
 
     SYS_ResetChip();
     while (1);
+}
+
+static bool qualify_can_rx_wakeup_pulse(void) {
+    /* Ensure TIMER1 is running in 24-bit continuous mode clocked directly from 22.1184 MHz HIRC (~22.12 ticks/us) */
+    if ((TIMER1->TCSR & (TIMER_TCSR_CEN_Msk | TIMER_TCSR_TDR_EN_Msk)) !=
+        (TIMER_TCSR_CEN_Msk | TIMER_TCSR_TDR_EN_Msk)) {
+        TIMER1->TCMPR = 0xFFFFFFUL;
+        TIMER1->TCSR  = TIMER_CONTINUOUS_MODE | TIMER_TCSR_TDR_EN_Msk | TIMER_TCSR_CEN_Msk;
+    }
+
+    uint32_t t_origin = TIMER1->TDR & 0xFFFFFFUL;
+
+    /* Step A (Initial Glitch Check):
+     * Sample PD.6 (CAN_RX) at 1 us intervals over a bounded 8 us window.
+     * Accounting for ~2-3 us HIRC wakeup latency after WFI, a genuine 8.0 us
+     * 125 kbps dominant bit holds PD.6 LOW for >= 5.0 us. */
+    uint32_t consecutive_low_us = 0U;
+    uint32_t t_low_start = t_origin;
+
+    for (uint32_t sample = 0U; sample < 8U; sample++) {
+        if ((PD->PIN & (1U << 6)) == 0U) {
+            if (consecutive_low_us == 0U) {
+                t_low_start = TIMER1->TDR & 0xFFFFFFUL;
+            }
+            consecutive_low_us++;
+            uint32_t low_ticks = (TIMER1->TDR - t_low_start) & 0xFFFFFFUL;
+            if (low_ticks >= CAN_WAKE_MIN_INITIAL_LOW_TICKS) {
+                return true;
+            }
+        } else if (consecutive_low_us > 0U) {
+            /* Initial LOW pulse ended before reaching 5.0 us; proceed to Step B */
+            break;
+        } else if (((TIMER1->TDR - t_origin) & 0xFFFFFFUL) >= CAN_WAKE_INITIAL_WINDOW_TICKS) {
+            break;
+        }
+
+        /* Wait 1 us (~22 HIRC ticks) while monitoring for premature rising edge */
+        uint32_t t_step = TIMER1->TDR & 0xFFFFFFUL;
+        uint32_t step_guard = 200U;
+        while ((((TIMER1->TDR - t_step) & 0xFFFFFFUL) < NUC_HIRC_TICKS_PER_US) && --step_guard) {
+            if ((PD->PIN & (1U << 6)) != 0U && consecutive_low_us > 0U) {
+                break;
+            }
+        }
+        if ((PD->PIN & (1U << 6)) == 0U && consecutive_low_us > 0U) {
+            uint32_t low_ticks = (TIMER1->TDR - t_low_start) & 0xFFFFFFUL;
+            if (low_ticks >= CAN_WAKE_MIN_INITIAL_LOW_TICKS) {
+                return true;
+            }
+        }
+    }
+
+    /* Step B (Second Dominant Bit Confirmation within 1 Frame Header):
+     * If the first pulse was already ending as the CPU woke up (e.g. a single 8 us SOF
+     * bit followed by recessive ID bits), monitor PD.6 for up to 80 us (10 bit times
+     * at 125 kbps) for the next falling edge (1 -> 0) and verify its LOW duration is
+     * between 6.0 us and 48.0 us (1 to 6 consecutive dominant bits). */
+    uint32_t wait_high_guard = 1000U;
+    while (((PD->PIN & (1U << 6)) == 0U) &&
+           (((TIMER1->TDR - t_origin) & 0xFFFFFFUL) < CAN_WAKE_HEADER_WINDOW_TICKS) &&
+           --wait_high_guard);
+
+    uint32_t window_guard = 8000U;
+    while ((((TIMER1->TDR - t_origin) & 0xFFFFFFUL) < CAN_WAKE_HEADER_WINDOW_TICKS) && --window_guard) {
+        if ((PD->PIN & (1U << 6)) == 0U) {
+            uint32_t edge_start = TIMER1->TDR & 0xFFFFFFUL;
+            uint32_t pulse_guard = 4000U;
+            while (((PD->PIN & (1U << 6)) == 0U) && --pulse_guard) {
+                uint32_t low_ticks = (TIMER1->TDR - edge_start) & 0xFFFFFFUL;
+                if (low_ticks > (CAN_WAKE_MAX_BIT_LOW_TICKS + NUC_HIRC_TICKS_PER_US)) {
+                    break; /* Reject stuck-dominant bus fault (> 6 dominant bits) */
+                }
+            }
+            uint32_t low_ticks = (TIMER1->TDR - edge_start) & 0xFFFFFFUL;
+            if (low_ticks >= CAN_WAKE_MIN_BIT_LOW_TICKS &&
+                low_ticks <= CAN_WAKE_MAX_BIT_LOW_TICKS) {
+                return true;
+            }
+            if (low_ticks > CAN_WAKE_MAX_BIT_LOW_TICKS) {
+                break;
+            }
+        }
+    }
+
+    /* Step C (Noise Rejection): No valid >= 5-6 us dominant bit observed */
+    return false;
 }
 
 static void hal_system_on_wakeup(bool woke_by_can) {
@@ -230,33 +328,94 @@ void hal_system_enter_deep_sleep(void) {
     CLK->PWRCON |= CLK_PWRCON_PD_WU_INT_EN_Msk;
     NVIC_EnableIRQ(PWRWU_IRQn);
 
+    // Ensure TIMER1 is armed on 22.1184 MHz HIRC for immediate post-WFI pulse qualification
+    CLK->APBCLK |= CLK_APBCLK_TMR1_EN_Msk;
+    CLK->CLKSEL1 = (CLK->CLKSEL1 & ~CLK_CLKSEL1_TMR1_S_Msk) | CLK_CLKSEL1_TMR1_S_HIRC;
+    TIMER1->TCMPR = 0xFFFFFFUL;
+    TIMER1->TCSR  = TIMER_CONTINUOUS_MODE | TIMER_TCSR_TDR_EN_Msk | TIMER_TCSR_CEN_Msk;
+
     /* 5. Enable Cortex-M0 Deep Sleep in SCB */
     SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
 
-    /* 6. Enable Chip Power-Down mode and wait for CPU WFI */
-    CLK->PWRCON |= (CLK_PWRCON_PWR_DOWN_EN_Msk | CLK_PWRCON_PD_WAIT_CPU_Msk);
+    bool woke_by_can = false;
 
-    SYS_LockReg();
+    for (;;) {
+        // Clear all GPIO interrupt status flags, CAN wake status, and NVIC pending bits
+        // immediately prior to entering Power-Down WFI
+        PA->ISRC = PA->ISRC;
+        PB->ISRC = PB->ISRC;
+        PC->ISRC = PC->ISRC;
+        PD->ISRC = PD->ISRC;
+        PE->ISRC = PE->ISRC;
+        PF->ISRC = PF->ISRC;
+        CAN0->WU_STATUS = 0;
+        CLK->PWRCON |= CLK_PWRCON_PD_WU_STS_Msk;
 
-    /* 7. Stop CPU core until external interrupt occurs */
-    __asm volatile("wfi");
+        NVIC_ClearPendingIRQ(CAN0_IRQn);
+        NVIC_ClearPendingIRQ(GPCDEF_IRQn);
+        NVIC_ClearPendingIRQ(GPAB_IRQn);
+        NVIC_ClearPendingIRQ(PWRWU_IRQn);
 
-    /* ========================================================= */
-    /*   MCU WAKES UP HERE IMMEDIATELY UPON BUS/KEY TRANSITION   */
-    /* ========================================================= */
+        /* 6. Enable Chip Power-Down mode and wait for CPU WFI */
+        SYS_UnlockReg();
+        CLK->PWRCON |= (CLK_PWRCON_PWR_DOWN_EN_Msk | CLK_PWRCON_PD_WAIT_CPU_Msk);
+        SYS_LockReg();
 
-    /* Sample raw hardware wake flags while PRIMASK=1 before any ISR clears them:
-     * - PD.6 falling edge (CAN_RX dominant pulse) or PD.6 actively dominant LOW
-     * - CAN0 hardware wake-up status bit
-     * - PA.0 rising edge (Ignition sense) verified with PA.0 pin still HIGH */
-    uint32_t pd_wake = PD->ISRC & (1U << 6);
-    uint32_t pa_wake = (PA->ISRC & (1U << 0)) && ((PA->PIN & (1U << 0)) != 0U);
-    uint32_t can_wu  = CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk;
+        /* 7. Stop CPU core until external interrupt occurs */
+        __asm volatile("wfi");
 
-    bool woke_by_can = (pd_wake != 0U) ||
-                       (pa_wake != 0U) ||
-                       (can_wu != 0U)  ||
-                       ((PD->PIN & (1U << 6)) == 0U);
+        /* ========================================================= */
+        /*   MCU WAKES UP HERE IMMEDIATELY UPON BUS/KEY TRANSITION   */
+        /* ========================================================= */
+
+        /* Ensure Power-Down bit is cleared and 22.1184 MHz HIRC is stable so GPIO
+         * and TIMER1 registers are clocked before sampling pins or pulse width */
+        SYS_UnlockReg();
+        CLK->PWRCON &= ~CLK_PWRCON_PWR_DOWN_EN_Msk;
+        SYS_LockReg();
+        uint32_t hirc_wait = 1000U;
+        while (!(CLK->CLKSTATUS & CLK_CLKSTATUS_OSC22M_STB_Msk) && --hirc_wait);
+
+        /* Sample raw hardware wake flags while PRIMASK=1 before any ISR clears them:
+         * 1. PA.0 rising edge (Ignition sense) verified with PA.0 pin actively HIGH
+         * 2. PB.0 falling edge (UART0_RXD start bit)
+         * 3. PD.6 falling edge (CAN_RX) or CAN0 hardware wake-up status bit */
+        bool pa_wake  = ((PA->ISRC & (1U << 0)) != 0U) && ((PA->PIN & (1U << 0)) != 0U);
+        bool pb_wake  = (PB->ISRC & (1U << 0)) != 0U;
+        bool can_edge = ((PD->ISRC & (1U << 6)) != 0U) ||
+                        ((CAN0->WU_STATUS & CAN_WUSTATUS_WAKUP_STS_Msk) != 0U) ||
+                        ((PD->PIN & (1U << 6)) == 0U);
+
+        if (pa_wake) {
+            woke_by_can = true;
+            break;
+        }
+
+        if (can_edge) {
+            bool valid_can_bit = qualify_can_rx_wakeup_pulse();
+            if (valid_can_bit) {
+                woke_by_can = true;
+                break;
+            }
+            if (!pb_wake) {
+                /* Sub-bit electrical noise rejected (< 50 us):
+                 * Clear wake flags and immediately re-enter deep sleep without waking
+                 * CAN transceiver (PC.3 stays HIGH), PLL/SysTick, or can_router. */
+                PD->ISRC = (1U << 6);
+                CAN0->WU_STATUS = 0;
+                CLK->PWRCON |= CLK_PWRCON_PD_WU_STS_Msk;
+                NVIC_ClearPendingIRQ(CAN0_IRQn);
+                NVIC_ClearPendingIRQ(GPCDEF_IRQn);
+                NVIC_ClearPendingIRQ(PWRWU_IRQn);
+                continue;
+            }
+        }
+
+        if (pb_wake) {
+            woke_by_can = false;
+            break;
+        }
+    }
 
     /* Disarm wake-only GPIO interrupts and clear pending flags before re-enabling IRQs */
     GPIO_DisableInt(PD, 6);
@@ -270,6 +429,7 @@ void hal_system_enter_deep_sleep(void) {
     CAN0->WU_STATUS = 0;
     CLK->PWRCON |= CLK_PWRCON_PD_WU_STS_Msk;
 
+    NVIC_ClearPendingIRQ(CAN0_IRQn);
     NVIC_ClearPendingIRQ(GPCDEF_IRQn);
     NVIC_ClearPendingIRQ(GPAB_IRQn);
     NVIC_ClearPendingIRQ(PWRWU_IRQn);
@@ -294,7 +454,8 @@ void hal_system_enter_deep_sleep(void) {
                 can_router_process_uart_byte(b);
                 wake_listen_start = s_ticks_ms; /* Extend window while active packet streams */
             }
-            if (s_irq_woke_by_can || g_nuc131_can_woke_flag || ((PD->PIN & (1U << 6)) == 0U)) {
+            if (s_irq_woke_by_can || g_nuc131_can_woke_flag ||
+                (((PD->PIN & (1U << 6)) == 0U) && qualify_can_rx_wakeup_pulse())) {
                 PC->DOUT &= ~(1U << 3);
                 can_router_notify_wake();
                 break;
@@ -309,4 +470,6 @@ void hal_system_enter_deep_sleep(void) {
             hal_watchdog_feed();
         }
     }
+
+    TIMER1->TCSR = 0;
 }
