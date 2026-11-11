@@ -193,5 +193,6 @@ const hu_protocol_driver_t g_hu_protocol_raise = {
     .send_radar = raise_send_radar,
     .send_reverse = raise_send_reverse,
     .send_audio_settings = NULL,
+    .send_sniffer_packet = NULL,
     .send_heartbeat = raise_send_heartbeat,
 };

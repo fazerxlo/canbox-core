@@ -64,6 +64,7 @@ Embedded C99 CAN-to-UART bridge for **Peugeot 407 (PSA CAN2004 Comfort @ 125 kbp
 | **Clock / MFD Emulation** | `0x3F6` (TX), `0x0DF` (TX), `0x167` (TX), `0x525` | `0xCB`, `0xA6`, `0x9A`, `0xCA` | `psa_407_car_config.c`, `test_407_car_config.c` | `407_10_BSI_SETTINGS_CLOCK_SYNC.md` |
 | **Car Config (BSI)** | `0x361`, `0x260`, `0x15B` (TX) | `0x71`, `0x72`, `0x76`, `0x79`, `0x7B`, `0x7D` | `psa_407_car_config.c`, `test_407_car_config.c` | `407_11_CAR_CONFIGURATION_OPTIONS.md` |
 | **Alerts & Diagnostics** | `0x120`, `0x1A1` | `0x42`, `0xEA`, `0xFA` | `psa_407_alerts.c`, `test_407_alerts.c` | `407_12_ALERTS_DIAGNOSTICS.md` |
+| **CAN Sniffer** | All 407 IDs (RX / TX) | `0xD0`, `0xD1` | `can_sniffer.c`, `test_can_sniffer.c` | `407_13_CAN_SNIFFER.md` |
 | **Handshake / Link** | — | `0x24`, `0x30`, `0xFE`, `0xFF`, `0xF0` | `hiworld_connection.c`, `proto_hiworld.c`, `test_hiworld_parser.c` | `GENERIC_CONNECTION_PHASE.md` |
 | **OEM Firmware Diffs** | All 407 IDs | All 407 Cmds | `profile_psa.c`, `hiworld_psa_builders.c` | `CUSTOMIZATIONS_AND_DIFFERENCES.md` |
 

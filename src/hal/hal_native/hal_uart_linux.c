@@ -15,8 +15,22 @@
 #include <termios.h>
 
 #define PTY_SYMLINK_PATH "/tmp/ttyCanbox"
+#define HAL_UART_NATIVE_MAX_TX_HISTORY 2048
 
 static int s_master_fd = -1;
+static uint8_t s_native_tx_history[HAL_UART_NATIVE_MAX_TX_HISTORY];
+static size_t  s_native_tx_history_len = 0;
+
+void hal_uart_native_clear_tx_history(void) {
+    s_native_tx_history_len = 0;
+}
+
+size_t hal_uart_native_get_tx_history(uint8_t *out_buf, size_t max_len) {
+    if (!out_buf || max_len == 0) return 0;
+    size_t count = (s_native_tx_history_len < max_len) ? s_native_tx_history_len : max_len;
+    memcpy(out_buf, s_native_tx_history, count);
+    return count;
+}
 
 static speed_t baudrate_to_speed(uart_baudrate_t baudrate) {
     switch (baudrate) {
@@ -148,8 +162,17 @@ size_t hal_uart_read(uint8_t *buffer, size_t max_len) {
 }
 
 hal_status_t hal_uart_write(const uint8_t *data, size_t len) {
-    if (s_master_fd < 0 || !data || len == 0) {
+    if (!data || len == 0) {
         return HAL_STATUS_ERROR;
+    }
+
+    if (s_native_tx_history_len + len <= sizeof(s_native_tx_history)) {
+        memcpy(&s_native_tx_history[s_native_tx_history_len], data, len);
+        s_native_tx_history_len += len;
+    }
+
+    if (s_master_fd < 0) {
+        return HAL_STATUS_OK;
     }
 
     size_t total_written = 0;

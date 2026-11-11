@@ -24,7 +24,8 @@
 | **13. Cruise/Limiter Presets & Powertrain** | 3 | 0 | 3 | 0 | 0% |
 | **14. Secondary Display & ID3 Navigation** | 2 | 0 | 0 | 2 | 0% |
 | **15. Commercial Hardware & IAP Bootloader** | 2 | 2 | 0 | 0 | 100% |
-| **Overall** | **57** | **39** | **6** | **12** | **68%** |
+| **16. CAN Delta Sniffer & Replay** | 2 | 2 | 0 | 0 | 100% |
+| **Overall** | **59** | **41** | **6** | **12** | **69%** |
 
 ---
 
@@ -68,6 +69,7 @@
 | `[ ]` | `0xC2` | Date & Time Broadcast | `0x08` | `0x228` | `hiworld_connection.c` | Uplink clock broadcast planned |
 | `[-]` | `0xCB` | Powertrain Telemetry | `0x0B` | `0x0B6`, `0x165` | `psa_407_telemetry.c` | Extended powertrain packet packing planned |
 | `[x]` | `0xEA` | Extended CAN Alerts | `0x06`/Var | `0x1A1`, `0x120` | `psa_407_alerts.c`, `proto_hiworld_adapter.c` | 15-bit PSA DTCs, severity, categories, empty clear frame |
+| `[x]` | `0xD1` | CAN Delta Sniffer Batch | `4..52` | All IDs | `can_sniffer.c`, `hu_protocol.c` | `CANBOX_SPEC_HIWORLD_407_13_CAN_SNIFFER.md` |
 | `[x]` | `0xFF` | Heartbeat Ping | `0x02` | Timer (1 Hz) | `proto_hiworld_adapter.c` | `5A A5 01 FF 01 00` every 1000 ms |
 
 ---
@@ -99,6 +101,7 @@
 | `[x]` | `0xAD` | RD4 Audio Source Routing | `0x02`..`0x03` | `0x21F` | `psa_source_arbiter.c`, `can_router.c` | Line In 1 / AUX 1 routing (`0xAD 03 03` / `0xAD 02 01`) |
 | `[ ]` | `0xCA` | System Units Downlink | `0x02` | `0x15B` | `PEUGEOT_HIWORLD_COMMANDS.md` | Android settings syncing units to BSI |
 | `[x]` | `0xCB` | GPS Date & Time Set | `0x07` | `0x228` | `hiworld_connection.c` | `CANBOX_SPEC_HIWORLD_407_10_BSI_SETTINGS_CLOCK_SYNC.md` |
+| `[x]` | `0xD0` | Sniffer Session Control | `0x02` | N/A | `proto_hiworld_adapter.c` | Mode 0/1 start/stop sniffer, ACK `5A A5 01 FF D0 CF` |
 | `[x]` | `0xC2`/`0xE0` | MCU IAP Flash Transfer | Var | N/A | `hiworld_iap_nuc131.c`, `pack_hiworld_iap.py` | Verified on OpenCanbox hardware (NUC131 FMC vector remap & 136B container) |
 | `[ ]` | `0xE1`/`0xE4` | Media Metadata / ID3 to MFD | `13..32` | `0x3B6` | `PEUGEOT_HIWORLD_COMMANDS.md` | Forward song title & artist to car display |
 | `[x]` | `0xF1` | Dedicated RD4 UI Downlink | `0x02`..`0x03` | `0x21F` | `PEUGEOT_HIWORLD_COMMANDS.md` | On-screen Seek, Step, Presets 1..6 translated to stalk frames |

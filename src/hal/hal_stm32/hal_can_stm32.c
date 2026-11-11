@@ -75,8 +75,18 @@ hal_status_t hal_can_init(can_baudrate_t baudrate) {
     return HAL_STATUS_OK;
 }
 
+static hal_can_tx_hook_t s_can_tx_hook = NULL;
+
+void hal_can_set_tx_hook(hal_can_tx_hook_t hook) {
+    s_can_tx_hook = hook;
+}
+
 hal_status_t hal_can_send(const can_frame_t *frame) {
     if (!frame) return HAL_STATUS_ERROR;
+
+    if (s_can_tx_hook) {
+        s_can_tx_hook(frame);
+    }
 
     uint32_t tsr = CAN1->TSR;
     uint8_t mailbox = 0xFF;

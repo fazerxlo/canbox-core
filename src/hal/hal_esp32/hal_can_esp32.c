@@ -66,9 +66,19 @@ hal_status_t hal_can_set_filters(const can_filter_t *filters, uint8_t count) {
     return HAL_STATUS_OK;
 }
 
+static hal_can_tx_hook_t s_can_tx_hook = NULL;
+
+void hal_can_set_tx_hook(hal_can_tx_hook_t hook) {
+    s_can_tx_hook = hook;
+}
+
 hal_status_t hal_can_send(const can_frame_t *frame) {
     if (!s_twai_installed || !frame) {
         return HAL_STATUS_ERROR;
+    }
+
+    if (s_can_tx_hook) {
+        s_can_tx_hook(frame);
     }
 
     twai_message_t tx_msg;

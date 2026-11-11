@@ -1,9 +1,11 @@
 #include "core/can_router.h"
+#include "core/can_sniffer.h"
 #include "core/vehicle_profile.h"
 #include "profiles/peugeot_407.h"
 #include "profiles/psa_source_arbiter.h"
 #include "protocols/hu_protocol.h"
 #include "hal/hal_gpio.h"
+#include "hal/hal_can.h"
 #include <string.h>
 
 static vehicle_state_t s_current_state;
@@ -46,6 +48,12 @@ bool can_router_is_id_allowed(uint32_t can_id) {
         return false;
     }
     return (s_allowed_ids_bitmask[can_id >> 3] & (uint8_t)(1U << (can_id & 7))) != 0;
+}
+
+static void on_can_tx_sniffer_hook(const can_frame_t *frame) {
+    if (can_sniffer_is_active()) {
+        can_sniffer_on_can_frame(frame, true, hal_get_tick_ms());
+    }
 }
 
 void can_router_init(void) {
@@ -98,6 +106,8 @@ void can_router_init(void) {
     vehicle_profile_init();
     hu_protocol_init();
     psa_source_arbiter_init();
+    can_sniffer_init();
+    hal_can_set_tx_hook(on_can_tx_sniffer_hook);
     can_router_rebuild_filter();
 }
 
@@ -111,12 +121,25 @@ void can_router_process_can(const can_frame_t *frame) {
     }
     s_can_inactivity_ticks = 0;
 
+    can_sniffer_on_can_frame(frame, false, hal_get_tick_ms());
+
     // Reject extended (29-bit) or unmapped standard CAN IDs early (O(1) static bitmask)
     if (frame->is_extended || !can_router_is_id_allowed(frame->id)) {
         return;
     }
 
     vehicle_profile_process_frame(frame, &s_current_state);
+
+    // During active CAN sniffing:
+    // 1. Hold ACC status ON (GPIO_PIN_HEADUNIT_POWER = true)
+    // 2. Do not change lighting (GPIO_PIN_ILL_OUT unchanged)
+    // 3. Do not send any action commands or UI triggers to Head Unit
+    if (can_sniffer_is_active()) {
+        hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, true);
+        memset(&s_current_state.dirty, 0, sizeof(s_current_state.dirty));
+        s_last_sent_state = s_current_state;
+        return;
+    }
 
     // Immediately push illumination hardware trigger on lighting change
     bool ill_active = s_current_state.lights.side_light ||
@@ -630,6 +653,18 @@ void can_router_process_uart_byte(uint8_t byte) {
 }
 
 void can_router_periodic_100ms(void) {
+    // While Sniffer Mode is active:
+    // 1. Hold ACC status ON (GPIO_PIN_HEADUNIT_POWER = true)
+    // 2. Prevent sleep / inactivity timeout
+    // 3. Suppress all non-essential background action and resync bursts
+    // 4. Send only heartbeat ping to keep HU link alive
+    if (can_sniffer_is_active()) {
+        s_can_inactivity_ticks = 0;
+        hal_gpio_write(GPIO_PIN_HEADUNIT_POWER, true);
+        hu_protocol_send_heartbeat();
+        return;
+    }
+
     // Bus Inactivity & Safe Sleep Watchdog (3.0s / 30 ticks of total CAN silence)
     if (++s_can_inactivity_ticks >= 30) {
         s_can_inactivity_ticks = 30; /* Clamp */
@@ -704,7 +739,9 @@ void can_router_periodic_100ms(void) {
     if (any_door_open) {
         if (++s_doors_periodic_timer >= 10) {
             s_doors_periodic_timer = 0;
-            hu_protocol_send_doors(&s_current_state.doors);
+            if (!can_sniffer_is_active()) {
+                hu_protocol_send_doors(&s_current_state.doors);
+            }
         }
     } else {
         s_doors_periodic_timer = 0;
@@ -713,7 +750,7 @@ void can_router_periodic_100ms(void) {
     // Periodically refresh TPMS telemetry every 30 seconds (300 * 100ms ticks)
     if (++s_tpms_periodic_timer >= 300) {
         s_tpms_periodic_timer = 0;
-        if (s_current_state.tpms.valid) {
+        if (!can_sniffer_is_active() && s_current_state.tpms.valid) {
             hu_protocol_send_tpms(&s_current_state.tpms);
         }
     }
@@ -738,13 +775,15 @@ void can_router_periodic_100ms(void) {
     // Ensures Android Head Unit recovers state after a silent reboot or app restart
     if (++s_bulk_resync_timer >= 600) {
         s_bulk_resync_timer = 0;
-        hu_protocol_send_doors(&s_current_state.doors);
-        hu_protocol_send_central_state1(&s_current_state.config);
-        hu_protocol_send_central_state2(&s_current_state.config, &s_current_state);
-        if (s_current_state.audio.valid && s_current_state.audio.active_mode == 0) {
-            vehicle_audio_settings_t sync_audio = s_current_state.audio;
-            sync_audio.active_mode = 0;
-            hu_protocol_send_audio_settings(&sync_audio);
+        if (!can_sniffer_is_active()) {
+            hu_protocol_send_doors(&s_current_state.doors);
+            hu_protocol_send_central_state1(&s_current_state.config);
+            hu_protocol_send_central_state2(&s_current_state.config, &s_current_state);
+            if (s_current_state.audio.valid && s_current_state.audio.active_mode == 0) {
+                vehicle_audio_settings_t sync_audio = s_current_state.audio;
+                sync_audio.active_mode = 0;
+                hu_protocol_send_audio_settings(&sync_audio);
+            }
         }
     }
 
@@ -762,7 +801,7 @@ void can_router_periodic_100ms(void) {
     // Periodic slow resync for Radio & Media states (60 seconds / 600 ticks)
     if (++s_media_resync_timer >= 600) {
         s_media_resync_timer = 0;
-        if (!psa_source_arbiter_is_source_filtered() && s_current_state.media.radio.power_status != 0) {
+        if (!can_sniffer_is_active() && !psa_source_arbiter_is_source_filtered() && s_current_state.media.radio.power_status != 0) {
             hu_protocol_send_radio_state(&s_current_state.media.radio);
             if (s_current_state.media.radio.source_mode < 0x20) {
                 hu_protocol_send_radio_presets(&s_current_state.media.radio);

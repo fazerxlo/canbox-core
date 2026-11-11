@@ -2,6 +2,7 @@ set(srcs
     "main_esp32.c"
     "core/canbox_version.c"
     "core/can_router.c"
+    "core/can_sniffer.c"
     "core/ring_buffer.c"
     "core/vehicle_profile.c"
     "profiles/profile_psa.c"

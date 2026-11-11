@@ -212,6 +212,12 @@ void hu_protocol_send_central_state2(const vehicle_config_t *config, const vehic
     }
 }
 
+void hu_protocol_send_sniffer_packet(uint8_t subtype, const uint8_t *payload, size_t len) {
+    if (s_active_driver && s_active_driver->send_sniffer_packet) {
+        s_active_driver->send_sniffer_packet(subtype, payload, len);
+    }
+}
+
 void hu_protocol_send_heartbeat(void) {
     if (s_active_driver && s_active_driver->send_heartbeat) {
         s_active_driver->send_heartbeat();

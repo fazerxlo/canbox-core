@@ -375,6 +375,20 @@ int main(void) {
     RUN_TEST(test_hiworld_query_cmd_0x6a_parsing);
     RUN_TEST(test_hiworld_downlink_gate_unlock_cmd_0x7d_25_01_parsing);
 
+    // CAN Sniffer Mode (30-second Reconstructable Delta Sniffer)
+    extern void test_can_sniffer_0xd0_start_stop_and_ack(void);
+    extern void test_can_sniffer_dedup_and_delta_trigger(void);
+    extern void test_can_sniffer_tx_logging_and_filter_bypass(void);
+    extern void test_can_sniffer_pacing_and_summary_flush(void);
+    extern void test_can_sniffer_suppresses_hu_actions_locks_acc_and_lights(void);
+    extern void test_can_sniffer_hard_30s_timeout_without_hu_stop(void);
+    RUN_TEST(test_can_sniffer_0xd0_start_stop_and_ack);
+    RUN_TEST(test_can_sniffer_dedup_and_delta_trigger);
+    RUN_TEST(test_can_sniffer_tx_logging_and_filter_bypass);
+    RUN_TEST(test_can_sniffer_pacing_and_summary_flush);
+    RUN_TEST(test_can_sniffer_suppresses_hu_actions_locks_acc_and_lights);
+    RUN_TEST(test_can_sniffer_hard_30s_timeout_without_hu_stop);
+
     return UNITY_END();
 }
 

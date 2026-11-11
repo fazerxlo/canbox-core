@@ -88,6 +88,8 @@ extern "C" {
 #define HIWORLD_CMD_DSP_STATE_SET         0xAD /* 173 */
 #define HIWORLD_CMD_UNIT_SET              0xCA /* 204 */
 #define HIWORLD_CMD_DATE_TIME_SET         0xCB /* 203 */
+#define HIWORLD_CMD_SNIFFER_CONTROL       0xD0 /* 208 - On-demand sniffer downlink */
+#define HIWORLD_CMD_SNIFFER_DATA          0xD1 /* 209 - Compact sniffer uplink batch */
 #define HIWORLD_CMD_HOST_SOURCE_INFO      0xE1 /* 225 */
 #define HIWORLD_CMD_ID3_INFO              0xE4 /* 228 */
 

@@ -3,6 +3,7 @@
 #include "hal/hal_uart.h"
 #include "hal/hal_gpio.h"
 #include "core/can_router.h"
+#include "core/can_sniffer.h"
 
 int main(void) {
     hal_system_init();
@@ -13,6 +14,7 @@ int main(void) {
     can_router_init();
 
     uint32_t last_heartbeat = 0;
+    uint32_t last_sniffer_tick = 0;
 
     while (1) {
         bool activity = false;
@@ -29,6 +31,11 @@ int main(void) {
         }
 
         uint32_t now = hal_get_tick_ms();
+        if ((now - last_sniffer_tick) >= 10) {
+            last_sniffer_tick = now;
+            can_sniffer_poll_10ms(now);
+        }
+
         if ((now - last_heartbeat) >= 100) {
             last_heartbeat = now;
             can_router_periodic_100ms();

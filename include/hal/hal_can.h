@@ -33,6 +33,13 @@ typedef struct {
     bool     is_extended;
 } can_filter_t;
 
+typedef void (*hal_can_tx_hook_t)(const can_frame_t *frame);
+
+/**
+ * @brief Register a hook called whenever a frame is sent via hal_can_send().
+ */
+void hal_can_set_tx_hook(hal_can_tx_hook_t hook);
+
 /**
  * @brief Initialize the CAN controller and physical transceiver.
  */

@@ -37,6 +37,7 @@ void hu_protocol_send_media_state(const vehicle_cdc_t *cdc);
 void hu_protocol_send_feature_enables(const uint8_t *feat1, const uint8_t *feat2);
 void hu_protocol_send_central_state1(const vehicle_config_t *config);
 void hu_protocol_send_central_state2(const vehicle_config_t *config, const vehicle_state_t *state);
+void hu_protocol_send_sniffer_packet(uint8_t subtype, const uint8_t *payload, size_t len);
 
 #ifdef __cplusplus
 }

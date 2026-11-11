@@ -5,6 +5,7 @@
 #include "proto_hiworld.h"
 #include "protocols/hiworld_psa_builders.h"
 #include "core/can_router.h"
+#include "core/can_sniffer.h"
 #include "profiles/peugeot_407.h"
 #include "profiles/psa_source_arbiter.h"
 #include "hal/hal_uart.h"
@@ -339,6 +340,18 @@ static void on_hiworld_packet_received(const hiworld_packet_t *packet) {
         *(volatile uint32_t *)0x20000000 = 0x55AA55AA;
         /* Reboot into bootloader */
         hal_system_reboot();
+    } else if (packet->cmd == HIWORLD_CMD_SNIFFER_CONTROL) { /* 0xD0 */
+        uint8_t mode = (packet->payload_len >= 1) ? packet->payload[0] : 0x01;
+        uint8_t duration_s = (packet->payload_len >= 2) ? packet->payload[1] : SNIFFER_MAX_DURATION_S;
+        if (duration_s == 0 || duration_s > SNIFFER_MAX_DURATION_S) {
+            duration_s = SNIFFER_MAX_DURATION_S;
+        }
+        uint32_t now_ms = hal_get_tick_ms();
+        if (mode == 0x00) {
+            can_sniffer_stop(now_ms);
+        } else {
+            can_sniffer_start(mode, duration_s, now_ms);
+        }
     }
 }
 
@@ -1039,6 +1052,22 @@ static void hiworld_send_central_state2(const vehicle_config_t *config, const ve
     }
 }
 
+static void hiworld_send_sniffer_packet(uint8_t subtype, const uint8_t *payload, size_t len) {
+    uint8_t tx_payload[64];
+    if (len + 1 > sizeof(tx_payload)) {
+        return;
+    }
+    tx_payload[0] = subtype;
+    if (len > 0 && payload != NULL) {
+        memcpy(&tx_payload[1], payload, len);
+    }
+    uint8_t tx_frame[70];
+    size_t frame_len = proto_hiworld_serialize(HIWORLD_CMD_SNIFFER_DATA, tx_payload, (uint8_t)(len + 1), tx_frame, sizeof(tx_frame));
+    if (frame_len > 0) {
+        hal_uart_write(tx_frame, frame_len);
+    }
+}
+
 const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .id = HU_PROTOCOL_HIWORLD,
     .name = "Hiworld",
@@ -1069,5 +1098,6 @@ const hu_protocol_driver_t g_hu_protocol_hiworld = {
     .send_feature_enables = hiworld_send_feature_enables,
     .send_central_state1 = hiworld_send_central_state1,
     .send_central_state2 = hiworld_send_central_state2,
+    .send_sniffer_packet = hiworld_send_sniffer_packet,
     .send_heartbeat = hiworld_send_heartbeat,
 };
