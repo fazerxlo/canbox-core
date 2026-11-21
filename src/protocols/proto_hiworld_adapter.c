@@ -394,9 +394,9 @@ static uint8_t map_wheel_key_to_hiworld(wheel_key_t key) {
         case WHEEL_KEY_SRC:          return 0x0B;
         case WHEEL_KEY_SCROLL_UP:    return 0x12;
         case WHEEL_KEY_SCROLL_DOWN:  return 0x11;
-        case WHEEL_KEY_PHONE_ACCEPT: return 0x09;
-        case WHEEL_KEY_PHONE_REJECT: return 0x0A;
-        case WHEEL_KEY_VOICE:        return 0x05;
+        case WHEEL_KEY_PHONE_ACCEPT: return 0x05;
+        case WHEEL_KEY_PHONE_REJECT: return 0x06;
+        case WHEEL_KEY_VOICE:        return 0x04;
         case WHEEL_KEY_TRIP:         return 0x14;
         case WHEEL_KEY_STALK_LEFT:   return 0x40;
         default:                     return 0x00;
