@@ -18,6 +18,7 @@ typedef enum {
 } psa_station_scroll_state_t;
 
 static psa_station_scroll_state_t s_scroll_state = STATION_LIST_SCROLL_IDLE;
+static bool s_fascia_key_active = false;
 
 void psa_source_arbiter_init(void) {
     memset(&s_arbiter, 0, sizeof(s_arbiter));
@@ -26,6 +27,7 @@ void psa_source_arbiter_init(void) {
     s_target_reached_tick_ms = 0;
     s_last_station_list_scroll_ms = 0;
     s_scroll_state = STATION_LIST_SCROLL_IDLE;
+    s_fascia_key_active = false;
 }
 
 const psa_source_arbiter_t *psa_source_arbiter_get_context(void) {
@@ -413,23 +415,85 @@ void psa_source_arbiter_handle_f1_cmd(uint8_t type, uint8_t param) {
     }
 }
 
+static void psa_source_arbiter_send_fascia_3e5(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b5) {
+    if (can_router_is_bus_sleeping() || !psa_car_config_is_mdf_present()) {
+        return;
+    }
+    can_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.id = PSA_CAN_ID_CONSOLE_3E5;
+    frame.dlc = 6;
+    frame.data[0] = b0;
+    frame.data[1] = b1;
+    frame.data[2] = b2;
+    frame.data[5] = b5;
+    hal_can_send(&frame);
+}
+
 void psa_source_arbiter_handle_downlink_key(uint8_t key_code, uint8_t press_state) {
-    if (press_state == 0) return;
+    if (press_state == 0) {
+        if (s_fascia_key_active) {
+            s_fascia_key_active = false;
+            psa_source_arbiter_send_fascia_3e5(0x00, 0x00, 0x00, 0x00);
+        }
+        return;
+    }
+
+    /* 1. Steering stalk / media controls -> CAN 0x21F */
     switch (key_code) {
-        case 0x01: psa_source_arbiter_pulse_key(0x08); break; /* Vol+ */
-        case 0x02: psa_source_arbiter_pulse_key(0x04); break; /* Vol- */
-        case 0x03: psa_source_arbiter_pulse_key(0x0C); break; /* Mute */
-        case 0x08: psa_source_arbiter_pulse_key(0x80); break; /* Seek+ / Next */
-        case 0x09: psa_source_arbiter_pulse_key(0x40); break; /* Seek- / Prev */
-        case 0x0B: psa_source_arbiter_pulse_source(); break;  /* Source */
-        case 0x11: psa_source_arbiter_send_rotary_step(-1); break; /* Scroll Down */
-        case 0x12: psa_source_arbiter_send_rotary_step(+1); break; /* Scroll Up */
-        case 0x19: psa_source_arbiter_pulse_key(0x40); break; /* Left / Seek- */
-        case 0x1A: psa_source_arbiter_pulse_key(0x80); break; /* Right / Seek+ */
-        case 0x24: psa_source_arbiter_pulse_key(0x10); break; /* OK */
-        case 0x25: psa_source_arbiter_pulse_key(0x20); break; /* ESC */
+        case 0x01: psa_source_arbiter_pulse_key(0x08); return; /* Vol+ */
+        case 0x02: psa_source_arbiter_pulse_key(0x04); return; /* Vol- */
+        case 0x03: psa_source_arbiter_pulse_key(0x0C); return; /* Mute */
+        case 0x08: psa_source_arbiter_pulse_key(0x80); return; /* Seek+ / Next */
+        case 0x09: psa_source_arbiter_pulse_key(0x40); return; /* Seek- / Prev */
+        case 0x0B: /* Source */
+        case 0x26: /* QF_Canbus_system forwardPanelKeyBean Src */
+            psa_source_arbiter_pulse_source();
+            return;
+        case 0x11: psa_source_arbiter_send_rotary_step(-1); return; /* Scroll Down */
+        case 0x12: psa_source_arbiter_send_rotary_step(+1); return; /* Scroll Up */
         default: break;
     }
+
+    /* 2. RD4 / MFD fascia navigation controls -> CAN 0x3E5 (ONLY when physical MDF is present) */
+    if (!psa_car_config_is_mdf_present()) {
+        return;
+    }
+
+    uint8_t b0 = 0x00, b1 = 0x00, b2 = 0x00, b5 = 0x00;
+    switch (key_code) {
+        case 0x16:              /* QF_Canbus_system forwardPanelKeyBean Menu */
+        case PSA_PANEL_KEY_MENU:/* 0x2E */
+            b0 = 0x40; break;
+        case PSA_PANEL_KEY_TEL: /* 0x2B */
+            b0 = 0x10; break;
+        case PSA_PANEL_KEY_CLIM:/* 0x28 */
+            b0 = 0x01; break;
+        case PSA_PANEL_KEY_TRIP:/* 0x40 */
+            b1 = 0x40; break;
+        case PSA_PANEL_KEY_AUDIO:/* 0x31 */
+            b1 = 0x01; break;
+        case PSA_PANEL_KEY_OK:  /* 0x24 (Confirm) */
+            b2 = 0x40; break;
+        case PSA_PANEL_KEY_ESC: /* 0x25 (Esc) */
+            b2 = 0x10; break;
+        case 0x27:              /* QF_Canbus_system forwardPanelKeyBean Dark */
+        case PSA_PANEL_KEY_DARK:/* 0x07 */
+            b2 = 0x04; break;
+        case PSA_PANEL_KEY_UP:  /* 0x17 */
+            b5 = 0x40; break;
+        case PSA_PANEL_KEY_DOWN:/* 0x18 */
+            b5 = 0x10; break;
+        case PSA_PANEL_KEY_RIGHT:/* 0x1A */
+            b5 = 0x04; break;
+        case PSA_PANEL_KEY_LEFT:/* 0x19 */
+            b5 = 0x01; break;
+        default:
+            return;
+    }
+
+    s_fascia_key_active = true;
+    psa_source_arbiter_send_fascia_3e5(b0, b1, b2, b5);
 }
 
 void psa_source_arbiter_tick_100ms(void) {

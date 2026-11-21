@@ -144,6 +144,7 @@ void test_peugeot_407_station_list_scroll_closed_loop_success(void);
 void test_peugeot_407_station_list_scroll_timeout_retry_and_abort(void);
 void test_peugeot_407_rd4_f1_key_pulses(void);
 void test_peugeot_407_rd4_f1_preset_navigation(void);
+void test_peugeot_407_downlink_0x21_fascia_3e5_mdf_gating(void);
 
 // Peugeot 407 Car Configuration & Personalization (SPEC_11) declarations
 void test_peugeot_407_car_config_vector1_follow_me_home_downlink(void);
@@ -335,6 +336,7 @@ int main(void) {
     RUN_TEST(test_peugeot_407_station_list_scroll_timeout_retry_and_abort);
     RUN_TEST(test_peugeot_407_rd4_f1_key_pulses);
     RUN_TEST(test_peugeot_407_rd4_f1_preset_navigation);
+    RUN_TEST(test_peugeot_407_downlink_0x21_fascia_3e5_mdf_gating);
 
     // Peugeot 407 Car Configuration & Personalization (SPEC_11)
     RUN_TEST(test_peugeot_407_car_config_vector1_follow_me_home_downlink);

@@ -693,3 +693,91 @@ void test_peugeot_407_rd4_f1_preset_navigation(void) {
     TEST_ASSERT_EQUAL_HEX8(12, history[2].data[1]); /* Step 2 to P3: 11 -> 12 */
     TEST_ASSERT_EQUAL_HEX8(12, psa_source_arbiter_get_stalk_rotary());
 }
+
+void test_peugeot_407_downlink_0x21_fascia_3e5_mdf_gating(void) {
+    can_router_init();
+    psa_car_config_init();
+    psa_source_arbiter_init();
+
+    /* 1. MDF ABSENT: fascia keys MUST NOT emit CAN 0x3E5 */
+    TEST_ASSERT_FALSE(psa_car_config_is_mdf_present());
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x16, 1); /* Menu */
+    psa_source_arbiter_handle_downlink_key(0x16, 0);
+    psa_source_arbiter_handle_downlink_key(0x24, 1); /* OK */
+    psa_source_arbiter_handle_downlink_key(0x27, 1); /* Dark */
+    psa_source_arbiter_handle_downlink_key(0x17, 1); /* Up */
+    can_frame_t sent;
+    TEST_ASSERT_FALSE(hal_can_native_get_last_sent_frame(&sent));
+
+    /* 2. Stalk Src (0x26 from QF_Canbus_system) still pulses 0x21F even without MDF */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x26, 1);
+    can_frame_t history[4];
+    size_t count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_HEX32(0x21F, history[0].id);
+    TEST_ASSERT_EQUAL_HEX8(0x02, history[0].data[0]); /* Source press */
+    TEST_ASSERT_EQUAL_HEX8(0x00, history[1].data[0]); /* Source release */
+
+    /* 3. MDF PRESENT: fascia keys emit CAN 0x3E5 (DLC 6) press & release */
+    psa_car_config_notify_mdf_seen();
+    TEST_ASSERT_TRUE(psa_car_config_is_mdf_present());
+
+    /* Menu (0x16) press -> B0=0x40, release -> all zero */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x16, 1);
+    psa_source_arbiter_handle_downlink_key(0x16, 0);
+    count = hal_can_native_get_sent_history(history, 4);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_HEX32(0x3E5, history[0].id);
+    TEST_ASSERT_EQUAL_UINT8(6, history[0].dlc);
+    TEST_ASSERT_EQUAL_HEX8(0x40, history[0].data[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x3E5, history[1].id);
+    TEST_ASSERT_EQUAL_HEX8(0x00, history[1].data[0]);
+
+    /* OK (0x24) -> B2=0x40, ESC (0x25) -> B2=0x10, Dark (0x27) -> B2=0x04 */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x24, 1);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x3E5, sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x40, sent.data[2]);
+
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x25, 1);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX8(0x10, sent.data[2]);
+
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x27, 1);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX8(0x04, sent.data[2]);
+
+    /* Arrows (0x17 Up, 0x18 Down, 0x19 Left, 0x1A Right) -> B5 */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x17, 1);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX8(0x40, sent.data[5]);
+
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x18, 1);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX8(0x10, sent.data[5]);
+
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x1A, 1);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX8(0x04, sent.data[5]);
+
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x19, 1);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX8(0x01, sent.data[5]);
+
+    /* Release with 0x00 also emits 0x3E5 all-zero release */
+    hal_can_native_clear_sent_frame();
+    psa_source_arbiter_handle_downlink_key(0x00, 0);
+    TEST_ASSERT_TRUE(hal_can_native_get_last_sent_frame(&sent));
+    TEST_ASSERT_EQUAL_HEX32(0x3E5, sent.id);
+    TEST_ASSERT_EQUAL_HEX8(0x00, sent.data[5]);
+}
