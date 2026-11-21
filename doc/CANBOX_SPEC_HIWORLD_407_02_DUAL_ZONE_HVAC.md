@@ -24,10 +24,10 @@ The CAN adapter decodes `0x1E3` (plus `rear_defrost` from `0x1D0` and `outdoor_t
 # 2. PSA CAN Bus Bitfield Specification
 
 ### 2.1 PSA Climate Panel State Frame (`0x1D0`)
-- **CAN ID:** `0x1D0` (DLC: 8 bytes, Period: 100 ms)
+- **CAN ID:** `0x1D0` (DLC: 7 bytes, Period: 100 ms / 500 ms idle)
 - **Direction:** Climate Panel (Façade Climatisation) → BSI / CAN adapter (uplink / status broadcast)
-- **Note on DLC:** The RT4 re-emits `0x1D0` toward the Climate ECU as a 7-byte *demand* frame. The 8-byte format described here is the *panel broadcast* direction verified on the bench.
-- **Standby Frame (Ignition ON, Fan=0):** `A8 00 0F 00 00 <TempLeft> <TempRight> 00`
+- **Note on DLC:** Verified on physical Peugeot 407 bench (`workbench_bsi`, 716/716 frames) as **7 bytes** (`DLC=7`). Decoders retain `dlc >= 7` tolerance for legacy 8-byte simulated traces.
+- **Standby Frame (Ignition ON, Fan=0):** `A8 00 0F 00 00 <TempLeft> <TempRight>`
 - **Active Byte Layout:**
 
 ### 2.2 Temperature Index Table (`0x1D0` Bytes 5 & 6)
