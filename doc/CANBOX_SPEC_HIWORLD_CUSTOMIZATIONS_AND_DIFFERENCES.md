@@ -107,7 +107,7 @@ This document formally records all customizations, bug fixes, architectural enha
   In the commercial firmware, both `0x1D0` (fascia panel demand) and `0x1E3` (Climate ECU display status) wrote to the same HVAC state fields, causing fan speed and mode oscillations when panel demands differed from ECU status (e.g. on bench or in Economy Mode). Additionally, `0x1E3` byte 0 bit 4 was mistakenly parsed as `ac_on`.
 - **OpenCanbox Core Fix:**
   - **RT4 Demand-vs-Status Rule (`mmi_airc.out` / `Fp_Network_CAN.out`):** `0x1E3` is the sole authority for all HVAC display status (`power_on`, `ac_on`, `auto_mode`, `dual_mode` from `B0[0]`, `aqs_auto` from `B0[4]`, `recirculate` from `B0[7]`, `front_max_defrost` from `B1[7]`, setpoints from `B2..B3`, airflow from `B4..B5`, and `fan_speed` from `B6[3:0]`).
-  - `0x1D0` only updates `rear_defrost` (`Byte 4 Bit 6`, `0x40`), which is not present in `0x1E3`.
+  - `0x1D0` (DLC 7) only updates `rear_defrost` (**Byte 0 Bit 6**, `0x40`, verified on physical 407 fascia panel via [`tools/workbench_defrost_live_test.py`](../tools/workbench_defrost_live_test.py): `0x29` idle $\to$ `0x69` active); `0x1E3` Byte 1 Bit 3 (`0x08`) can also latch `rear_defrost` ON. *(Pending final real-car log confirmation of the running-engine BSI/ECU LED handshake.)*
 
 ---
 

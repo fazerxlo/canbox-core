@@ -281,6 +281,17 @@ Rear defrost is decoded from bench-verified PSA Comfort CAN signals:
 
 A cleared bit in `0x1D0` and `0x1E3` clears the flag. It is serialized in Hiworld `0x31` payload[2] bit 5 (`0x20`) and Raise `0x21` payload[0] bit 0 (`0x01`). Implemented in `psa_hvac_process_can_0x1d0()` and `psa_hvac_process_can_0x1e3()`; test `test_peugeot_407_rear_defrost_detection`.
 
+### Bench Verification Script & Real-Car Confirmation Status
+- **Bench Script:** [`tools/workbench_defrost_live_test.py`](../tools/workbench_defrost_live_test.py) — injects engine-running interlock frames (`0x0B6` 900 RPM + `0x12D` Compressor/Alternator OK) on `can0` without colliding with physical BSI frames (`0x036`/`0x0F6`/`0x128`) and logs live byte/bit transitions on `0x1D0`, `0x1E3`, `0x217`, `0x128`, `0x168` (plus optional Canbox UART `0x31`/`0x21`):
+  ```bash
+  # Physical BSI + HVAC fascia panel connected on workbench:
+  ./tools/workbench_defrost_live_test.py --can can0
+
+  # Standalone HVAC fascia panel without physical BSI (adds 0x036/0x0F6/0x128 wake):
+  ./tools/workbench_defrost_live_test.py --can can0 --with-bsi-wake
+  ```
+- **Pending Real-Car Confirmation:** Because a workbench BSI without a running engine/alternator cannot satisfy the full high-load interlock needed to illuminate the physical fascia defrost LED, final confirmation of the `0x1D0 B0[6]` $\leftrightarrow$ `0x1E3 B1[3]` / BSI LED handshake remains **pending real-car CAN logs** (see `C-004` in `psa-can-lab/407-orchestrator/reports/01_synthesis_and_conflicts.md`).
+
 ## Downlink Climate Commands (`0x1ED` / `0x0DF`)
 
 The physical center-console HVAC panel has no physical buttons for A/C Compressor ON/OFF (Eco) or Mono/Dual sync. These functions are commanded via CAN ID `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, DLC 1) by the Multifunction Display (EMF/RT4) or OpenCanbox (Virtual MDF):
