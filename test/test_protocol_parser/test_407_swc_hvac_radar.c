@@ -513,9 +513,9 @@ void test_peugeot_407_radar_hiworld_vector_1_obstacle_rear_center(void) {
     vehicle_radar_t radar;
     memset(&radar, 0, sizeof(radar));
 
-    // Vector 1: Native CAN 0x0E1 Obstacle Rear Center
-    // cansend vcan0 0E1#24403F04202600
-    const uint8_t can_0e1[] = { 0x24, 0x40, 0x3F, 0x04, 0x20, 0x26, 0x00 };
+    // Vector 1: Native CAN 0x0E1 Obstacle Rear Center (B0=0x98: Rear=4 Active, Front=6 Idle)
+    // cansend vcan0 0E1#98403F04202600
+    const uint8_t can_0e1[] = { 0x98, 0x40, 0x3F, 0x04, 0x20, 0x26, 0x00 };
     psa_radar_process_can_0x0e1(&radar, can_0e1, sizeof(can_0e1));
 
     TEST_ASSERT_TRUE(radar.rear_active);
@@ -539,9 +539,9 @@ void test_peugeot_407_radar_hiworld_vector_2_quiescent_all_clear(void) {
     vehicle_radar_t radar;
     memset(&radar, 0, sizeof(radar));
 
-    // Vector 2: Quiescent / All Clear
-    // cansend vcan0 0E1#24003FFCFCFC00
-    const uint8_t can_0e1[] = { 0x24, 0x00, 0x3F, 0xFC, 0xFC, 0xFC, 0x00 };
+    // Vector 2: Quiescent / All Clear (real workbench_bsi idle: B0=0xD8, B3..B5=FC FC FC)
+    // cansend vcan0 0E1#D8003FFCFCFC00
+    const uint8_t can_0e1[] = { 0xD8, 0x00, 0x3F, 0xFC, 0xFC, 0xFC, 0x00 };
     psa_radar_process_can_0x0e1(&radar, can_0e1, sizeof(can_0e1));
 
     TEST_ASSERT_FALSE(radar.rear_active);
@@ -610,8 +610,8 @@ void test_peugeot_407_radar_inactive_sentinel_clearing(void) {
     radar.rear_left_outer = 1;
     radar.rear_left_center = 2;
 
-    // Sentinel: d[3]=0xFC, d[4]=0xFC, d[5]=0xFE
-    const uint8_t can_sentinel[] = { 0x24, 0x40, 0x3F, 0xFC, 0xFC, 0xFE, 0x00 };
+    // Sentinel: d[3]=0xFC, d[4]=0xFC, d[5]=0xFE (active B0=0x98, all zones clear)
+    const uint8_t can_sentinel[] = { 0x98, 0x00, 0x3F, 0xFC, 0xFC, 0xFE, 0x00 };
     psa_radar_process_can_0x0e1(&radar, can_sentinel, sizeof(can_sentinel));
 
     TEST_ASSERT_FALSE(radar.rear_active);

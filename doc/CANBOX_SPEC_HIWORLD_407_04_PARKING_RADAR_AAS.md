@@ -29,8 +29,17 @@ The CAN box translates these raw distance zones into serialized headunit radar p
 ### 2.1 Native Peugeot 407 CAN2004 Parking Radar Frame (`0x0E1`)
 - **CAN ID:** `0x0E1` (Standard 11-bit Identifier)
 - **DLC:** 7 bytes
-- **Transmission Cycle:** Periodic 100 ms while active
-- **Inactive / Quiescent Frame:** `24 00 3F FC FC FC 00` (or commercial Hiworld sentinel: `d[3] == 0xFC && d[4] == 0xFC && d[5] == 0xFE`, which clears all 8 sensor zones to `0xFF` inactive)
+- **Transmission Cycle:** Periodic 50–100 ms (confirmed in RT4 SW 8.31 `Fp_Network_CAN.out` / `mmi_alerts.out` `C_ParkingMMI::UpdateParkingStatus`)
+- **Inactive / Quiescent Frame:** `D8 00 3F FC FC FC 00` (`B0=0xD8`: Rear=6 Off, Front=6 Off; `B1=0x00` beep off; `B2=0x3F` silence; `B3..B5=FC FC FC`: all 6 zones=7 clear, `B5[1]=0` popup hidden). When `B5[1]=1` with all zones clear (`FC FC FE`), the popup is shown with all 8 UART slots cleared to `0xFF`.
+- **Byte Layout (`B0..B6`):**
+  - `B0[7:5]`: Rear AAS status (`4`=Active `0x80`, `5`=Standby, `6`=Idle/Off `0xC0`, `3`=Fault, `1`=Inhibited)
+  - `B0[4:2]`: Front AAS status (`4`=Active `0x10`, `5`=Standby, `6`=Idle/Off `0x18`, `1`=Fault) — e.g. `0x98`=Rear active, `0xD0`=Front active, `0x90`=Both active, `0xD8`=Both idle
+  - `B1[7:6]`: Audio speaker side (`0`=Silence, `1`=Left, `2`=Right, `3`=Both); `B1[5]`: Audio zone (`0`=Rear 500 Hz, `1`=Front 800 Hz); `B1[4]`: Audio beep enable (`1`=ON)
+  - `B2[7:6]`: Beep ON duration (`0`=90 ms, `1`=160 ms, `2`=220 ms, `3`=300 ms); `B2[5:0]`: Beep pause (`* 8 ms`, `0x00`=continuous, `0x3F`=silence)
+  - `B3[7:5]` / `B3[4:2]`: Rear Left / Rear Middle (`0`=closest/STOP .. `6`=far, `7`=clear)
+  - `B4[7:5]` / `B4[4:2]`: Rear Right / Front Left (`0`=closest/STOP .. `6`=far, `7`=clear)
+  - `B5[7:5]` / `B5[4:2]`: Front Middle / Front Right (`0`=closest/STOP .. `6`=far, `7`=clear); `B5[1]`: Graphic radar popup request (`1`=show, `0`=hide)
+  - `B6`: Unused (`0x00`)
 
 ### 2.2 Alternate / AEE2010 Parking Radar Frames (`0x260` / `0x270`) — CAN2010 Only
 *(Note: Not applicable to Peugeot 407 CAN2004. On CAN2004, `0x260` is `MSG_BSI_INF_PROFILS` broadcast by the BSI at 250 ms. These frames are only used on CAN2010 / AEE2010 platforms.)*

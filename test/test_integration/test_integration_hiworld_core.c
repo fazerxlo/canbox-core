@@ -629,12 +629,12 @@ void test_integration_hiworld_downlink_trip_reset_pipeline(void) {
 void test_integration_hiworld_radar_pipeline(void) {
     hu_protocol_set_active(HU_PROTOCOL_HIWORLD);
 
-    // 1. Inject Vector 1: Native CAN 0x0E1 Obstacle
-    // cansend vcan0 0E1#24403F04202600
+    // 1. Inject Vector 1: Native CAN 0x0E1 Obstacle (B0=0x98: Rear=4 Active, Front=6 Idle)
+    // cansend vcan0 0E1#98403F04202600
     can_frame_t frame_0e1 = {
         .id = 0x0E1,
         .dlc = 7,
-        .data = { 0x24, 0x40, 0x3F, 0x04, 0x20, 0x26, 0x00 }
+        .data = { 0x98, 0x40, 0x3F, 0x04, 0x20, 0x26, 0x00 }
     };
     can_router_process_can(&frame_0e1);
 
@@ -649,12 +649,12 @@ void test_integration_hiworld_radar_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(sizeof(expected_v1), rx_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_v1, rx_buf, sizeof(expected_v1));
 
-    // 2. Inject Vector 2: Quiescent / All Clear
-    // cansend vcan0 0E1#24003FFCFCFC00
+    // 2. Inject Vector 2: Quiescent / All Clear (real workbench_bsi idle: B0=0xD8)
+    // cansend vcan0 0E1#D8003FFCFCFC00
     can_frame_t frame_quiescent = {
         .id = 0x0E1,
         .dlc = 7,
-        .data = { 0x24, 0x00, 0x3F, 0xFC, 0xFC, 0xFC, 0x00 }
+        .data = { 0xD8, 0x00, 0x3F, 0xFC, 0xFC, 0xFC, 0x00 }
     };
     can_router_process_can(&frame_quiescent);
 
@@ -753,11 +753,11 @@ void test_integration_hiworld_reverse_quiescent_no_blinking_or_trajectory(void) 
     size_t rx_len = read_uart_output(rx_buf, sizeof(rx_buf));
     TEST_ASSERT_EQUAL_UINT32(0, rx_len);
 
-    // 3. Inject native CAN2004 radar frame 0x0E1: All clear (FC FC FE)
+    // 3. Inject native CAN2004 radar frame 0x0E1: All clear (FC FC FE, B0=0x98 active)
     can_frame_t frame_0e1 = {
         .id = 0x0E1,
         .dlc = 7,
-        .data = { 0x24, 0x40, 0x3F, 0xFC, 0xFC, 0xFE, 0x00 }
+        .data = { 0x98, 0x00, 0x3F, 0xFC, 0xFC, 0xFE, 0x00 }
     };
     can_router_process_can(&frame_0e1);
 

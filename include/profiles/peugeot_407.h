@@ -182,12 +182,13 @@ void psa_hvac_decode_frame(const can_frame_t *frame, vehicle_state_t *state);
 
 /* --------------------------------------------------------------------------
  * 1.3 Ultrasonic Parking Sensors (Front & Rear AAS)
+ * Polarity (RT4 SW 8.31 mmi_alerts.out): 0x00 = closest/STOP .. 0x06 = far, 0x07 -> 0xFF clear
  * -------------------------------------------------------------------------- */
-#define PSA_RADAR_DIST_OVER_120CM 0x00
-#define PSA_RADAR_DIST_90_120CM   0x01
+#define PSA_RADAR_DIST_UNDER_30CM 0x00
+#define PSA_RADAR_DIST_30_60CM    0x01
 #define PSA_RADAR_DIST_60_90CM    0x02
-#define PSA_RADAR_DIST_30_60CM    0x03
-#define PSA_RADAR_DIST_UNDER_30CM 0x04
+#define PSA_RADAR_DIST_90_120CM   0x03
+#define PSA_RADAR_DIST_OVER_120CM 0x04
 #define PSA_RADAR_DIST_INACTIVE   0xFF
 
 void psa_decode_aas_rear_0x260(const uint8_t *data, uint8_t dlc, uint8_t *rl, uint8_t *rc, uint8_t *rr);
