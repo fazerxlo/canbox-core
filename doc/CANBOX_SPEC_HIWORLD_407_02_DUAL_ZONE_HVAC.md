@@ -17,7 +17,7 @@ The Peugeot 407 automatic climate control system drives three CAN frames on the 
 - **`0x1D0` (Climate Panel Demand, 100 ms):** Sent by the physical fascia panel (`MSG_CDE_CLIMAV`, DLC 7) when a user adjusts controls, or injected by the CAN adapter on downlink (`Cmd 0x3B` / `0x7D`). Because panel demands can be refused or clamped by the Climate ECU (e.g. in Battery Economy mode or when refrigerant pressure is missing on a bench), `0x1D0` is **never** used to overwrite HVAC display state; only **Rear Window Defrost** (Byte 0 Bit 6, `0x40`) is extracted from `0x1D0`.
 - **`0x12D` (Climate Compressor State, 100 ms):** Carries compressor clutch state (`0x80` = engaged, `0x00` = off).
 
-The CAN adapter decodes `0x1E3` (plus `rear_defrost` from `0x1D0` and `outdoor_temp_raw` from `0x0F6`) into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x7D`) to inject corresponding `0x1D0` demand frames back to the vehicle.
+The CAN adapter decodes `0x1E3` (plus `rear_defrost` from `0x1D0` and `outdoor_temp_raw` from `0x0F6` Byte 6 `T_EXT_FILT`) into standardized Hiworld HVAC frames (`Cmd 0x31`) and accepts touchscreen overrides (`Cmd 0x3B` / `0x7D`) to inject corresponding `0x1D0` demand frames back to the vehicle.
 
 ---
 

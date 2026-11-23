@@ -242,10 +242,16 @@ void test_peugeot_407_trip_hiworld_bsi_slow_data_0x0f6(void) {
     TEST_ASSERT_EQUAL_UINT8(80, state.climate.outdoor_temp_raw);
     TEST_ASSERT_FALSE(state.reverse_gear);
 
-    // Raw 0xFF should NOT overwrite existing outdoor_temp_raw
-    const uint8_t can_0f6_inv[] = { 0x88, 120, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00 };
+    // Raw 0xFF in B6 (even if B5=0xFC raw fault sentinel as in bench log_029)
+    // must NOT overwrite existing outdoor_temp_raw
+    const uint8_t can_0f6_inv[] = { 0x88, 120, 0x1F, 0x5E, 0x0B, 0xFC, 0xFF, 0x00 };
     psa_bsi_process_can_0x0f6(&state, can_0f6_inv, sizeof(can_0f6_inv));
     TEST_ASSERT_EQUAL_UINT8(80, state.climate.outdoor_temp_raw);
+
+    // Split B5 != B6: must decode B6 (T_EXT_FILT), ignoring B5 (T_EXT_BRUTE)
+    const uint8_t can_0f6_split[] = { 0x88, 120, 0x00, 0x00, 0x00, 0x70, 0x78, 0x00 };
+    psa_bsi_process_can_0x0f6(&state, can_0f6_split, sizeof(can_0f6_split));
+    TEST_ASSERT_EQUAL_UINT8(0x78, state.climate.outdoor_temp_raw);
 
     // Sub-zero ambient temperature: Raw 40 -> (40 * 5 - 400)/10 = -20 C
     const uint8_t can_0f6_neg[] = { 0x88, 120, 0x00, 0x00, 0x00, 40, 40, 0x00 };

@@ -121,8 +121,11 @@ void psa_bsi_process_can_0x0f6(vehicle_state_t *state, const uint8_t *data, uint
     state->ignition_on = (data[0] & 0x08) != 0;
     state->coolant_temp_c = (data[1] == 0xFF) ? 0x7F : (int8_t)(data[1] - 40);
     state->reverse_gear = (data[7] & 0x80) != 0;
-    if (data[5] != 0xFF) {
-        state->climate.outdoor_temp_raw = data[5];
+    /* RT4 SW 8.31 (Fp_Network_CAN.out get_ext_temp 0x00f3e4): B6 is T_EXT_FILT
+     * (display ambient temp, 0xFF = invalid); B5 is raw T_EXT_BRUTE (unused by RT4,
+     * may report 0xFC sensor fault while B6 is 0xFF). */
+    if (data[6] != 0xFF) {
+        state->climate.outdoor_temp_raw = data[6];
     }
     state->dirty.telemetry = true;
 }
