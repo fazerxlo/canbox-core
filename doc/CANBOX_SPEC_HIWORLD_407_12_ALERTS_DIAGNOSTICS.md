@@ -67,7 +67,7 @@ In Peugeot 407 vehicles equipped with factory infotainment (RD4, RT3, RT4, RT5),
   3. **Block 3 (`(data[0] >> 6) == 3`, e.g. `0xFC`):** `data[1..7]` &rarr; bytes 14..20 of 21-byte alert bitfield.
   *(A fallback ISO-TP multi-frame decoder with `0x10`, `0x21..0x23` is also supported for synthetic test runners).*
 
-Each set bit `k` in `[0..167]` is mapped to an internal Alarm Index via `Alarm_BitToIndex_Tab[k]`, and then resolved to a 15-bit CAN Alarm ID via `Alarm_IndexToPointer_Tab[alarm_idx]`.
+Each set bit `k` in `[0..167]` is mapped to an internal `Alarm_Index` (`0x00..0xCF`) via `Alarm_BitToIndex_Tab[k]` (verified RT4 `Fp_Network_CAN.out` entries: bit `37 -> 0x0083`, `52 -> 0x007F`, `148 -> 0x0130`, `149 -> 0x0131`, `0x00F0` = `"Diagnosis in progress"`), then resolved to a 15-bit CAN Alarm ID via `Alarm_IndexToPointer_Tab[alarm_idx]`. **Critical rule:** Never index `0x1A1` (`((B0 & 0x7F) << 8) | B1`) by RT4 internal `Alarm_Index` — always index strictly by 15-bit CAN Alarm ID against `doc/RT4_CAN_ALERTS_0x1A1.csv` (208 entries).
 
 ---
 
@@ -296,7 +296,7 @@ typedef struct {
 - Serializes custom extended frames via `build_hiworld_alert_single()` (10 bytes) and `build_hiworld_alerts_summary()` (Len $4 + 5 \times N$).
 
 ### 5.3 Protocol Driver Interface & Adapter (`src/protocols/proto_hiworld_adapter.c`)
-- **Dual Serialization Strategy:** Emits both legacy Hiworld frames (`Cmd 0x42`) for stock Android apps and custom extended frames (`Cmd 0xEA`) for modified Head Unit firmware (`com.qf.vehicle`):
+- **Dual Serialization Strategy:** Emits both legacy Hiworld frames (`Cmd 0x42`) for stock Android apps and custom extended frames (`Cmd 0xEA`) for modified Head Unit firmware (`com.qf.vehicle`); handles `door_mask == 0xFF` and `00 00` popup clear transitions cleanly (see `0x0008`/`0x000D`/`0x00C9` code mapping notes in `../psa-ai-knowledge/orchestrator_reports/01_synthesis_and_conflicts.md`):
   - `hiworld_send_alert_single()`: Transmits 2-byte `Cmd 0x42` **and** 5-byte `Cmd 0xEA`.
   - `hiworld_send_alerts_summary()`: Transmits 24-byte `Cmd 0x42` **and** `4 + 5*N` byte `Cmd 0xEA` table (or 9-byte empty clearance frame `5A A5 04 EA 00 00 00 00 ED`).
 - Dispatches active CAN query to car's BSI via `can_router_query_alert_journal()` upon receiving `HIWORLD_CMD_DIAGNOSTIC_QUERY` (`0x2F`).

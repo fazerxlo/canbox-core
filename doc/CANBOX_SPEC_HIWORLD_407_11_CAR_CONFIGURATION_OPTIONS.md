@@ -126,9 +126,10 @@ v                                                     |
 ### 1.3 BSI State Caching, Periodic `0x15B` & Ground Truth Synchronization
 
 Hardware bench captures (`mdf_trace.log`, `dump_mdf_stalk_trip.log`) and live BSI ablation testing on `can0` prove the exact operational model between the factory PSA Multifunction Display (MDF / EMF-C), BSI, and aftermarket CAN box:
-- **OEM EMF-C MDF Behavior & `0x167` 10 Hz Presence Gate:**
+- **OEM EMF-C MDF Behavior & `0x167` 10 Hz + Menu Session Gate:**
   - The physical EMF-C display broadcasts **`0x167` (`TRAME_GENERALE_EMF`, DLC 8, nominal `08 06 FF FF 00 00 00 00`) continuously at 100 ms (10 Hz)** and **`0x15B` (`MSG_BSI_PERSO_REQ`, DLC 8) continuously at 500 ms (2.0 Hz)**.
-  - **Critical BSI Gate:** The Peugeot 407 BSI monitors `0x167` with a ~500 ms supervision timeout. If `0x167` is absent or transmitted only at 1000 ms (1 Hz), the BSI marks the Multifunction Display as offline and **silently ignores all `0x15B` configuration write requests**. Streaming `0x167` at **100 ms (10 Hz)** alongside `0x15B` (`Byte 0 = 0x01`) at **500 ms (2 Hz)** is necessary and sufficient for the BSI to commit changes to EEPROM.
+  - **Critical BSI Gate:** The Peugeot 407 BSI monitors `0x167` with a ~500 ms supervision timeout and requires **BOTH** `0x167` @ **100 ms (10 Hz)** **AND** the menu session handshake (`0x0DF` start + `0x3E5` OK pulse) to commit `0x15B` (`Byte 0 = 0x01`) writes to EEPROM. Bare `0x15B` frames without `0x167` @ 10 Hz or without the menu session are silently ignored by physical BSI.
+  - **MDF Exclusion & Bitmask Rules (`CASE-002`):** Always gate `psa_car_config_apply_downlink()` (`0x15B`/`0x1ED`) on `!psa_car_config_is_mdf_present()` so OpenCanbox never collides with a physical EMF display on `can0`. Ensure `Cmd 0x7B` Setting `0x0A` (ambient lighting) & `0x06` (FMH) do not clobber `0x15B` `B2[2:0]` (`15s=bit 0, 30s=bit 1, 60s=bit 2, OFF=bit 5`).
   - **`0x15B` Byte 0 Bit 2 (`0x04` $\to$ `0x05`) is an Init/Invalidation Flag, NOT a Write Strobe:** At cold power-on before receiving `0x260`, EMF-C emits `0x15B#0500000000000000` (`Byte 0 = 0x05`) to tell the BSI not to overwrite EEPROM with uninitialized RAM. Once synchronized, valid personalization writes always use `Byte 0 = 0x01` (Profile 1, Bit 2 cleared); sending `Byte 0 = 0x05` is ignored by the BSI.
   - **`0x260` 3-Profile Multiplexing (1.5 s Cycle):** The BSI broadcasts `0x260` every 500 ms, cycling round-robin through Profile 1 (`01 03 ...`), Profile 2 (`02 03 ...`), and Profile 3 (`03 03 ...`). Thus, Profile 1 (`data[0] == 0x01`) updates once every **1500 ms (1.5 s)**.
 - **OpenCanbox Virtual MDF & Coexistence Architecture:**
@@ -539,6 +540,7 @@ void psa_decode_config_0x260(vehicle_config_t *cfg, const uint8_t *data, uint8_t
 }
 
 hal_status_t psa_car_config_apply_downlink(uint8_t cmd_id, uint8_t setting_id, uint8_t val) {
+    if (psa_car_config_is_mdf_present()) return HAL_STATUS_OK; /* MDF Exclusion gate */
     can_frame_t frame;
     memset(&frame, 0, sizeof(frame));
 

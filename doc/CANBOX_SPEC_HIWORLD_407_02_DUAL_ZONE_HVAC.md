@@ -48,11 +48,11 @@ The CAN adapter decodes `0x1E3` (plus `rear_defrost` from `0x1D0` and `outdoor_t
 
 > **Note:** `0x1D0` uses this raw 0..22 index directly. `0x1E3` uses a **separate** display encoding: raw `0x00` = LO, `0x01..0x15` (1..21) = 14.5 °C .. 27.0 °C via formula `14.0 + raw × 0.5`, `0x16` = HI. See Section 2.4.
 
-### 2.3 Air Distribution Codes (`0x1D0` Byte 3 & `0x1E3` Bytes 4–5)
+### 2.3 Air Distribution Codes (`0x1D0` Byte 3 vs `0x1E3` Bytes 4–5)
 
-> **Source:** RT4 firmware reverse-engineering (`RT4_CAN_2004.md` §4.3). The previous table was wrong (codes were shifted by 1). Both `0x1D0` (panel broadcast nibble) and `0x1E3` (EMF display upper nibble) use the same code set.
+> **Source:** RT4 firmware reverse-engineering (`RT4_CAN_2004.md` §4.3) and bench dual-stream captures (`dump_2026-09-24_13-55-54.log`). `0x1E3` upper nibbles (`B4[7:4]`, `B5[7:4]`) encode the enumerated EMF display target (`0..5`), whereas **`0x1D0` Byte 3 uses bitmask nibbles** (`0x8` = Down/Floor, `0x4` = Up/Windshield, `0x2` = Face; e.g. asymmetric `0x1D0 B3 = 0x84` maps to `Cmd 0x31` tail `0xBE`). Never index a 6-element LUT directly with raw 4-bit nibbles `0..15`.
 
-| Nibble Code | Vent Target | Hiworld Code | Android Distribution Flags |
+| Nibble Code (`0x1E3`) | Vent Target | Hiworld Code | Android Distribution Flags |
 |:---:|:---|:---:|:---|
 | `0x00` | **AUTO** | `0` | Auto distribution |
 | `0x01` | **Windshield / Screen** (defrost vent) | `11` | Windshield defrost vent |
@@ -294,7 +294,7 @@ A cleared bit in `0x1D0` and `0x1E3` clears the flag. It is serialized in Hiworl
 
 ## Downlink Climate Commands (`0x1ED` / `0x0DF`)
 
-The physical center-console HVAC panel has no physical buttons for A/C Compressor ON/OFF (Eco) or Mono/Dual sync. These functions are commanded via CAN ID `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, DLC 1) by the Multifunction Display (EMF/RT4) or OpenCanbox (Virtual MDF):
+The physical center-console HVAC panel has no physical buttons for A/C Compressor ON/OFF (Eco) or Mono/Dual sync. These functions are commanded via CAN ID `0x1ED` (`DEMANDES_AFFICHEUR_CLIM`, DLC 1) by the Multifunction Display (EMF/RT4) or OpenCanbox (Virtual MDF). *(Note: `0x364` 15-tick bursts seen in reversed Hiworld firmware `H1H2PAF23A-260709` are a CAN2010 / Peugeot 508 variant and are not used for 407 CAN2004 HVAC downlink.)*
 - **Prerequisite:** `0x0DF` (`10 00 50`, DLC 3) broadcast every 500 ms.
 - **`0x1ED` Byte 0 Bitfield:**
   - **Bit 4 (`0x10`):** `1` = Dual Mode, `0` = Mono Mode.

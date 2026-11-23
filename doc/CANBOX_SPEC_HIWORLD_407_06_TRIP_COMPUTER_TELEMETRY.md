@@ -14,10 +14,10 @@
 In Peugeot 407 (PSA CAN2004 architecture), engine telemetry, odometer readings, ambient temperatures, and trip metrics are broadcast across the following core frames:
 - **`0x0B6` (Fast Dynamic Data, 50 ms):** Engine RPM (bits 15..3 = RPM $\times 8$) and vehicle speed (uint16 scaled by 100 in km/h).
 - **`0x0F6` (BSI Slow Data, 500 ms):** Ignition contact state (+APC: Byte 0 Bit 3, `0x88`=ON, `0x80`=OFF), engine coolant temperature ($\text{Raw} - 40^\circ\text{C}$), external ambient air temperature ($\text{Raw} \times 0.5 - 40^\circ\text{C}$), reverse gear status (Byte 7 Bit 7), wipers, and turn signals (blinkers).
-- **`0x161` (BSI Gauges, 500 ms):** Oil temperature (Byte 2, combine calibration `((raw * 50 + 1360 + 39) / 79)`), fuel level percentage (Byte 3), and oil level (Byte 6).
+- **`0x161` (BSI Gauges, 500 ms, DLC 7):** Oil temperature (`Byte 2`, cluster formula `(50 * raw + 1360) / 79` °C), fuel level percentage (`Byte 3`), and oil level (`Byte 6`). Always enforce DLC 7 (never DLC 8).
 - **`0x036` (Network State & Illumination, 100 ms):** Comfort bus network lifecycle / Phase de vie (`Byte 4: 0x00=Sleep, 0x01=Awake, 0x02=Shutdown countdown, 0x03=Wakeup transition`), dashboard illumination enabled (Byte 3 Bit 5), and luminosity level.
-- **`0x221` (Instantaneous Trip, 1000 ms):** Cruising range / autonomy (km, Bytes 1..2), instantaneous fuel consumption ($0.1\text{ L/100km}$, Bytes 3..4), distance ($0.1\text{ km}$, Bytes 5..6), and stalk com button flags (Byte 0).
-- **`0x2A1` (Trip 1 Historical, 1000 ms):** Mean speed (uint8 / uint16 km/h), distance (km), and average consumption ($0.1\text{ L/100km}$).
+- **`0x221` (Instantaneous Trip, 1000 ms):** Instantaneous fuel consumption ($0.1\text{ L/100km}$, Bytes 1..2 = `CONSO_INST`), cruising range / autonomy (km, Bytes 3..4 = `AUTONOMIE`), distance ($0.1\text{ km}$, Bytes 5..6), and stalk com button flags (Byte 0).
+- **`0x2A1` (Trip 1 Historical, 1000 ms):** Mean speed (`B0` `uint8` km/h on monochrome EMF-C & 407 GT; RT4 color docs cite `B5..6` `uint16`), distance (km), and average consumption ($0.1\text{ L/100km}$).
 - **`0x261` (Trip 2 Historical, 1000 ms):** Same format as Trip 1.
 
 The CAN box translates these parameters into Hiworld trip computer packets (`Cmd 0x13`, `0x14`, `0x15`) and accepts touchscreen trip reset commands from the Android system to clear Trip 1 or Trip 2.
@@ -118,8 +118,8 @@ The CAN box translates these parameters into Hiworld trip computer packets (`Cmd
   - View Instant: `5A A5 04 1B 01 00 01 FF 1F` (No CAN action)
   - View Trip 1: `5A A5 04 1B 02 00 01 FF 20` (No CAN action)
   - View Trip 2: `5A A5 04 1B 03 00 01 FF 21` (No CAN action)
-  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (20 consecutive frames at 100 ms intervals / 2000 ms burst, then clears reset bit to `0A 06 FF FF 00 00 00 00`)
-  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (20 consecutive frames at 100 ms intervals / 2000 ms burst, then clears reset bit to `0C 06 FF FF 00 00 00 00`)
+  - Reset Trip 1: `5A A5 04 1B 02 02 01 FF 22` $\longrightarrow$ Injects CAN `0x167` with `8A 06 FF FF 00 00 00 00` (**Check `payload[1] != 0x00`** to ignore tab navigation; OpenCanbox holds `0x8A` event-driven for **`300 ms` @ `100 ms` cadence** then emits explicit release `0x0A 06 FF FF 00 00 00 00`; OEM Hiworld emits a 20-tick / 2000 ms burst)
+  - Reset Trip 2: `5A A5 04 1B 03 03 01 FF 24` $\longrightarrow$ Injects CAN `0x167` with `4C 06 FF FF 00 00 00 00` (OpenCanbox holds `0x4C` event-driven for **`300 ms` @ `100 ms` cadence** then emits explicit release `0x0C 06 FF FF 00 00 00 00`; OEM Hiworld emits 20 ticks)
 
 ### 3.5 Hiworld Powertrain & Fluid Telemetry (`Cmd 0x1A` / `com.qf.vehicle`)
 - **Sync Header:** `0x5A 0xA5`

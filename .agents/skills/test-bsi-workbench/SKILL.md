@@ -40,12 +40,28 @@ Port enumeration `/dev/ttyUSB*` changes when devices are replugged. All tools re
    - **Climate Panel Demand (`0x1D0`, DLC 7):** **Byte 0 Bit 6** (`0x40`): `0x29` (OFF) $\longleftrightarrow$ `0x69` (ON). `0x1E3` is the sole authority for all other HVAC fields; `0x1D0` only supplies rear defrost (Byte 4 carries vent distribution mode `0x20`, not rear defrost).
    - **Climate ECU Status Indicator (`0x1E3`, DLC 7):** **Byte 1 Bit 3** (`0x08`): `0x00` (OFF) $\longleftrightarrow$ `0x08` (ON).
    - Serialized in Hiworld `0x31` `payload[2]` bit 5 (`0x20`) and Raise `0x21` `payload[0]` bit 0 (`0x01`).
-5. **BSI Personalization EEPROM Write Gate (`0x167` @ 100 ms + `0x15B` @ 500 ms):**
+5. **BSI Personalization EEPROM Write Gate (`0x167` @ 100 ms + Menu Session + `0x15B` @ 500 ms):**
    - When the physical EMF-C Multifunction Display is disconnected, the BSI monitors `0x167` (`TRAME_GENERALE_EMF`, `08 06 FF FF 00 00 00 00`) with a ~500 ms supervision timeout.
-   - If `0x167` is absent or sent at 1000 ms (1 Hz), the BSI marks the MFD offline and **ignores all `0x15B` writes**.
-   - **Mandatory sequence:** Stream `0x167` at **100 ms (10 Hz)** + `0x15B` (`Byte 0 = 0x01`, Bit 2 cleared; `Byte 0 = 0x05` is cold-boot invalidation and is ignored) at **500 ms (2 Hz)**. The BSI cycles `0x260` through Profiles 1..3 every 500 ms (1.5 s per profile) and commits on the next Profile 1 slot.
-6. **Single-Invocation Hardware Ablation Rule (Zero Interactive Trial-and-Error):**
+   - Physical BSI ignores bare `0x15B` writes unless `0x167` streams at **100 ms (10 Hz)** **AND** the menu session handshake (`0x0DF` start + `0x3E5` OK pulse) has been executed. `0x15B` (`Byte 0 = 0x01`, Bit 2 cleared; `0x05` is cold-boot invalidation) @ **500 ms (2 Hz)** commits on the next Profile 1 `0x260` slot; FMH bitmask (`0x260`/`0x15B`): `15s=bit 0, 30s=bit 1, 60s=bit 2, OFF=bit 5`.
+   - Real bench VIN across BSI captures is **`VF36JRHRH21715383`** (`0x336` `'VF3'`, `0x3B6` `'6JRHRH'`, `0x2B6` `'21715383'`; simulator fake VIN `VF7SWYHYSJT721649` marks synthetic logs).
+6. **Bench PDC Reverse Overlay (`tools/hiworld_reverse_radar_test.py`):**
+   - Requires `ACC/IGN + Reverse + 0x41` (`RPM > 0` NOT required), plus MCU `BACK` wire or `--adb-trigger` (`com.qf.action.BACKCAR_START`, `KeyEvent 289`).
+7. **Single-Invocation Hardware Ablation Rule (Zero Interactive Trial-and-Error):**
    - Never run sequential one-off `python3 -c` CAN injection tests across 10–20 turns. Extract all candidate CAN IDs/periods from the reference trace in Turn 1, then run a single automated Python ablation script (with `can_filters=[...]`) in Turn 2 that tests all combinations in one process.
+
+### 0.1 Modular Car ECU Matrix (Connected Bench + Spare Modules)
+
+| Car Module (ECU) | Status | Owned TX CAN IDs (NEVER collide!) | Required Wakeup / Prerequisite Keepalives | Notes / Verification |
+| :--- | :---: | :--- | :--- | :--- |
+| **1. BSI** | On Bench | `0x036, 0x0F6, 0x120, 0x128, 0x1A1, 0x220, 0x221, 0x260, 0x261, 0x2A1, 0x361, 0x3B6` | Self-wakes on +APC/`0x036`/`0x0F6`. Needs `0x167` @ 10 Hz + `0x0DF`/`0x3E5` for `0x15B`; `0x0B6` (900 RPM)+`0x12D` for Rear Defrost. | `tools/test_bsi_settings.py` |
+| **2. Climate Panel (HVAC)** | On Bench | `0x1D0` (DLC 7), `0x1E3` (DLC 7), `0x12D` | `0x036` (`0x01`), `0x0F6` (`0x88` +APC), `0x0DF` (`10 00 50` @ 500 ms). | `tools/test_clima_canbox.py` |
+| **3. Blaupunkt RD4 Radio** | On Bench | `0x165` (DLC 4), `0x225, 0x265, 0x2A5, 0x125, 0x0A4` | `0x036`, `0x0F6`; VIN match (`0x2B6/336/3B6`). | `svt/base-bsi-radio.py` |
+| **4. EMF-C / RT4 / RT5** | Spare | `0x0DF, 0x15B, 0x167, 0x1ED, 0x3F6, 0x525` | **MDF Exclusion:** Disable simulator & `canbox-core` downlink TX on all 6 IDs when physical EMF is connected. | `psa_car_config_is_mdf_present()` |
+| **5. Parking Radar (AAS)** | Future | `0x0E1` (DLC 7) | `0x036`, `0x0F6` (`B7 & 0x80` Reverse), `0x0B6` (`<15 km/h`). | `svt/base-bsi-radar.py` |
+| **6. TPMS (DSG)** | Future | `0x268, 0x3A1, 0x1E1` | `0x036`, `0x0F6`, `0x0B6`. Bits 7:3 `& 0x1F`: `0x40` (`0x08`) unmonitored, `0x80` (`0x10`) unequipped. | `test_407_tpms_extended.c` |
+| **7. Alarm (ALR)** | Future | `0x120 / 0x1A1` / LIN | `0x036`, `0x220` door/boot contacts. | UDS `0x600..0x7FF` |
+| **8. Engine Gateway (ECM/BSM)** | Future | `0x0B6, 0x161` (DLC 7), `0x168` | BSI gateways IS-CAN (`500 kbps`) to Comfort CAN; emulate via simulator when absent. | Enforce `0x161` DLC=7 |
+| **9. Alt Radios / CDC** | Future | RT4 `0x165` (DLC 5); RD45 `0x122/328/53B`; CDC `0x0E2/131/162/1A0/1A2/1E2/531` | Isolate by `0x165` DLC (`4` vs `5`) and CAN2010 IDs. | `psa_source_arbiter.c` |
 
 ---
 
