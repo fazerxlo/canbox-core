@@ -93,6 +93,12 @@ The CAN box translates these raw distance zones into serialized headunit radar p
 
 > [!NOTE]
 > In the Hiworld protocol dictionary, `Cmd 0x22` is reserved for physical rotary control knobs (`Handle.ControlPanelKnob`), whereas `Cmd 0x41` is dedicated to radar state telemetry (`Handle.CarRadarState`). OEM Hiworld canbox sends 12 payload bytes (`0x0C`) with trailing metadata `01 00 3F 05`.
+>
+> **Cadence & Companion Commands (`C-009` Verified):**
+> - **Delta-Only `0x41` Cadence:** Both OEM `H1H2PAF23A` firmware (48 ms delta scan, excluded from 528 ms heartbeat) and `QF_Canbus_system` (`WindowRadar` has no inactivity timeout; `VehicleSender.showRadarLayer()` drops unchanged frames) confirm delta-only `0x41` emission is sufficient; periodic keepalives are unnecessary. `QF_Canbus_system` `PeugeotDataParser` decodes `B0..B7` (`0x00`=closest level `1`, `0x01..0x06`=`2,4,5,7,8,10`, `0xFF`=clear `0`) and ignores `B8..B11`.
+> - **`Cmd 0xD7` (Redundant OEM Mirror):** Older OEM `H1H2PA123A` boxes also emit 9-byte `0xD7` (`01 [8 zones]`), parsed by `WcComDataParser` into the exact same 8 radar fields. Absent in `H1H2PAF23A` and unneeded in `canbox-core`.
+> - **`Cmd 0x43` (Unused):** Absent in both `QF_Canbus_system` and OEM Hiworld PSA firmware.
+> - **`Cmd 0xF2` (Not 407 AAS):** 2-byte downlink (`forwardAmvParkingState`) writes only AEE2010 Visiopark/360° camera CAN `0x1A9` (never `0x15B`). On Peugeot 407, AAS enable/disable uses `Cmd 0x7B [0x0B, state]` $\to$ CAN `0x15B`.
 
 ### 3.2 Raise Radar Compatibility Format:
 - **Front Radar (`Cmd 0x30`):** `0x2E 0x30 0x06 [FL] [FC] [FR] [RL] [RC] [RR] [Checksum]`
